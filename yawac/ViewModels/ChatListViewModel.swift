@@ -115,6 +115,30 @@ final class ChatListViewModel {
         chats.sort { $0.lastTimestamp > $1.lastTimestamp }
     }
 
+    func mergeContacts(_ cs: [BridgeContact]) {
+        for c in cs where !chats.contains(where: { $0.jid == c.jid }) {
+            let chat = Chat(
+                jid: c.jid,
+                name: c.name,
+                lastMessage: "",
+                lastTimestamp: 0,
+                unread: 0)
+            chats.append(chat)
+            upsertPersisted(chat)
+        }
+        chats.sort { $0.lastTimestamp > $1.lastTimestamp }
+    }
+
+    func resolveNames(_ cs: [BridgeContact]) {
+        let byJID = Dictionary(uniqueKeysWithValues: cs.map { ($0.jid, $0.name) })
+        for i in chats.indices {
+            if let resolved = byJID[chats[i].jid], chats[i].name != resolved {
+                chats[i].name = resolved
+                upsertPersisted(chats[i])
+            }
+        }
+    }
+
     private func upsertPersisted(_ c: Chat) {
         guard let context else { return }
         let jid = c.jid

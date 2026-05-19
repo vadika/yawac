@@ -88,6 +88,13 @@ final class WAClient {
         return try JSONDecoder().decode([BridgeGroupModel].self, from: Data(json.utf8))
     }
 
+    func listContacts() throws -> [BridgeContact] {
+        var err: NSError?
+        let json = go.listContacts(&err)
+        if let err { throw err }
+        return try JSONDecoder().decode([BridgeContact].self, from: Data(json.utf8))
+    }
+
     func createGroup(name: String, participantJIDs: [String]) throws -> String {
         let jids = try JSONEncoder().encode(participantJIDs)
         let jidsString = String(data: jids, encoding: .utf8) ?? "[]"

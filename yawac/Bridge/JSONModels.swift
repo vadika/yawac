@@ -90,3 +90,19 @@ struct BridgeParticipantModel: Codable {
         case isSuper = "is_super_admin"
     }
 }
+
+struct BridgeContact: Codable, Identifiable {
+    var id: String { jid }
+    let jid: String
+    let name: String
+    let pushName: String?
+    let fullName: String?
+    let businessName: String?
+
+    enum CodingKeys: String, CodingKey {
+        case jid, name
+        case pushName = "push_name"
+        case fullName = "full_name"
+        case businessName = "business_name"
+    }
+}

@@ -29,6 +29,9 @@ struct ContentView: View {
             let groups = GroupsViewModel(client: client)
             await groups.refresh()
             vm.mergeGroups(groups.groups)
+            let contacts = (try? client.listContacts()) ?? []
+            vm.resolveNames(contacts)
+            vm.mergeContacts(contacts)
             let stream = client.eventStream()
             for await event in stream {
                 if case .message(let m) = event { vm.ingest(m) }
