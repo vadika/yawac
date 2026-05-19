@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Observation
 import SwiftData
@@ -48,6 +49,12 @@ final class ChatListViewModel {
             upsertPersisted(c)
         }
         chats.sort { $0.lastTimestamp > $1.lastTimestamp }
+
+        if !message.fromMe, !NSApp.isActive {
+            let title = chats.first(where: { $0.jid == message.chatJID })?.name ?? message.chatJID
+            let body = message.text ?? "[\(message.kind)]"
+            NotificationService.notify(title: title, body: body, chatJID: message.chatJID)
+        }
     }
 
     func markRead(_ jid: String) {

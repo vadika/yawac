@@ -12,6 +12,7 @@ struct YawacApp: App {
         } catch {
             fatalError("ModelContainer: \(error)")
         }
+        Task { await NotificationService.requestAuthorization() }
     }
 
     var body: some Scene {
