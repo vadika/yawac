@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"time"
 
 	"go.mau.fi/whatsmeow"
@@ -53,6 +54,9 @@ func (c *Client) FetchProfilePicture(jidStr, outPath string) (string, error) {
 		return "", fmt.Errorf("http status %d", resp.StatusCode)
 	}
 
+	if err := os.MkdirAll(filepath.Dir(outPath), 0o700); err != nil {
+		return "", fmt.Errorf("mkdir: %w", err)
+	}
 	f, err := os.OpenFile(outPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
 		return "", fmt.Errorf("open file: %w", err)

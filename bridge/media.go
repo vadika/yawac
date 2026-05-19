@@ -315,6 +315,9 @@ func (c *Client) DownloadMedia(refJSON, outPath string) (string, error) {
 		}
 		data = fresh
 	}
+	if err := os.MkdirAll(filepath.Dir(outPath), 0o700); err != nil {
+		return "", fmt.Errorf("mkdir: %w", err)
+	}
 	if err := os.WriteFile(outPath, data, 0o600); err != nil {
 		return "", fmt.Errorf("write: %w", err)
 	}
