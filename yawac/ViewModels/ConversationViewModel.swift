@@ -132,16 +132,68 @@ final class ConversationViewModel {
         ensureDownloadFromHistory(id: message.id, kind: kind, refJSON: refJSON)
     }
 
-    private func ensureDownloadFromHistory(id: String, kind: String, refJSON: String) {
-        let ext: String
+    /// Picks a sensible on-disk extension so macOS opens the file with the
+    /// correct app. Documents use the original filename's extension when
+    /// available, falling back to a mime-derived one or `.bin`.
+    private func extensionFor(kind: String, refJSON: String, messageID: String) -> String {
         switch kind {
-        case "image":    ext = "jpg"
-        case "video":    ext = "mp4"
-        case "audio":    ext = "ogg"
-        case "document": ext = "bin"
-        case "sticker":  ext = "webp"
-        default:         ext = "bin"
+        case "image":   return mimeExt(refJSON: refJSON, fallback: "jpg", prefix: "image/")
+        case "video":   return mimeExt(refJSON: refJSON, fallback: "mp4", prefix: "video/")
+        case "audio":   return mimeExt(refJSON: refJSON, fallback: "ogg", prefix: "audio/")
+        case "sticker": return "webp"
+        case "document":
+            if let context, let row = try? context.fetch(
+                FetchDescriptor<PersistedMessage>(predicate: #Predicate { $0.id == messageID })
+            ).first {
+                if let fn = row.mediaFileName, !fn.isEmpty {
+                    let e = (fn as NSString).pathExtension
+                    if !e.isEmpty { return e.lowercased() }
+                }
+            }
+            return mimeExt(refJSON: refJSON, fallback: "bin", prefix: "")
+        default:
+            return "bin"
         }
+    }
+
+    private func mimeExt(refJSON: String, fallback: String, prefix: String) -> String {
+        guard let data = refJSON.data(using: .utf8),
+              let dict = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let mime = dict["mimetype"] as? String,
+              !mime.isEmpty else { return fallback }
+        switch mime.lowercased() {
+        case "image/jpeg":  return "jpg"
+        case "image/png":   return "png"
+        case "image/gif":   return "gif"
+        case "image/webp":  return "webp"
+        case "video/mp4":   return "mp4"
+        case "video/quicktime": return "mov"
+        case "video/webm":  return "webm"
+        case "audio/mpeg":  return "mp3"
+        case "audio/ogg":   return "ogg"
+        case "audio/mp4":   return "m4a"
+        case "audio/wav":   return "wav"
+        case "audio/ogg; codecs=opus": return "opus"
+        case "application/pdf":  return "pdf"
+        case "application/zip":  return "zip"
+        case "application/msword": return "doc"
+        case "application/vnd.openxmlformats-officedocument.wordprocessingml.document": return "docx"
+        case "application/vnd.ms-excel": return "xls"
+        case "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": return "xlsx"
+        case "text/plain":  return "txt"
+        default:
+            // Use the subtype as a last resort (e.g. "application/foo" → "foo").
+            if let slash = mime.firstIndex(of: "/") {
+                let sub = mime[mime.index(after: slash)...]
+                let cleaned = sub.split(separator: ";").first.map(String.init) ?? String(sub)
+                if !cleaned.isEmpty { return cleaned }
+            }
+            return fallback
+        }
+    }
+
+    private func ensureDownloadFromHistory(id: String, kind: String, refJSON: String) {
+        let ext = extensionFor(kind: kind, refJSON: refJSON, messageID: id)
         let client = self.client
         downloadTasks[id] = Task { @MainActor [weak self] in
             let result = await MediaCache.shared.ensure(
