@@ -30,16 +30,32 @@ final class ConversationViewModel {
             predicate: #Predicate { $0.chatJID == jid },
             sortBy: [SortDescriptor(\.timestamp, order: .forward)])
         if let rows = try? context.fetch(descriptor) {
-            self.messages = rows.map { p in
-                UIMessage(
+            // Sweep legacy rows of non-displayable kinds (e.g. reactions persisted
+            // by older builds before the dedicated Reaction event).
+            for p in rows where p.kind == "reaction" || p.kind == "protocol" || p.kind == "system" {
+                context.delete(p)
+            }
+            try? context.save()
+            let displayable = rows.filter { p in
+                p.kind != "reaction" && p.kind != "protocol" && p.kind != "system"
+            }
+            self.messages = displayable.map { p in
+                let body: UIMessage.Body
+                switch p.kind {
+                case "text":
+                    body = .text(p.text ?? "")
+                case "image", "video", "audio", "document", "sticker":
+                    body = .media(kind: p.kind, caption: p.mediaCaption, localPath: p.mediaPath)
+                default:
+                    body = .system(p.kind)
+                }
+                return UIMessage(
                     id: p.id,
                     chatJID: p.chatJID,
                     senderJID: p.senderJID,
                     fromMe: p.fromMe,
                     timestamp: p.timestamp,
-                    body: p.kind == "text"
-                        ? .text(p.text ?? "")
-                        : .media(kind: p.kind, caption: p.mediaCaption, localPath: p.mediaPath))
+                    body: body)
             }
             // Seed localPaths from any persisted media files, then kick off
             // downloads for media (images/stickers) that we don't have on disk yet.
