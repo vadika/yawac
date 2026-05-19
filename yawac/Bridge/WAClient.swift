@@ -22,7 +22,11 @@ final class WAClient {
         case bridgeFailure(String)
     }
 
-    private let go: BridgeClient
+    // gomobile-generated BridgeClient is thread-safe (the Go side serializes
+    // calls internally). Marking nonisolated(unsafe) so blocking I/O (media
+    // downloads, profile picture fetches) can run off MainActor without
+    // pinning the UI.
+    nonisolated(unsafe) private let go: BridgeClient
     private let bus = WAEventBus()
     private var subscribers: [UUID: AsyncStream<Event>.Continuation] = [:]
     private var pump: Task<Void, Never>?
@@ -96,14 +100,14 @@ final class WAClient {
         return try JSONDecoder().decode(BridgeSendResult.self, from: Data(json.utf8))
     }
 
-    func downloadMedia(_ refJSON: String, to outPath: String) throws -> String {
+    nonisolated func downloadMedia(_ refJSON: String, to outPath: String) throws -> String {
         var err: NSError?
         let out = go.downloadMedia(refJSON, outPath: outPath, error: &err)
         if let err { throw err }
         return out
     }
 
-    func fetchProfilePicture(jid: String, outPath: String) throws -> String {
+    nonisolated func fetchProfilePicture(jid: String, outPath: String) throws -> String {
         var err: NSError?
         let result = go.fetchProfilePicture(jid, outPath: outPath, error: &err)
         if let err { throw err }

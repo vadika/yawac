@@ -28,7 +28,7 @@ actor AvatarCache {
         if FileManager.default.fileExists(atPath: url.path) { return url }
         if let t = inflight[jid] { return await t.value }
 
-        let task: Task<URL?, Never> = Task { @MainActor in
+        let task: Task<URL?, Never> = Task.detached(priority: .utility) {
             do {
                 let result = try client.fetchProfilePicture(jid: jid, outPath: url.path)
                 return result.isEmpty ? nil : URL(filePath: result)

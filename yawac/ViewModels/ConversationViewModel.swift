@@ -103,9 +103,14 @@ final class ConversationViewModel {
               localPaths[message.id] == nil,
               downloadTasks[message.id] == nil else { return }
 
-        // Size cap for v1: skip media larger than 25 MB to avoid runaway downloads.
-        let maxBytes: Int64 = 25 * 1024 * 1024
-        if let size = media.sizeBytes, size > 0, size > maxBytes { return }
+        // Size cap: 100 MB. Larger files surface as an error with a Retry
+        // button that bypasses the cap (user opt-in).
+        let maxBytes: Int64 = 100 * 1024 * 1024
+        if let size = media.sizeBytes, size > 0, size > maxBytes {
+            let mb = Double(size) / (1024.0 * 1024.0)
+            downloadErrors[message.id] = String(format: "Too large (%.1f MB)", mb)
+            return
+        }
 
         guard let refJSON = ref.json else { return }
         ensureDownloadFromHistory(id: message.id, kind: kind, refJSON: refJSON)

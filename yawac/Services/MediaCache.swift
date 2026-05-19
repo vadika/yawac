@@ -35,10 +35,8 @@ actor MediaCache {
             do { return .file(try await t.value) }
             catch { return .failed(error.localizedDescription) }
         }
-        let task = Task<URL, Error> {
-            try await MainActor.run {
-                _ = try client.downloadMedia(refJSON, to: url.path)
-            }
+        let task = Task<URL, Error>.detached(priority: .userInitiated) {
+            _ = try client.downloadMedia(refJSON, to: url.path)
             return url
         }
         inflight[messageID] = task
