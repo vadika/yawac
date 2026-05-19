@@ -3,15 +3,18 @@ import SwiftUI
 struct MessageRow: View {
     let message: UIMessage
     let status: UIMessage.Status?
+    let senderName: String?
 
-    init(message: UIMessage, status: UIMessage.Status? = nil) {
+    init(message: UIMessage, status: UIMessage.Status? = nil, senderName: String? = nil) {
         self.message = message
         self.status = status
+        self.senderName = senderName
     }
 
     private var isGroupChat: Bool { message.chatJID.hasSuffix("@g.us") }
 
     private var senderDisplay: String {
+        if let senderName, !senderName.isEmpty { return senderName }
         let raw = message.senderJID
         if let at = raw.firstIndex(of: "@") {
             return String(raw[..<at])

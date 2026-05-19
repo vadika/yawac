@@ -32,6 +32,7 @@ struct ContentView: View {
             let contacts = (try? client.listContacts()) ?? []
             vm.resolveNames(contacts)
             vm.mergeContacts(contacts)
+            session.ingestContacts(contacts)
             let stream = client.eventStream()
             for await event in stream {
                 switch event {
@@ -41,6 +42,7 @@ struct ContentView: View {
                     let cs = (try? client.listContacts()) ?? []
                     vm.resolveNames(cs)
                     vm.mergeContacts(cs)
+                    session.ingestContacts(cs)
                 default:
                     break
                 }

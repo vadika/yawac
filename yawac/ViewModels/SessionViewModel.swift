@@ -15,6 +15,19 @@ final class SessionViewModel {
     var client: WAClient?
     var syncing: Bool = false
     var syncedConversations: Int = 0
+    var contactNames: [String: String] = [:]
+
+    func ingestContacts(_ cs: [BridgeContact]) {
+        for c in cs { contactNames[c.jid] = c.name }
+    }
+
+    func displayName(for jid: String) -> String {
+        if let n = contactNames[jid] { return n }
+        if let at = jid.firstIndex(of: "@") {
+            return String(jid[..<at])
+        }
+        return jid
+    }
 
     private var eventTask: Task<Void, Never>?
     private var syncWatchdog: Task<Void, Never>?

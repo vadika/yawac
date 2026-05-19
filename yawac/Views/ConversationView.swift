@@ -16,7 +16,11 @@ struct ConversationView: View {
                         ScrollView {
                             LazyVStack(spacing: 6) {
                                 ForEach(vm.messages) { msg in
-                                    MessageRow(message: msg, status: vm.receiptStatus[msg.id]).id(msg.id)
+                                    MessageRow(
+                                        message: msg,
+                                        status: vm.receiptStatus[msg.id],
+                                        senderName: session.displayName(for: msg.senderJID)
+                                    ).id(msg.id)
                                 }
                             }
                             .padding()
@@ -40,7 +44,7 @@ struct ConversationView: View {
                 ProgressView()
             }
         }
-        .navigationTitle(chatJID)
+        .navigationTitle(session.displayName(for: chatJID))
         .onDrop(of: [.fileURL], isTargeted: nil) { providers in
             guard let vm else { return false }
             for p in providers {
