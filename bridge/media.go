@@ -292,10 +292,70 @@ func (c *Client) DownloadMedia(refJSON, outPath string) (string, error) {
 	}
 	data, err := c.wa.Download(context.Background(), dl)
 	if err != nil {
-		return "", fmt.Errorf("download: %w", err)
+		// Fallback: refresh URL via DirectPath + media connection.
+		// whatsmeow URLs expire after ~24h, but DirectPath is stable —
+		// DownloadMediaWithPath negotiates a fresh URL transparently.
+		mt := mediaTypeFor(r.Kind)
+		if mt == "" {
+			return "", fmt.Errorf("download: %w", err)
+		}
+		mmsType := mmsTypeFor(r.Kind)
+		fresh, ferr := c.wa.DownloadMediaWithPath(
+			context.Background(),
+			r.DirectPath,
+			r.FileEncSHA256,
+			r.FileSHA256,
+			r.MediaKey,
+			int(r.FileLength),
+			mt,
+			mmsType,
+		)
+		if ferr != nil {
+			return "", fmt.Errorf("download: %w (refresh also failed: %v)", err, ferr)
+		}
+		data = fresh
 	}
 	if err := os.WriteFile(outPath, data, 0o600); err != nil {
 		return "", fmt.Errorf("write: %w", err)
 	}
 	return outPath, nil
+}
+
+// mediaTypeFor maps our MediaRef.Kind to whatsmeow.MediaType (used for key
+// derivation). Returns "" (zero value) for unknown kinds.
+// Note: whatsmeow has no per-sticker MediaType — stickers reuse MediaImage.
+func mediaTypeFor(kind string) whatsmeow.MediaType {
+	switch kind {
+	case "image":
+		return whatsmeow.MediaImage
+	case "video":
+		return whatsmeow.MediaVideo
+	case "audio":
+		return whatsmeow.MediaAudio
+	case "document":
+		return whatsmeow.MediaDocument
+	case "sticker":
+		return whatsmeow.MediaImage
+	default:
+		return ""
+	}
+}
+
+// mmsTypeFor returns the wire-format mmsType string whatsmeow expects when
+// re-resolving a media URL from a DirectPath.
+func mmsTypeFor(kind string) string {
+	switch kind {
+	case "image":
+		return "image"
+	case "video":
+		return "video"
+	case "audio":
+		return "audio"
+	case "document":
+		return "document"
+	case "sticker":
+		return "image"
+	default:
+		return ""
+	}
 }
