@@ -265,6 +265,11 @@ func (c *Client) DownloadMedia(refJSON, outPath string) (string, error) {
 	if err := json.Unmarshal([]byte(refJSON), &r); err != nil {
 		return "", fmt.Errorf("parse ref: %w", err)
 	}
+	fmt.Fprintf(os.Stderr,
+		"[yawac/download] kind=%s len=%d mime=%s mediaKey=%dB encSHA=%dB plainSHA=%dB dp=%q\n",
+		r.Kind, r.FileLength, r.Mimetype,
+		len(r.MediaKey), len(r.FileEncSHA256), len(r.FileSHA256),
+		r.DirectPath)
 	var dl whatsmeow.DownloadableMessage
 	switch r.Kind {
 	case "image":
