@@ -9,10 +9,25 @@ struct MessageRow: View {
         self.status = status
     }
 
+    private var isGroupChat: Bool { message.chatJID.hasSuffix("@g.us") }
+
+    private var senderDisplay: String {
+        let raw = message.senderJID
+        if let at = raw.firstIndex(of: "@") {
+            return String(raw[..<at])
+        }
+        return raw
+    }
+
     var body: some View {
         HStack {
             if message.fromMe { Spacer(minLength: 60) }
             VStack(alignment: message.fromMe ? .trailing : .leading, spacing: 2) {
+                if !message.fromMe && isGroupChat {
+                    Text(senderDisplay)
+                        .font(.caption).bold()
+                        .foregroundStyle(.tint)
+                }
                 bodyView
                 footerView
             }
