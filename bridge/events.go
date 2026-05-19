@@ -3,6 +3,7 @@ package bridge
 import (
 	"encoding/json"
 
+	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 )
 
@@ -58,8 +59,44 @@ func (c *Client) handleWAEvent(evt any) {
 	}
 }
 
+func (c *Client) dispatchReceipt(evt *events.Receipt) {
+	status := "delivered"
+	switch evt.Type {
+	case types.ReceiptTypeRead, types.ReceiptTypeReadSelf:
+		status = "read"
+	case types.ReceiptTypePlayed:
+		status = "played"
+	case types.ReceiptTypeDelivered:
+		status = "delivered"
+	}
+	b, _ := json.Marshal(JReceipt{
+		ChatJID:    evt.Chat.String(),
+		SenderJID:  evt.Sender.String(),
+		MessageIDs: evt.MessageIDs,
+		Status:     status,
+		Timestamp:  evt.Timestamp.Unix(),
+	})
+	c.dispatch("Receipt", string(b))
+}
+
+func (c *Client) dispatchPresence(evt *events.Presence) {
+	b, _ := json.Marshal(map[string]any{
+		"from":        evt.From.String(),
+		"unavailable": evt.Unavailable,
+		"last_seen":   evt.LastSeen.Unix(),
+	})
+	c.dispatch("Presence", string(b))
+}
+
+func (c *Client) dispatchChatPresence(evt *events.ChatPresence) {
+	b, _ := json.Marshal(map[string]any{
+		"chat":   evt.MessageSource.Chat.String(),
+		"sender": evt.MessageSource.Sender.String(),
+		"state":  string(evt.State), // composing, paused
+		"media":  string(evt.Media), // text, audio
+	})
+	c.dispatch("ChatPresence", string(b))
+}
+
 // stubs — filled in later tasks
-func (c *Client) dispatchReceipt(*events.Receipt)           {}
-func (c *Client) dispatchPresence(*events.Presence)         {}
-func (c *Client) dispatchChatPresence(*events.ChatPresence) {}
-func (c *Client) dispatchHistory(*events.HistorySync)       {}
+func (c *Client) dispatchHistory(*events.HistorySync) {}
