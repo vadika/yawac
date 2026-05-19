@@ -1,0 +1,33 @@
+name: yawac
+options:
+  deploymentTarget:
+    macOS: "14.0"
+  bundleIdPrefix: dev.vadikas.yawac
+settings:
+  base:
+    SWIFT_VERSION: "5.10"
+    ENABLE_HARDENED_RUNTIME: YES
+targets:
+  yawac:
+    type: application
+    platform: macOS
+    sources:
+      - path: yawac
+    dependencies:
+      - framework: build/Bridge.xcframework
+        embed: true
+    info:
+      path: yawac/Info.plist
+      properties:
+        NSAppleEventsUsageDescription: yawac needs Apple events for notifications
+        LSMinimumSystemVersion: "14.0"
+        CFBundleDisplayName: yawac
+        CFBundleShortVersionString: "0.1.0"
+        CFBundleVersion: "1"
+  yawacTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: yawacTests
+    dependencies:
+      - target: yawac

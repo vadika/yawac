@@ -16,6 +16,9 @@ DerivedData/
 *.swiftpm
 Package.resolved
 
+# XcodeGen output (regenerated from project.yml)
+yawac.xcodeproj/
+
 # macOS
 .DS_Store
 
