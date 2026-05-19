@@ -166,6 +166,7 @@ func mediaFromDocument(m *waE2E.DocumentMessage) *JMedia {
 	return &JMedia{
 		MimeType:  m.GetMimetype(),
 		Caption:   m.GetCaption(),
+		FileName:  m.GetFileName(),
 		SizeBytes: int64(m.GetFileLength()),
 		Ref: &MediaRef{
 			Kind:          "document",

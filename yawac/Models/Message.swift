@@ -10,7 +10,7 @@ struct UIMessage: Identifiable, Hashable {
 
     enum Body: Hashable {
         case text(String)
-        case media(kind: String, caption: String?, localPath: String?)
+        case media(kind: String, caption: String?, fileName: String?, localPath: String?)
         case system(String)
     }
 }
@@ -37,6 +37,7 @@ extension UIMessage {
         case "image", "video", "audio", "document", "sticker":
             self.body = .media(kind: b.kind,
                                caption: b.media?.caption,
+                               fileName: b.media?.fileName,
                                localPath: b.media?.filePath)
         default:
             self.body = .system(b.kind)

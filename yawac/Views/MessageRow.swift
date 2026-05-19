@@ -1,3 +1,5 @@
+import AppKit
+import AVKit
 import SwiftUI
 
 struct MessageRow: View {
@@ -81,8 +83,8 @@ struct MessageRow: View {
         switch message.body {
         case .text(let s):
             Text(s).textSelection(.enabled)
-        case .media(let kind, let caption, let path):
-            mediaView(kind: kind, caption: caption, path: path)
+        case .media(let kind, let caption, let fileName, let path):
+            mediaView(kind: kind, caption: caption, fileName: fileName, path: path)
         case .system(let s):
             Text(s).font(.caption).foregroundStyle(.secondary)
         }
@@ -102,31 +104,109 @@ struct MessageRow: View {
     }
 
     @ViewBuilder
-    private func mediaView(kind: String, caption: String?, path: String?) -> some View {
+    private func mediaView(kind: String, caption: String?, fileName: String?, path: String?) -> some View {
         let effectivePath = localPath ?? path
         VStack(alignment: .leading, spacing: 4) {
-            if kind == "image",
-               let p = effectivePath,
-               let img = NSImage(contentsOfFile: p) {
-                Image(nsImage: img)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(maxWidth: 320, maxHeight: 240)
-                    .clipShape(.rect(cornerRadius: 8))
-            } else if kind == "sticker",
-                      let p = effectivePath,
-                      let img = NSImage(contentsOfFile: p) {
-                Image(nsImage: img)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(maxWidth: 160, maxHeight: 160)
-            } else {
+            switch kind {
+            case "image":
+                imageBubble(path: effectivePath)
+            case "sticker":
+                stickerBubble(path: effectivePath)
+            case "video":
+                videoBubble(path: effectivePath)
+            case "audio":
+                audioBubble(path: effectivePath)
+            case "document":
+                documentBubble(path: effectivePath, fileName: fileName)
+            default:
                 Label(kind, systemImage: iconName(for: kind))
                     .foregroundStyle(.secondary)
             }
             if let caption, !caption.isEmpty {
                 Text(caption)
             }
+        }
+    }
+
+    @ViewBuilder
+    private func imageBubble(path: String?) -> some View {
+        if let p = path, let img = NSImage(contentsOfFile: p) {
+            Image(nsImage: img)
+                .resizable()
+                .scaledToFit()
+                .frame(maxWidth: 320, maxHeight: 240)
+                .clipShape(.rect(cornerRadius: 8))
+        } else {
+            downloadingPlaceholder("photo")
+        }
+    }
+
+    @ViewBuilder
+    private func stickerBubble(path: String?) -> some View {
+        if let p = path, let img = NSImage(contentsOfFile: p) {
+            Image(nsImage: img)
+                .resizable()
+                .scaledToFit()
+                .frame(maxWidth: 160, maxHeight: 160)
+        } else {
+            downloadingPlaceholder("face.smiling")
+        }
+    }
+
+    @ViewBuilder
+    private func videoBubble(path: String?) -> some View {
+        if let p = path {
+            VideoThumbnailView(path: p)
+                .frame(maxWidth: 320, maxHeight: 240)
+                .clipShape(.rect(cornerRadius: 8))
+                .onTapGesture {
+                    NSWorkspace.shared.open(URL(fileURLWithPath: p))
+                }
+        } else {
+            downloadingPlaceholder("play.rectangle")
+        }
+    }
+
+    @ViewBuilder
+    private func audioBubble(path: String?) -> some View {
+        if let p = path {
+            AudioPlayerView(path: p)
+        } else {
+            downloadingPlaceholder("waveform")
+        }
+    }
+
+    @ViewBuilder
+    private func documentBubble(path: String?, fileName: String?) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "doc")
+                .font(.title2)
+                .foregroundStyle(.tint)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(fileName ?? "Document").font(.callout).bold()
+                if path != nil {
+                    Text("Tap to open").font(.caption2).foregroundStyle(.secondary)
+                } else {
+                    Text("Downloading…").font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(6)
+        .frame(maxWidth: 320, alignment: .leading)
+        .contentShape(.rect)
+        .onTapGesture {
+            if let p = path {
+                NSWorkspace.shared.open(URL(fileURLWithPath: p))
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func downloadingPlaceholder(_ icon: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: icon).foregroundStyle(.secondary)
+            ProgressView().controlSize(.small)
+            Text("Downloading…").font(.caption).foregroundStyle(.secondary)
         }
     }
 

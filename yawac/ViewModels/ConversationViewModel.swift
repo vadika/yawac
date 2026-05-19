@@ -46,7 +46,7 @@ final class ConversationViewModel {
                 case "text":
                     body = .text(p.text ?? "")
                 case "image", "video", "audio", "document", "sticker":
-                    body = .media(kind: p.kind, caption: p.mediaCaption, localPath: p.mediaPath)
+                    body = .media(kind: p.kind, caption: p.mediaCaption, fileName: p.mediaFileName, localPath: p.mediaPath)
                 default:
                     body = .system(p.kind)
                 }
@@ -65,7 +65,8 @@ final class ConversationViewModel {
                     localPaths[p.id] = path
                     continue
                 }
-                guard p.kind == "image" || p.kind == "sticker",
+                let downloadable: Set<String> = ["image", "sticker", "video", "audio", "document"]
+                guard downloadable.contains(p.kind),
                       let refJSON = p.mediaRefJSON,
                       downloadTasks[p.id] == nil else { continue }
                 ensureDownloadFromHistory(id: p.id, kind: p.kind, refJSON: refJSON)
@@ -74,13 +75,19 @@ final class ConversationViewModel {
     }
 
     private func ensureDownload(for message: BridgeMessage) {
-        // v1 scope: only auto-download images + stickers.
-        guard message.kind == "image" || message.kind == "sticker" else { return }
-        guard let ref = message.media?.ref,
+        guard let media = message.media, let ref = media.ref else { return }
+        let kind = message.kind
+        let allowedKinds: Set<String> = ["image", "sticker", "video", "audio", "document"]
+        guard allowedKinds.contains(kind),
               localPaths[message.id] == nil,
               downloadTasks[message.id] == nil else { return }
+
+        // Size cap for v1: skip media larger than 25 MB to avoid runaway downloads.
+        let maxBytes: Int64 = 25 * 1024 * 1024
+        if let size = media.sizeBytes, size > 0, size > maxBytes { return }
+
         guard let refJSON = ref.json else { return }
-        ensureDownloadFromHistory(id: message.id, kind: message.kind, refJSON: refJSON)
+        ensureDownloadFromHistory(id: message.id, kind: kind, refJSON: refJSON)
     }
 
     private func ensureDownloadFromHistory(id: String, kind: String, refJSON: String) {
@@ -187,6 +194,7 @@ final class ConversationViewModel {
             text: m.text,
             mediaPath: m.media?.filePath,
             mediaCaption: m.media?.caption,
+            mediaFileName: m.media?.fileName,
             mediaRefJSON: m.media?.ref?.json)
         context.insert(row)
         try? context.save()

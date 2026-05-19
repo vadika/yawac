@@ -24,6 +24,7 @@ struct BridgeMessage: Codable, Identifiable {
 struct BridgeMedia: Codable {
     let mimeType: String
     let caption: String?
+    let fileName: String?
     let filePath: String?
     let width: Int?
     let height: Int?
@@ -34,6 +35,7 @@ struct BridgeMedia: Codable {
     enum CodingKeys: String, CodingKey {
         case mimeType = "mime_type"
         case caption
+        case fileName = "file_name"
         case filePath = "file_path"
         case width, height, duration
         case sizeBytes = "size_bytes"

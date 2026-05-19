@@ -17,6 +17,7 @@ type JMessage struct {
 type JMedia struct {
 	MimeType  string    `json:"mime_type"`
 	Caption   string    `json:"caption,omitempty"`
+	FileName  string    `json:"file_name,omitempty"` // documents only
 	FilePath  string    `json:"file_path,omitempty"`
 	Width     int       `json:"width,omitempty"`
 	Height    int       `json:"height,omitempty"`
