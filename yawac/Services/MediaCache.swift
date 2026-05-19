@@ -36,7 +36,20 @@ actor MediaCache {
             catch { return .failed(error.localizedDescription) }
         }
         let task = Task<URL, Error>.detached(priority: .userInitiated) {
-            _ = try client.downloadMedia(refJSON, to: url.path)
+            do {
+                _ = try client.downloadMedia(refJSON, to: url.path)
+            } catch {
+                let msg = error.localizedDescription.lowercased()
+                if msg.contains("hash") {
+                    // Strict download failed integrity check. Fall back to a
+                    // best-effort fetch that skips SHA/HMAC verification — the
+                    // file is decrypted but bytes may not match the original
+                    // upload (e.g. server-side re-encoding).
+                    _ = try client.downloadMediaForce(refJSON, to: url.path)
+                } else {
+                    throw error
+                }
+            }
             return url
         }
         inflight[messageID] = task

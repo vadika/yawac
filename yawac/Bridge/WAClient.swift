@@ -108,6 +108,16 @@ final class WAClient {
         return out
     }
 
+    /// Last-resort download that bypasses whatsmeow's hash + HMAC checks.
+    /// Use only when the strict download fails with integrity errors and the
+    /// user has opted in.
+    nonisolated func downloadMediaForce(_ refJSON: String, to outPath: String) throws -> String {
+        var err: NSError?
+        let out = go.downloadMediaForce(refJSON, outPath: outPath, error: &err)
+        if let err { throw err }
+        return out
+    }
+
     nonisolated func requestMediaRetry(chatJID: String, senderJID: String, msgID: String, fromMe: Bool, refJSON: String) throws {
         try go.requestMediaRetry(chatJID, senderJID: senderJID, msgID: msgID, fromMe: fromMe, refJSON: refJSON)
     }

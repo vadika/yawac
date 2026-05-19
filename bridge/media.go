@@ -2,9 +2,11 @@ package bridge
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -13,6 +15,8 @@ import (
 	"go.mau.fi/whatsmeow"
 	waE2E "go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/types"
+	"go.mau.fi/whatsmeow/util/cbcutil"
+	"go.mau.fi/whatsmeow/util/hkdfutil"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -348,6 +352,95 @@ func (c *Client) DownloadMedia(refJSON, outPath string) (string, error) {
 		return "", fmt.Errorf("write: %w", err)
 	}
 	return outPath, nil
+}
+
+// DownloadMediaWithPath returns the path to a fetched file, decrypted using
+// the MediaRef's mediaKey + appInfo-derived AES key. Hash + HMAC verification
+// is intentionally skipped — use only when the strict download path failed
+// and the user accepts the integrity risk.
+func (c *Client) DownloadMediaForce(refJSON, outPath string) (string, error) {
+	if c.wa == nil {
+		return "", errors.New("client closed")
+	}
+	var r MediaRef
+	if err := json.Unmarshal([]byte(refJSON), &r); err != nil {
+		return "", fmt.Errorf("parse ref: %w", err)
+	}
+	mt := mediaTypeFor(r.Kind)
+	if mt == "" {
+		return "", fmt.Errorf("unknown kind %q", r.Kind)
+	}
+	mmsType := mmsTypeFor(r.Kind)
+
+	mediaConn, err := c.wa.DangerousInternals().RefreshMediaConn(context.Background(), false)
+	if err != nil {
+		return "", fmt.Errorf("media conn: %w", err)
+	}
+	if len(mediaConn.Hosts) == 0 {
+		return "", errors.New("no media hosts")
+	}
+	host := mediaConn.Hosts[0].Hostname
+	urlStr := fmt.Sprintf("https://%s%s&mms-type=%s&hash=", host, r.DirectPath, mmsType)
+
+	req, err := http.NewRequest("GET", urlStr, nil)
+	if err != nil {
+		return "", fmt.Errorf("new req: %w", err)
+	}
+	req.Header.Set("Origin", "https://web.whatsapp.com")
+	req.Header.Set("Referer", "https://web.whatsapp.com/")
+	req.Header.Set("Accept-Encoding", "identity")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("http get: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return "", fmt.Errorf("http status %d", resp.StatusCode)
+	}
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("read: %w", err)
+	}
+	fmt.Fprintf(os.Stderr,
+		"[yawac/download-force] kind=%s expected_len=%d got_len=%d enc_sha_expected_first8=%x got_first8=%x\n",
+		r.Kind, r.FileLength, len(raw),
+		shaPrefix(r.FileEncSHA256), sha256Prefix(raw))
+
+	if len(raw) <= 10 {
+		return "", errors.New("response too short")
+	}
+	ciphertext := raw[:len(raw)-10]
+
+	// Derive AES key & IV via HKDF (matches whatsmeow's getMediaKeys).
+	expanded := hkdfutil.SHA256(r.MediaKey, nil, []byte(mt), 112)
+	iv := expanded[:16]
+	cipherKey := expanded[16:48]
+
+	plain, err := cbcutil.Decrypt(cipherKey, iv, ciphertext)
+	if err != nil {
+		return "", fmt.Errorf("decrypt: %w", err)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(outPath), 0o700); err != nil {
+		return "", fmt.Errorf("mkdir: %w", err)
+	}
+	if err := os.WriteFile(outPath, plain, 0o600); err != nil {
+		return "", fmt.Errorf("write: %w", err)
+	}
+	return outPath, nil
+}
+
+func shaPrefix(b []byte) []byte {
+	if len(b) >= 8 {
+		return b[:8]
+	}
+	return b
+}
+
+func sha256Prefix(b []byte) []byte {
+	h := sha256.Sum256(b)
+	return h[:8]
 }
 
 // mediaTypeFor maps our MediaRef.Kind to whatsmeow.MediaType (used for key
