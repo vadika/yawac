@@ -72,7 +72,7 @@ final class ChatListViewModel {
             chats.append(c)
             upsertPersisted(c)
         }
-        chats.sort { $0.lastTimestamp > $1.lastTimestamp }
+        sortChats()
 
         if !message.fromMe, !NSApp.isActive, !preview.isEmpty {
             let title = chats.first(where: { $0.jid == message.chatJID })?.name ?? message.chatJID
@@ -108,11 +108,11 @@ final class ChatListViewModel {
                 jid: g.jid,
                 name: g.name.isEmpty ? g.jid : g.name,
                 lastMessage: g.topic,
-                lastTimestamp: g.created,
+                lastTimestamp: 0,
                 unread: 0))
             upsertPersisted(chats[chats.count - 1])
         }
-        chats.sort { $0.lastTimestamp > $1.lastTimestamp }
+        sortChats()
     }
 
     func mergeContacts(_ cs: [BridgeContact]) {
@@ -126,7 +126,16 @@ final class ChatListViewModel {
             chats.append(chat)
             upsertPersisted(chat)
         }
-        chats.sort { $0.lastTimestamp > $1.lastTimestamp }
+        sortChats()
+    }
+
+    private func sortChats() {
+        chats.sort { a, b in
+            if a.lastTimestamp != b.lastTimestamp {
+                return a.lastTimestamp > b.lastTimestamp
+            }
+            return a.name.localizedCaseInsensitiveCompare(b.name) == .orderedAscending
+        }
     }
 
     func resolveNames(_ cs: [BridgeContact]) {
