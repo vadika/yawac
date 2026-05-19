@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"go.mau.fi/whatsmeow"
 	waLog "go.mau.fi/whatsmeow/util/log"
@@ -23,6 +24,32 @@ type Client struct {
 	// DirectPath via *events.MediaRetry. Process-local only (not persisted).
 	retryMu      sync.Mutex
 	pendingRetry map[string]MediaRef
+
+	// mediaConnMu serializes force-refreshes of the media connection so a
+	// burst of concurrent download failures doesn't trigger N refreshes and
+	// trip WhatsApp's 429 rate limiter. lastForceRefresh records the most
+	// recent successful force refresh; calls within mediaConnCooldown are
+	// no-ops that simply succeed.
+	mediaConnMu       sync.Mutex
+	lastForceRefresh  time.Time
+}
+
+const mediaConnCooldown = 30 * time.Second
+
+// refreshMediaConnRateLimited force-refreshes the media connection at most
+// once per cooldown window. Returns nil if a refresh either just ran or was
+// skipped because one ran recently.
+func (c *Client) refreshMediaConnRateLimited() error {
+	c.mediaConnMu.Lock()
+	defer c.mediaConnMu.Unlock()
+	if time.Since(c.lastForceRefresh) < mediaConnCooldown {
+		return nil
+	}
+	if _, err := c.wa.DangerousInternals().RefreshMediaConn(context.Background(), true); err != nil {
+		return err
+	}
+	c.lastForceRefresh = time.Now()
+	return nil
 }
 
 // NewClient initializes a SQLite-backed bridge Client at dbPath.

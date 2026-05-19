@@ -313,7 +313,7 @@ func (c *Client) DownloadMedia(refJSON, outPath string) (string, error) {
 		if ferr != nil {
 			// Final attempt: force-refresh the media connection token (some
 			// 403s are caused by stale auth tokens) and retry once.
-			if _, refErr := c.wa.DangerousInternals().RefreshMediaConn(context.Background(), true); refErr == nil {
+			if refErr := c.refreshMediaConnRateLimited(); refErr == nil {
 				retry, retryErr := c.wa.DownloadMediaWithPath(
 					context.Background(),
 					r.DirectPath,
