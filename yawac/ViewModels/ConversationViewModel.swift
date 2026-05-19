@@ -76,6 +76,22 @@ final class ConversationViewModel {
         try? client.sendTyping(chatJID, typing)
     }
 
+    func sendImage(at url: URL) async {
+        let caption = draft
+        do {
+            _ = try client.sendImage(chatJID, path: url.path, caption: caption)
+            draft = ""
+        } catch {
+            messages.append(UIMessage(
+                id: UUID().uuidString,
+                chatJID: chatJID,
+                senderJID: "system",
+                fromMe: false,
+                timestamp: .now,
+                body: .system("send image failed: \(error.localizedDescription)")))
+        }
+    }
+
     private func persist(_ m: BridgeMessage) {
         guard let context else { return }
         let row = PersistedMessage(

@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import UniformTypeIdentifiers
 
 struct ConversationView: View {
     let chatJID: String
@@ -40,6 +41,17 @@ struct ConversationView: View {
             }
         }
         .navigationTitle(chatJID)
+        .onDrop(of: [.fileURL], isTargeted: nil) { providers in
+            guard let vm else { return false }
+            for p in providers {
+                _ = p.loadObject(ofClass: URL.self) { url, _ in
+                    if let url {
+                        Task { @MainActor in await vm.sendImage(at: url) }
+                    }
+                }
+            }
+            return true
+        }
         .task(id: chatJID) {
             guard let client = session.client else { return }
             let vm = ConversationViewModel(chatJID: chatJID, client: client, context: modelContext)

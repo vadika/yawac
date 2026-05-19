@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct ComposerView: View {
     @Bindable var vm: ConversationViewModel
@@ -6,6 +7,12 @@ struct ComposerView: View {
 
     var body: some View {
         HStack {
+            Button {
+                attachImage()
+            } label: {
+                Image(systemName: "paperclip")
+            }
+            .buttonStyle(.borderless)
             TextField("Message", text: $vm.draft, axis: .vertical)
                 .lineLimit(1...6)
                 .textFieldStyle(.plain)
@@ -25,5 +32,16 @@ struct ComposerView: View {
             .keyboardShortcut(.return, modifiers: .command)
         }
         .padding()
+    }
+
+    private func attachImage() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.image]
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        if panel.runModal() == .OK, let url = panel.url {
+            Task { await vm.sendImage(at: url) }
+        }
     }
 }
