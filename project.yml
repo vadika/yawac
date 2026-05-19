@@ -16,6 +16,9 @@ targets:
     dependencies:
       - framework: build/Bridge.xcframework
         embed: true
+    settings:
+      base:
+        OTHER_LDFLAGS: -lresolv
     info:
       path: yawac/Info.plist
       properties:
