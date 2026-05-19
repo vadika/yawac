@@ -30,10 +30,34 @@ final class ChatListViewModel {
     }
 
     func ingest(_ message: BridgeMessage) {
+        // Skip protocol/system noise — no UI value
+        if message.kind == "protocol" || message.kind == "system" { return }
+
+        // Persist every incoming message so history is available even when the
+        // conversation view hasn't been opened yet.
+        persistMessage(message)
+
+        let preview: String
+        if let text = message.text, !text.isEmpty {
+            preview = text
+        } else {
+            switch message.kind {
+            case "image":    preview = "📷 Photo"
+            case "video":    preview = "🎥 Video"
+            case "audio":    preview = "🎤 Audio"
+            case "document": preview = "📄 Document"
+            case "sticker":  preview = "Sticker"
+            case "location": preview = "📍 Location"
+            case "reaction": preview = "Reacted"
+            case "protocol", "system": preview = ""  // hide
+            default:         preview = "[\(message.kind)]"
+            }
+        }
+
         let now = message.timestamp
         if let idx = chats.firstIndex(where: { $0.jid == message.chatJID }) {
             var c = chats[idx]
-            c.lastMessage = message.text ?? "[\(message.kind)]"
+            c.lastMessage = preview
             c.lastTimestamp = now
             if !message.fromMe { c.unread += 1 }
             chats[idx] = c
@@ -42,7 +66,7 @@ final class ChatListViewModel {
             let c = Chat(
                 jid: message.chatJID,
                 name: message.chatJID,
-                lastMessage: message.text ?? "[\(message.kind)]",
+                lastMessage: preview,
                 lastTimestamp: now,
                 unread: message.fromMe ? 0 : 1)
             chats.append(c)
@@ -50,11 +74,26 @@ final class ChatListViewModel {
         }
         chats.sort { $0.lastTimestamp > $1.lastTimestamp }
 
-        if !message.fromMe, !NSApp.isActive {
+        if !message.fromMe, !NSApp.isActive, !preview.isEmpty {
             let title = chats.first(where: { $0.jid == message.chatJID })?.name ?? message.chatJID
-            let body = message.text ?? "[\(message.kind)]"
-            NotificationService.notify(title: title, body: body, chatJID: message.chatJID)
+            NotificationService.notify(title: title, body: preview, chatJID: message.chatJID)
         }
+    }
+
+    private func persistMessage(_ m: BridgeMessage) {
+        guard let context else { return }
+        let row = PersistedMessage(
+            id: m.id,
+            chatJID: m.chatJID,
+            senderJID: m.senderJID,
+            fromMe: m.fromMe,
+            timestamp: Date(timeIntervalSince1970: TimeInterval(m.timestamp)),
+            kind: m.kind,
+            text: m.text,
+            mediaPath: m.media?.filePath,
+            mediaCaption: m.media?.caption)
+        context.insert(row)
+        try? context.save()
     }
 
     func markRead(_ jid: String) {

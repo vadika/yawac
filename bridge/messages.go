@@ -69,6 +69,10 @@ func (c *Client) dispatchMessage(evt *events.Message) {
 
 func classifyMessage(m *waE2E.Message) string {
 	switch {
+	case m.GetConversation() != "":
+		return "text"
+	case m.GetExtendedTextMessage() != nil:
+		return "text"
 	case m.GetImageMessage() != nil:
 		return "image"
 	case m.GetVideoMessage() != nil:
@@ -81,8 +85,12 @@ func classifyMessage(m *waE2E.Message) string {
 		return "sticker"
 	case m.GetLocationMessage() != nil:
 		return "location"
+	case m.GetReactionMessage() != nil:
+		return "reaction"
+	case m.GetProtocolMessage() != nil:
+		return "protocol"
 	default:
-		return "text"
+		return "system"
 	}
 }
 
