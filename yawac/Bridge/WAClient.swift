@@ -23,8 +23,7 @@ final class WAClient {
 
     private let go: BridgeClient
     private let bus = WAEventBus()
-    let events: AsyncStream<Event>
-    private let eventsContinuation: AsyncStream<Event>.Continuation
+    private var subscribers: [UUID: AsyncStream<Event>.Continuation] = [:]
     private var pump: Task<Void, Never>?
 
     init(dbPath: String) throws {
@@ -33,11 +32,20 @@ final class WAClient {
             throw err ?? NSError(domain: "yawac", code: -1)
         }
         self.go = client
-        var cont: AsyncStream<Event>.Continuation!
-        self.events = AsyncStream { cont = $0 }
-        self.eventsContinuation = cont
         client.setEventSink(bus)
         startPump()
+    }
+
+    func eventStream() -> AsyncStream<Event> {
+        let id = UUID()
+        return AsyncStream { continuation in
+            self.subscribers[id] = continuation
+            continuation.onTermination = { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.subscribers.removeValue(forKey: id)
+                }
+            }
+        }
     }
 
     deinit {
@@ -103,14 +111,18 @@ final class WAClient {
 
     private func startPump() {
         let stream = bus.stream
-        let cont = eventsContinuation
         pump = Task { @MainActor [weak self] in
             for await tuple in stream {
-                guard self != nil else { break }
+                guard let self else { return }
                 let evt = WAClient.decode(kind: tuple.kind, payload: tuple.payload)
-                cont.yield(evt)
+                for cont in self.subscribers.values {
+                    cont.yield(evt)
+                }
             }
-            cont.finish()
+            // stream ended (deinit case)
+            guard let self else { return }
+            for cont in self.subscribers.values { cont.finish() }
+            self.subscribers.removeAll()
         }
     }
 

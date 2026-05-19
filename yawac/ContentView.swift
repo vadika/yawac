@@ -24,7 +24,8 @@ struct ContentView: View {
             guard let client = session.client else { return }
             let vm = ChatListViewModel(client: client)
             self.chatList = vm
-            for await event in client.events {
+            let stream = client.eventStream()
+            for await event in stream {
                 if case .message(let m) = event { vm.ingest(m) }
             }
         }

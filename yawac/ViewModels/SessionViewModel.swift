@@ -32,8 +32,9 @@ final class SessionViewModel {
     private func consumeEvents() {
         guard let client else { return }
         eventTask?.cancel()
+        let stream = client.eventStream()
         eventTask = Task { @MainActor [weak self] in
-            for await event in client.events {
+            for await event in stream {
                 self?.handle(event)
             }
         }
