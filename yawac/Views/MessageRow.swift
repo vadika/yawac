@@ -5,13 +5,16 @@ struct MessageRow: View {
     let status: UIMessage.Status?
     let senderName: String?
     let localPath: String?
+    let reactions: [String]
 
     init(message: UIMessage, status: UIMessage.Status? = nil,
-         senderName: String? = nil, localPath: String? = nil) {
+         senderName: String? = nil, localPath: String? = nil,
+         reactions: [String] = []) {
         self.message = message
         self.status = status
         self.senderName = senderName
         self.localPath = localPath
+        self.reactions = reactions
     }
 
     private var isGroupChat: Bool { message.chatJID.hasSuffix("@g.us") }
@@ -28,25 +31,48 @@ struct MessageRow: View {
     var body: some View {
         HStack {
             if message.fromMe { Spacer(minLength: 60) }
-            VStack(alignment: message.fromMe ? .trailing : .leading, spacing: 4) {
-                if !message.fromMe && isGroupChat {
-                    HStack(spacing: 6) {
-                        AvatarView(jid: message.senderJID, name: senderDisplay, size: 24)
-                        Text(senderDisplay)
-                            .font(.caption).bold()
-                            .foregroundStyle(.tint)
+            VStack(alignment: message.fromMe ? .trailing : .leading, spacing: 2) {
+                VStack(alignment: message.fromMe ? .trailing : .leading, spacing: 4) {
+                    if !message.fromMe && isGroupChat {
+                        HStack(spacing: 6) {
+                            AvatarView(jid: message.senderJID, name: senderDisplay, size: 24)
+                            Text(senderDisplay)
+                                .font(.caption).bold()
+                                .foregroundStyle(.tint)
+                        }
+                    }
+                    bodyView
+                    footerView
+                }
+                .padding(8)
+                .background(
+                    message.fromMe
+                        ? Color.accentColor.opacity(0.2)
+                        : Color.gray.opacity(0.15),
+                    in: .rect(cornerRadius: 10))
+                if !reactions.isEmpty {
+                    reactionChips
+                }
+            }
+            if !message.fromMe { Spacer(minLength: 60) }
+        }
+    }
+
+    @ViewBuilder
+    private var reactionChips: some View {
+        HStack(spacing: 4) {
+            ForEach(Array(Set(reactions)), id: \.self) { emoji in
+                let count = reactions.filter { $0 == emoji }.count
+                HStack(spacing: 2) {
+                    Text(emoji).font(.caption)
+                    if count > 1 {
+                        Text("\(count)").font(.caption2).foregroundStyle(.secondary)
                     }
                 }
-                bodyView
-                footerView
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(.gray.opacity(0.15), in: .capsule)
             }
-            .padding(8)
-            .background(
-                message.fromMe
-                    ? Color.accentColor.opacity(0.2)
-                    : Color.gray.opacity(0.15),
-                in: .rect(cornerRadius: 10))
-            if !message.fromMe { Spacer(minLength: 60) }
         }
     }
 

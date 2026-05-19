@@ -37,3 +37,12 @@ type JSendResult struct {
 	MessageID string `json:"message_id"`
 	Timestamp int64  `json:"timestamp"`
 }
+
+type JReaction struct {
+	ChatJID         string `json:"chat_jid"`
+	TargetMessageID string `json:"target_message_id"`
+	TargetFromMe    bool   `json:"target_from_me"`
+	SenderJID       string `json:"sender_jid"`
+	Emoji           string `json:"emoji"`
+	Timestamp       int64  `json:"timestamp"`
+}

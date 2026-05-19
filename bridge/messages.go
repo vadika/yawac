@@ -38,6 +38,15 @@ func (c *Client) SendText(chatJID, body string) (string, error) {
 
 // dispatchMessage converts whatsmeow Message events to JMessage JSON.
 func (c *Client) dispatchMessage(evt *events.Message) {
+	if r := evt.Message.GetReactionMessage(); r != nil {
+		c.dispatchReaction(
+			evt.Info.Chat.String(),
+			evt.Info.Sender.String(),
+			evt.Info.Timestamp.Unix(),
+			r,
+		)
+		return
+	}
 	jm := JMessage{
 		ID:        evt.Info.ID,
 		ChatJID:   evt.Info.Chat.String(),
@@ -169,6 +178,27 @@ func mediaFromDocument(m *waE2E.DocumentMessage) *JMedia {
 			Mimetype:      m.GetMimetype(),
 		},
 	}
+}
+
+// dispatchReaction emits a "Reaction" event for both live messages
+// (whatsmeow events.Message with ReactionMessage) and history-sync
+// WebMessageInfo records. Reactions are NOT delivered as "Message"
+// events — Swift treats them as bubble adornments, not chat entries.
+func (c *Client) dispatchReaction(chatJID, senderJID string, ts int64, r *waE2E.ReactionMessage) {
+	key := r.GetKey()
+	if key == nil {
+		return
+	}
+	payload := JReaction{
+		ChatJID:         chatJID,
+		TargetMessageID: key.GetID(),
+		TargetFromMe:    key.GetFromMe(),
+		SenderJID:       senderJID,
+		Emoji:           r.GetText(),
+		Timestamp:       ts,
+	}
+	b, _ := json.Marshal(payload)
+	c.dispatch("Reaction", string(b))
 }
 
 func mediaFromSticker(m *waE2E.StickerMessage) *JMedia {

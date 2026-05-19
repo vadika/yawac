@@ -120,6 +120,23 @@ struct BridgeParticipantModel: Codable {
     }
 }
 
+struct BridgeReaction: Codable {
+    let chatJID: String
+    let targetMessageID: String
+    let targetFromMe: Bool
+    let senderJID: String
+    let emoji: String
+    let timestamp: Int64
+
+    enum CodingKeys: String, CodingKey {
+        case chatJID = "chat_jid"
+        case targetMessageID = "target_message_id"
+        case targetFromMe = "target_from_me"
+        case senderJID = "sender_jid"
+        case emoji, timestamp
+    }
+}
+
 struct BridgeContact: Codable, Identifiable {
     var id: String { jid }
     let jid: String

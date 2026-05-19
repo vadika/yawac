@@ -10,6 +10,9 @@ final class ConversationViewModel {
     var peerTyping: Bool = false
     var receiptStatus: [String: UIMessage.Status] = [:]
     var localPaths: [String: String] = [:]
+    // Per-message reactions: targetMessageID -> senderJID -> emoji.
+    // Nested so removing/updating a sender's reaction is O(1).
+    var reactionsBySender: [String: [String: String]] = [:]
     let client: WAClient
     private let context: ModelContext?
     private var downloadTasks: [String: Task<Void, Never>] = [:]
@@ -165,6 +168,26 @@ final class ConversationViewModel {
             fromMe: m.fromMe, timestamp: m.timestamp, kind: kind, text: text)
         context.insert(row)
         try? context.save()
+    }
+
+    /// Emoji aggregated for a message (one per unique sender, latest emoji wins).
+    func reactions(for messageID: String) -> [String] {
+        Array((reactionsBySender[messageID] ?? [:]).values)
+    }
+
+    func applyReaction(_ r: BridgeReaction) {
+        guard r.chatJID == chatJID else { return }
+        var byMsg = reactionsBySender[r.targetMessageID] ?? [:]
+        if r.emoji.isEmpty {
+            byMsg.removeValue(forKey: r.senderJID)
+        } else {
+            byMsg[r.senderJID] = r.emoji
+        }
+        if byMsg.isEmpty {
+            reactionsBySender.removeValue(forKey: r.targetMessageID)
+        } else {
+            reactionsBySender[r.targetMessageID] = byMsg
+        }
     }
 
     func applyReceipt(_ r: BridgeReceipt) {

@@ -48,7 +48,6 @@ final class ChatListViewModel {
             case "document": preview = "📄 Document"
             case "sticker":  preview = "Sticker"
             case "location": preview = "📍 Location"
-            case "reaction": preview = "Reacted"
             case "protocol", "system": preview = ""  // hide
             default:         preview = "[\(message.kind)]"
             }

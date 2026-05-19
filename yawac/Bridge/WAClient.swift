@@ -11,6 +11,7 @@ final class WAClient {
         case loggedOut(reason: String)
         case message(BridgeMessage)
         case receipt(BridgeReceipt)
+        case reaction(BridgeReaction)
         case presence(jid: String, online: Bool, lastSeen: Int64)
         case chatPresence(chat: String, sender: String, typing: Bool)
         case historySync(conversations: Int)
@@ -159,6 +160,10 @@ final class WAClient {
         case "Receipt":
             if let r = try? dec.decode(BridgeReceipt.self, from: data) {
                 return .receipt(r)
+            }
+        case "Reaction":
+            if let r = try? dec.decode(BridgeReaction.self, from: data) {
+                return .reaction(r)
             }
         case "Presence":
             struct P: Codable {

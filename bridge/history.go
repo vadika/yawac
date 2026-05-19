@@ -82,6 +82,10 @@ func (c *Client) dispatchWebMessage(chatJID string, wm *waWeb.WebMessageInfo) {
 			senderJID = c.wa.Store.ID.String()
 		}
 	}
+	if r := msg.GetReactionMessage(); r != nil {
+		c.dispatchReaction(chatJID, senderJID, int64(wm.GetMessageTimestamp()), r)
+		return
+	}
 	kind := classifyMessage(msg)
 	if kind == "protocol" || kind == "system" {
 		return // skip noise

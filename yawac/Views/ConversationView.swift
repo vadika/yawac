@@ -20,7 +20,8 @@ struct ConversationView: View {
                                         message: msg,
                                         status: vm.receiptStatus[msg.id],
                                         senderName: session.displayName(for: msg.senderJID),
-                                        localPath: vm.localPaths[msg.id]
+                                        localPath: vm.localPaths[msg.id],
+                                        reactions: vm.reactions(for: msg.id)
                                     ).id(msg.id)
                                 }
                             }
@@ -72,6 +73,8 @@ struct ConversationView: View {
                     vm.peerTyping = typing
                 case .receipt(let r) where r.chatJID == chatJID:
                     vm.applyReceipt(r)
+                case .reaction(let r) where r.chatJID == chatJID:
+                    vm.applyReaction(r)
                 default:
                     break
                 }
