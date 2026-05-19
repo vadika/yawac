@@ -42,6 +42,18 @@ final class SessionViewModel {
         }
     }
 
+    func logout() async {
+        try? client?.logout()
+        client = nil
+        qrCode = nil
+        syncing = false
+        syncedConversations = 0
+        state = .loading
+        eventTask?.cancel()
+        eventTask = nil
+        await boot()
+    }
+
     private func handle(_ event: WAClient.Event) {
         switch event {
         case .qr(let code):

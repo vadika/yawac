@@ -25,6 +25,12 @@ struct YawacApp: App {
         .windowStyle(.titleBar)
         .commands {
             CommandGroup(replacing: .newItem) {}
+            CommandMenu("Account") {
+                Button("Log Out") {
+                    Task { await session.logout() }
+                }
+                .keyboardShortcut("Q", modifiers: [.command, .shift])
+            }
         }
     }
 }
