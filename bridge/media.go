@@ -311,9 +311,30 @@ func (c *Client) DownloadMedia(refJSON, outPath string) (string, error) {
 			mmsType,
 		)
 		if ferr != nil {
-			return "", fmt.Errorf("download: %w (refresh also failed: %v)", err, ferr)
+			// Final attempt: force-refresh the media connection token (some
+			// 403s are caused by stale auth tokens) and retry once.
+			if _, refErr := c.wa.DangerousInternals().RefreshMediaConn(context.Background(), true); refErr == nil {
+				retry, retryErr := c.wa.DownloadMediaWithPath(
+					context.Background(),
+					r.DirectPath,
+					r.FileEncSHA256,
+					r.FileSHA256,
+					r.MediaKey,
+					int(r.FileLength),
+					mt,
+					mmsType,
+				)
+				if retryErr == nil {
+					data = retry
+				} else {
+					return "", fmt.Errorf("download: %w (refresh also failed: %v; retry after media-conn refresh: %v)", err, ferr, retryErr)
+				}
+			} else {
+				return "", fmt.Errorf("download: %w (refresh also failed: %v; media-conn refresh also failed: %v)", err, ferr, refErr)
+			}
+		} else {
+			data = fresh
 		}
-		data = fresh
 	}
 	if err := os.MkdirAll(filepath.Dir(outPath), 0o700); err != nil {
 		return "", fmt.Errorf("mkdir: %w", err)
