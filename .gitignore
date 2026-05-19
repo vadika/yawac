@@ -1,0 +1,24 @@
+# Go
+bridge/vendor/
+*.test
+*.out
+
+# gomobile build outputs
+build/
+Bridge.xcframework/
+Bridge.xcframework.zip
+
+# Xcode
+*.xcuserstate
+*.xcuserdata/
+DerivedData/
+.build/
+*.swiftpm
+Package.resolved
+
+# macOS
+.DS_Store
+
+# Local config
+.env
+*.local
