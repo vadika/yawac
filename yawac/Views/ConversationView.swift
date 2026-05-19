@@ -16,7 +16,7 @@ struct ConversationView: View {
                         ScrollView {
                             LazyVStack(spacing: 6) {
                                 ForEach(vm.messages) { msg in
-                                    MessageRow(message: msg).id(msg.id)
+                                    MessageRow(message: msg, status: vm.receiptStatus[msg.id]).id(msg.id)
                                 }
                             }
                             .padding()
@@ -57,6 +57,7 @@ struct ConversationView: View {
             let vm = ConversationViewModel(chatJID: chatJID, client: client, context: modelContext)
             vm.loadHistory()
             self.vm = vm
+            try? client.subscribePresence(chatJID)
             let stream = client.eventStream()
             for await event in stream {
                 switch event {
@@ -64,6 +65,8 @@ struct ConversationView: View {
                     vm.ingest(m)
                 case .chatPresence(let chat, _, let typing) where chat == chatJID:
                     vm.peerTyping = typing
+                case .receipt(let r) where r.chatJID == chatJID:
+                    vm.applyReceipt(r)
                 default:
                     break
                 }

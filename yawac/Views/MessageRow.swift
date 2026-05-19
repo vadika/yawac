@@ -2,14 +2,19 @@ import SwiftUI
 
 struct MessageRow: View {
     let message: UIMessage
+    let status: UIMessage.Status?
+
+    init(message: UIMessage, status: UIMessage.Status? = nil) {
+        self.message = message
+        self.status = status
+    }
 
     var body: some View {
         HStack {
             if message.fromMe { Spacer(minLength: 60) }
             VStack(alignment: message.fromMe ? .trailing : .leading, spacing: 2) {
                 bodyView
-                Text(message.timestamp, style: .time)
-                    .font(.caption2).foregroundStyle(.secondary)
+                footerView
             }
             .padding(8)
             .background(
@@ -31,6 +36,19 @@ struct MessageRow: View {
         case .system(let s):
             Text(s).font(.caption).foregroundStyle(.secondary)
         }
+    }
+
+    @ViewBuilder
+    private var footerView: some View {
+        HStack(spacing: 4) {
+            Text(message.timestamp, style: .time)
+            if message.fromMe, let status {
+                Image(systemName: statusIcon(status))
+                    .foregroundStyle(statusColor(status))
+            }
+        }
+        .font(.caption2)
+        .foregroundStyle(.secondary)
     }
 
     @ViewBuilder
@@ -62,5 +80,18 @@ struct MessageRow: View {
         case "sticker":  return "face.smiling"
         default:         return "doc"
         }
+    }
+
+    private func statusIcon(_ s: UIMessage.Status) -> String {
+        switch s {
+        case .sent:      return "checkmark"
+        case .delivered: return "checkmark.circle"
+        case .read:      return "checkmark.circle.fill"
+        case .played:    return "play.circle.fill"
+        }
+    }
+
+    private func statusColor(_ s: UIMessage.Status) -> Color {
+        s == .read || s == .played ? .blue : .secondary
     }
 }

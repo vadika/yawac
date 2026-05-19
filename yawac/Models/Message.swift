@@ -16,6 +16,15 @@ struct UIMessage: Identifiable, Hashable {
 }
 
 extension UIMessage {
+    enum Status: Hashable {
+        case sent
+        case delivered
+        case read
+        case played
+    }
+}
+
+extension UIMessage {
     init(_ b: BridgeMessage) {
         self.id = b.id
         self.chatJID = b.chatJID

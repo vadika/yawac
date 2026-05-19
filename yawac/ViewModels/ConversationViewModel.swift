@@ -8,6 +8,7 @@ final class ConversationViewModel {
     var messages: [UIMessage] = []
     var draft: String = ""
     var peerTyping: Bool = false
+    var receiptStatus: [String: UIMessage.Status] = [:]
     let client: WAClient
     private let context: ModelContext?
 
@@ -52,6 +53,7 @@ final class ConversationViewModel {
                 timestamp: Date(timeIntervalSince1970: TimeInterval(res.timestamp)),
                 body: .text(body))
             messages.append(m)
+            receiptStatus[m.id] = .sent
             persistOutgoing(m, kind: "text", text: body)
         } catch {
             messages.append(UIMessage(
@@ -79,7 +81,8 @@ final class ConversationViewModel {
     func sendImage(at url: URL) async {
         let caption = draft
         do {
-            _ = try client.sendImage(chatJID, path: url.path, caption: caption)
+            let res = try client.sendImage(chatJID, path: url.path, caption: caption)
+            receiptStatus[res.messageID] = .sent
             draft = ""
         } catch {
             messages.append(UIMessage(
@@ -115,5 +118,34 @@ final class ConversationViewModel {
             fromMe: m.fromMe, timestamp: m.timestamp, kind: kind, text: text)
         context.insert(row)
         try? context.save()
+    }
+
+    func applyReceipt(_ r: BridgeReceipt) {
+        let status: UIMessage.Status
+        switch r.status {
+        case "read":      status = .read
+        case "played":    status = .played
+        case "delivered": status = .delivered
+        default:          status = .sent
+        }
+        for id in r.messageIDs {
+            // Only downgrade-prevent: read > delivered > sent
+            if let existing = receiptStatus[id] {
+                if rank(status) > rank(existing) {
+                    receiptStatus[id] = status
+                }
+            } else {
+                receiptStatus[id] = status
+            }
+        }
+    }
+
+    private func rank(_ s: UIMessage.Status) -> Int {
+        switch s {
+        case .sent:      return 0
+        case .delivered: return 1
+        case .played:    return 2
+        case .read:      return 3
+        }
     }
 }
