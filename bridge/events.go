@@ -98,5 +98,12 @@ func (c *Client) dispatchChatPresence(evt *events.ChatPresence) {
 	c.dispatch("ChatPresence", string(b))
 }
 
-// stubs — filled in later tasks
-func (c *Client) dispatchHistory(*events.HistorySync) {}
+func (c *Client) dispatchHistory(evt *events.HistorySync) {
+	convs := evt.Data.GetConversations()
+	payload := map[string]any{
+		"sync_type":     evt.Data.GetSyncType().String(),
+		"conversations": len(convs),
+	}
+	b, _ := json.Marshal(payload)
+	c.dispatch("HistorySync", string(b))
+}
