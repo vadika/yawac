@@ -25,13 +25,20 @@ final class ConversationViewModel {
         self.context = context
     }
 
+    /// Hard cap on initial load — large chats freeze SwiftUI's LazyVStack
+    /// prefetcher if we hand it 10k+ rows at once. Newest N kept; older
+    /// rows remain in storage and can be paged in later.
+    static let historyLoadLimit = 500
+
     func loadHistory() {
         guard let context else { return }
         let jid = chatJID
-        let descriptor = FetchDescriptor<PersistedMessage>(
+        var descriptor = FetchDescriptor<PersistedMessage>(
             predicate: #Predicate { $0.chatJID == jid },
-            sortBy: [SortDescriptor(\.timestamp, order: .forward)])
-        if let rows = try? context.fetch(descriptor) {
+            sortBy: [SortDescriptor(\.timestamp, order: .reverse)])
+        descriptor.fetchLimit = Self.historyLoadLimit
+        if let recentRows = try? context.fetch(descriptor) {
+            let rows = recentRows.reversed().map { $0 }
             // Sweep legacy rows of non-displayable kinds (e.g. reactions persisted
             // by older builds before the dedicated Reaction event).
             for p in rows where p.kind == "reaction" || p.kind == "protocol" || p.kind == "system" {
