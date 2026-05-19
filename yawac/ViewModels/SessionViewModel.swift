@@ -13,6 +13,8 @@ final class SessionViewModel {
     var state: State = .loading
     var qrCode: String?
     var client: WAClient?
+    var syncing: Bool = false
+    var syncedConversations: Int = 0
 
     private var eventTask: Task<Void, Never>?
 
@@ -45,9 +47,16 @@ final class SessionViewModel {
         case .qr(let code):
             qrCode = code
             state = .needsPair
-        case .pairSuccess, .connected:
+        case .pairSuccess:
             qrCode = nil
             state = .ready
+        case .connected:
+            qrCode = nil
+            state = .ready
+            syncing = true
+        case .historySync(let n):
+            syncing = false
+            syncedConversations += n
         case .loggedOut:
             state = .needsPair
         case .disconnected:
