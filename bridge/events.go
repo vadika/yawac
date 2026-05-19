@@ -99,6 +99,7 @@ func (c *Client) dispatchChatPresence(evt *events.ChatPresence) {
 }
 
 func (c *Client) dispatchHistory(evt *events.HistorySync) {
+	c.applyHistorySync(evt)
 	convs := evt.Data.GetConversations()
 	payload := map[string]any{
 		"sync_type":     evt.Data.GetSyncType().String(),

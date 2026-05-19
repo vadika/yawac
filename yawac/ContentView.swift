@@ -34,7 +34,16 @@ struct ContentView: View {
             vm.mergeContacts(contacts)
             let stream = client.eventStream()
             for await event in stream {
-                if case .message(let m) = event { vm.ingest(m) }
+                switch event {
+                case .message(let m):
+                    vm.ingest(m)
+                case .historySync:
+                    let cs = (try? client.listContacts()) ?? []
+                    vm.resolveNames(cs)
+                    vm.mergeContacts(cs)
+                default:
+                    break
+                }
             }
         }
     }
