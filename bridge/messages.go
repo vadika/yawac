@@ -52,6 +52,17 @@ func (c *Client) dispatchMessage(evt *events.Message) {
 	case evt.Message.GetExtendedTextMessage() != nil:
 		jm.Text = evt.Message.GetExtendedTextMessage().GetText()
 	}
+	if m := evt.Message.GetImageMessage(); m != nil {
+		jm.Media = mediaFromImage(m)
+	} else if m := evt.Message.GetVideoMessage(); m != nil {
+		jm.Media = mediaFromVideo(m)
+	} else if m := evt.Message.GetAudioMessage(); m != nil {
+		jm.Media = mediaFromAudio(m)
+	} else if m := evt.Message.GetDocumentMessage(); m != nil {
+		jm.Media = mediaFromDocument(m)
+	} else if m := evt.Message.GetStickerMessage(); m != nil {
+		jm.Media = mediaFromSticker(m)
+	}
 	b, _ := json.Marshal(jm)
 	c.dispatch("Message", string(b))
 }
@@ -73,4 +84,30 @@ func classifyMessage(m *waE2E.Message) string {
 	default:
 		return "text"
 	}
+}
+
+func mediaFromImage(m *waE2E.ImageMessage) *JMedia {
+	return &JMedia{MimeType: m.GetMimetype(), Caption: m.GetCaption(),
+		Width: int(m.GetWidth()), Height: int(m.GetHeight()),
+		SizeBytes: int64(m.GetFileLength())}
+}
+
+func mediaFromVideo(m *waE2E.VideoMessage) *JMedia {
+	return &JMedia{MimeType: m.GetMimetype(), Caption: m.GetCaption(),
+		Width: int(m.GetWidth()), Height: int(m.GetHeight()),
+		Duration: int(m.GetSeconds()), SizeBytes: int64(m.GetFileLength())}
+}
+
+func mediaFromAudio(m *waE2E.AudioMessage) *JMedia {
+	return &JMedia{MimeType: m.GetMimetype(),
+		Duration: int(m.GetSeconds()), SizeBytes: int64(m.GetFileLength())}
+}
+
+func mediaFromDocument(m *waE2E.DocumentMessage) *JMedia {
+	return &JMedia{MimeType: m.GetMimetype(), Caption: m.GetCaption(),
+		SizeBytes: int64(m.GetFileLength())}
+}
+
+func mediaFromSticker(m *waE2E.StickerMessage) *JMedia {
+	return &JMedia{MimeType: m.GetMimetype(), SizeBytes: int64(m.GetFileLength())}
 }
