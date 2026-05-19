@@ -77,6 +77,8 @@ struct ConversationView: View {
                     vm.applyReceipt(r)
                 case .reaction(let r) where r.chatJID == chatJID:
                     vm.applyReaction(r)
+                case .mediaRetry(let mid, let ok, let newPath, let err):
+                    vm.applyMediaRetry(messageID: mid, ok: ok, newDirectPath: newPath, error: err)
                 default:
                     break
                 }

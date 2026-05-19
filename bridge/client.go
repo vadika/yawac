@@ -17,6 +17,12 @@ type Client struct {
 	sink   EventSink
 	cancel context.CancelFunc
 	dbPath string
+
+	// pendingRetry tracks in-flight media retry requests, keyed by message
+	// ID, so we can resume a download once the phone sends back the new
+	// DirectPath via *events.MediaRetry. Process-local only (not persisted).
+	retryMu      sync.Mutex
+	pendingRetry map[string]MediaRef
 }
 
 // NewClient initializes a SQLite-backed bridge Client at dbPath.
@@ -35,7 +41,11 @@ func NewClient(dbPath string) (*Client, error) {
 	}
 	log := waLog.Stdout("whatsmeow", "INFO", true)
 	wa := whatsmeow.NewClient(dev, log)
-	return &Client{wa: wa, dbPath: dbPath}, nil
+	return &Client{
+		wa:           wa,
+		dbPath:       dbPath,
+		pendingRetry: map[string]MediaRef{},
+	}, nil
 }
 
 // Close disconnects and releases resources.

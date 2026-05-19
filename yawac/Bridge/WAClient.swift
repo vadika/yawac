@@ -15,6 +15,7 @@ final class WAClient {
         case presence(jid: String, online: Bool, lastSeen: Int64)
         case chatPresence(chat: String, sender: String, typing: Bool)
         case historySync(conversations: Int)
+        case mediaRetry(messageID: String, ok: Bool, newDirectPath: String?, error: String?)
         case unknown(kind: String, payload: String)
     }
 
@@ -105,6 +106,10 @@ final class WAClient {
         let out = go.downloadMedia(refJSON, outPath: outPath, error: &err)
         if let err { throw err }
         return out
+    }
+
+    nonisolated func requestMediaRetry(chatJID: String, senderJID: String, msgID: String, fromMe: Bool, refJSON: String) throws {
+        try go.requestMediaRetry(chatJID, senderJID: senderJID, msgID: msgID, fromMe: fromMe, refJSON: refJSON)
     }
 
     nonisolated func fetchProfilePicture(jid: String, outPath: String) throws -> String {
@@ -207,6 +212,22 @@ final class WAClient {
             struct H: Codable { let conversations: Int }
             if let h = try? dec.decode(H.self, from: data) {
                 return .historySync(conversations: h.conversations)
+            }
+        case "MediaRetry":
+            struct R: Codable {
+                let messageID: String
+                let ok: Bool
+                let directPath: String?
+                let error: String?
+                enum CodingKeys: String, CodingKey {
+                    case messageID = "message_id"
+                    case ok
+                    case directPath = "direct_path"
+                    case error
+                }
+            }
+            if let r = try? dec.decode(R.self, from: data) {
+                return .mediaRetry(messageID: r.messageID, ok: r.ok, newDirectPath: r.directPath, error: r.error)
             }
         default:
             break

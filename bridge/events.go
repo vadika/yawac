@@ -56,6 +56,8 @@ func (c *Client) handleWAEvent(evt any) {
 		c.dispatchChatPresence(v)
 	case *events.HistorySync:
 		c.dispatchHistory(v)
+	case *events.MediaRetry:
+		c.handleMediaRetry(v)
 	}
 }
 

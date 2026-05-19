@@ -18,6 +18,10 @@ final class ConversationViewModel {
     let client: WAClient
     private let context: ModelContext?
     private var downloadTasks: [String: Task<Void, Never>] = [:]
+    // One retry-request per message id per session — avoids hammering the
+    // phone with redundant SendMediaRetryReceipt calls if download retries
+    // keep failing.
+    private var retriesRequested: Set<String> = []
 
     init(chatJID: String, client: WAClient, context: ModelContext? = nil) {
         self.chatJID = chatJID
@@ -149,11 +153,62 @@ final class ConversationViewModel {
                     self.downloadErrors[id] = nil
                 case .failed(let reason):
                     self.downloadErrors[id] = reason
+                    self.tryRequestMediaRetry(messageID: id, reason: reason)
                 case .missingRef:
                     self.downloadErrors[id] = "no ref"
                 }
             }
             self?.downloadTasks[id] = nil
+        }
+    }
+
+    private func tryRequestMediaRetry(messageID: String, reason: String) {
+        guard !retriesRequested.contains(messageID) else { return }
+        let lower = reason.lowercased()
+        guard lower.contains("403") || lower.contains("404") || lower.contains("410") else { return }
+        guard let context else { return }
+        let descriptor = FetchDescriptor<PersistedMessage>(predicate: #Predicate { $0.id == messageID })
+        guard let row = try? context.fetch(descriptor).first,
+              let refJSON = row.mediaRefJSON else { return }
+        retriesRequested.insert(messageID)
+        do {
+            try client.requestMediaRetry(
+                chatJID: row.chatJID,
+                senderJID: row.fromMe ? row.chatJID : row.senderJID,
+                msgID: messageID,
+                fromMe: row.fromMe,
+                refJSON: refJSON)
+            downloadErrors[messageID] = "asking phone to re-upload…"
+        } catch {
+            downloadErrors[messageID] = "retry request failed: \(error.localizedDescription)"
+        }
+    }
+
+    func applyMediaRetry(messageID: String, ok: Bool, newDirectPath: String?, error: String?) {
+        guard let context else { return }
+        let descriptor = FetchDescriptor<PersistedMessage>(predicate: #Predicate { $0.id == messageID })
+        guard let row = try? context.fetch(descriptor).first,
+              let oldRefJSON = row.mediaRefJSON else { return }
+        if !ok {
+            downloadErrors[messageID] = "phone retry failed: \(error ?? "?")"
+            return
+        }
+        guard let newPath = newDirectPath, !newPath.isEmpty else {
+            downloadErrors[messageID] = "phone retry returned no path"
+            return
+        }
+        // Patch direct_path inside the stored MediaRef JSON so future
+        // retries (and the immediate re-download below) use the fresh path.
+        var refDict = (try? JSONSerialization.jsonObject(with: Data(oldRefJSON.utf8))) as? [String: Any] ?? [:]
+        refDict["direct_path"] = newPath
+        if let newJSON = try? JSONSerialization.data(withJSONObject: refDict),
+           let s = String(data: newJSON, encoding: .utf8) {
+            row.mediaRefJSON = s
+            try? context.save()
+            downloadErrors[messageID] = nil
+            downloadTasks[messageID]?.cancel()
+            downloadTasks[messageID] = nil
+            ensureDownloadFromHistory(id: messageID, kind: row.kind, refJSON: s)
         }
     }
 
