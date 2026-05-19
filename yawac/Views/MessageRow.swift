@@ -185,16 +185,25 @@ struct MessageRow: View {
     @ViewBuilder
     private func documentBubble(path: String?, fileName: String?) -> some View {
         HStack(spacing: 8) {
-            Image(systemName: "doc")
+            Image(systemName: downloadError != nil ? "exclamationmark.triangle.fill" : "doc")
                 .font(.title2)
-                .foregroundStyle(.tint)
+                .foregroundStyle(downloadError != nil ? Color.orange : Color.accentColor)
             VStack(alignment: .leading, spacing: 2) {
                 Text(fileName ?? "Document").font(.callout).bold()
                 if path != nil {
                     Text("Tap to open").font(.caption2).foregroundStyle(.secondary)
+                } else if let err = downloadError {
+                    Text(err).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
                 } else {
-                    Text("Downloading…").font(.caption2).foregroundStyle(.secondary)
+                    HStack(spacing: 4) {
+                        ProgressView().controlSize(.small)
+                        Text("Downloading…").font(.caption2).foregroundStyle(.secondary)
+                    }
                 }
+            }
+            if path == nil, downloadError != nil, let retry = onRetryDownload {
+                Spacer()
+                Button("Retry", action: retry).buttonStyle(.borderless).font(.caption)
             }
         }
         .padding(6)

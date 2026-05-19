@@ -74,9 +74,14 @@ final class ConversationViewModel {
                     continue
                 }
                 let downloadable: Set<String> = ["image", "sticker", "video", "audio", "document"]
-                guard downloadable.contains(p.kind),
-                      let refJSON = p.mediaRefJSON,
-                      downloadTasks[p.id] == nil else { continue }
+                guard downloadable.contains(p.kind) else { continue }
+                if downloadTasks[p.id] != nil { continue }
+                guard let refJSON = p.mediaRefJSON else {
+                    // Persisted before mediaRefJSON column existed — no way to
+                    // fetch. Surface so user isn't stuck on infinite spinner.
+                    downloadErrors[p.id] = "no download info (re-pair to refresh)"
+                    continue
+                }
                 ensureDownloadFromHistory(id: p.id, kind: p.kind, refJSON: refJSON)
             }
         }
