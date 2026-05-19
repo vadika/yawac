@@ -21,6 +21,10 @@ final class SessionViewModel {
         for c in cs { contactNames[c.jid] = c.name }
     }
 
+    func ingestGroups(_ gs: [BridgeGroupModel]) {
+        for g in gs where !g.name.isEmpty { contactNames[g.jid] = g.name }
+    }
+
     func displayName(for jid: String) -> String {
         if let n = contactNames[jid] { return n }
         if let at = jid.firstIndex(of: "@") {
