@@ -26,6 +26,9 @@ struct ContentView: View {
             guard let client = session.client else { return }
             let vm = ChatListViewModel(client: client, context: modelContext)
             self.chatList = vm
+            let groups = GroupsViewModel(client: client)
+            await groups.refresh()
+            vm.mergeGroups(groups.groups)
             let stream = client.eventStream()
             for await event in stream {
                 if case .message(let m) = event { vm.ingest(m) }

@@ -56,6 +56,19 @@ final class ChatListViewModel {
         upsertPersisted(chats[i])
     }
 
+    func mergeGroups(_ gs: [BridgeGroupModel]) {
+        for g in gs where !chats.contains(where: { $0.jid == g.jid }) {
+            chats.append(Chat(
+                jid: g.jid,
+                name: g.name.isEmpty ? g.jid : g.name,
+                lastMessage: g.topic,
+                lastTimestamp: g.created,
+                unread: 0))
+            upsertPersisted(chats[chats.count - 1])
+        }
+        chats.sort { $0.lastTimestamp > $1.lastTimestamp }
+    }
+
     private func upsertPersisted(_ c: Chat) {
         guard let context else { return }
         let jid = c.jid
