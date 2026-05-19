@@ -1,0 +1,47 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Install gomobile + init
+        run: |
+          go install golang.org/x/mobile/cmd/gomobile@latest
+          go install golang.org/x/mobile/cmd/gobind@latest
+          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
+          gomobile init
+
+      - name: Go tests
+        run: |
+          cd bridge
+          go test -short ./...
+
+      - name: Build XCFramework
+        run: ./scripts/build-xcframework.sh
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Xcode build & test
+        run: |
+          xcodebuild \
+            -project yawac.xcodeproj \
+            -scheme yawac \
+            -destination 'platform=macOS' \
+            -configuration Debug \
+            build test \
+            CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
