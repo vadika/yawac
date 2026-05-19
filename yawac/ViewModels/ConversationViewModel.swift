@@ -14,6 +14,7 @@ final class ConversationViewModel {
     // Per-message reactions: targetMessageID -> senderJID -> emoji.
     // Nested so removing/updating a sender's reaction is O(1).
     var reactionsBySender: [String: [String: String]] = [:]
+    var downloadErrors: [String: String] = [:]
     let client: WAClient
     private let context: ModelContext?
     private var downloadTasks: [String: Task<Void, Never>] = [:]
@@ -74,6 +75,26 @@ final class ConversationViewModel {
         }
     }
 
+    func retryDownload(messageID: String, kind: String, refJSON: String) {
+        downloadErrors[messageID] = nil
+        downloadTasks[messageID]?.cancel()
+        downloadTasks[messageID] = nil
+        ensureDownloadFromHistory(id: messageID, kind: kind, refJSON: refJSON)
+    }
+
+    func retryHandler(for message: UIMessage) -> (() -> Void)? {
+        guard case .media(let kind, _, _, _) = message.body else { return nil }
+        guard let context else { return nil }
+        let id = message.id
+        let descriptor = FetchDescriptor<PersistedMessage>(
+            predicate: #Predicate { $0.id == id })
+        guard let row = try? context.fetch(descriptor).first,
+              let refJSON = row.mediaRefJSON else { return nil }
+        return { [weak self] in
+            self?.retryDownload(messageID: id, kind: kind, refJSON: refJSON)
+        }
+    }
+
     private func ensureDownload(for message: BridgeMessage) {
         guard let media = message.media, let ref = media.ref else { return }
         let kind = message.kind
@@ -102,10 +123,18 @@ final class ConversationViewModel {
         }
         let client = self.client
         downloadTasks[id] = Task { @MainActor [weak self] in
-            let url = await MediaCache.shared.ensure(
+            let result = await MediaCache.shared.ensure(
                 messageID: id, ext: ext, refJSON: refJSON, using: client)
-            if let url, let self {
-                self.localPaths[id] = url.path
+            if let self {
+                switch result {
+                case .file(let url):
+                    self.localPaths[id] = url.path
+                    self.downloadErrors[id] = nil
+                case .failed(let reason):
+                    self.downloadErrors[id] = reason
+                case .missingRef:
+                    self.downloadErrors[id] = "no ref"
+                }
             }
             self?.downloadTasks[id] = nil
         }

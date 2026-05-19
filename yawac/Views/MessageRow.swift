@@ -8,15 +8,21 @@ struct MessageRow: View {
     let senderName: String?
     let localPath: String?
     let reactions: [String]
+    let downloadError: String?
+    let onRetryDownload: (() -> Void)?
 
     init(message: UIMessage, status: UIMessage.Status? = nil,
          senderName: String? = nil, localPath: String? = nil,
-         reactions: [String] = []) {
+         reactions: [String] = [],
+         downloadError: String? = nil,
+         onRetryDownload: (() -> Void)? = nil) {
         self.message = message
         self.status = status
         self.senderName = senderName
         self.localPath = localPath
         self.reactions = reactions
+        self.downloadError = downloadError
+        self.onRetryDownload = onRetryDownload
     }
 
     private var isGroupChat: Bool { message.chatJID.hasSuffix("@g.us") }
@@ -203,10 +209,23 @@ struct MessageRow: View {
 
     @ViewBuilder
     private func downloadingPlaceholder(_ icon: String) -> some View {
-        HStack(spacing: 6) {
-            Image(systemName: icon).foregroundStyle(.secondary)
-            ProgressView().controlSize(.small)
-            Text("Downloading…").font(.caption).foregroundStyle(.secondary)
+        if let err = downloadError {
+            HStack(spacing: 6) {
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Download failed").font(.caption)
+                    Text(err).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
+                }
+                if let retry = onRetryDownload {
+                    Button("Retry", action: retry).buttonStyle(.borderless).font(.caption)
+                }
+            }
+        } else {
+            HStack(spacing: 6) {
+                Image(systemName: icon).foregroundStyle(.secondary)
+                ProgressView().controlSize(.small)
+                Text("Downloading…").font(.caption).foregroundStyle(.secondary)
+            }
         }
     }
 

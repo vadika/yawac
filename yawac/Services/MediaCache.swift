@@ -17,16 +17,23 @@ actor MediaCache {
         baseDir.appendingPathComponent("\(messageID).\(ext)")
     }
 
+    enum Result {
+        case file(URL)
+        case missingRef
+        case failed(String)
+    }
+
     /// Returns a local URL for the media of `messageID`. If `refJSON` is non-nil
     /// and the file doesn't exist yet, kicks off a download via the bridge.
-    /// Otherwise returns the file URL if it exists or nil.
+    /// Returns `.failed` with a reason on download error so callers can surface it.
     func ensure(messageID: String, ext: String,
-                refJSON: String?, using client: WAClient) async -> URL? {
+                refJSON: String?, using client: WAClient) async -> Result {
         let url = file(for: messageID, ext: ext)
-        if FileManager.default.fileExists(atPath: url.path) { return url }
-        guard let refJSON else { return nil }
+        if FileManager.default.fileExists(atPath: url.path) { return .file(url) }
+        guard let refJSON else { return .missingRef }
         if let t = inflight[messageID] {
-            return try? await t.value
+            do { return .file(try await t.value) }
+            catch { return .failed(error.localizedDescription) }
         }
         let task = Task<URL, Error> {
             try await MainActor.run {
@@ -36,6 +43,10 @@ actor MediaCache {
         }
         inflight[messageID] = task
         defer { inflight[messageID] = nil }
-        return try? await task.value
+        do {
+            return .file(try await task.value)
+        } catch {
+            return .failed(error.localizedDescription)
+        }
     }
 }

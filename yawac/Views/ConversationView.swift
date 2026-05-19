@@ -21,7 +21,9 @@ struct ConversationView: View {
                                         status: vm.receiptStatus[msg.id],
                                         senderName: session.displayName(for: msg.senderJID),
                                         localPath: vm.localPaths[msg.id],
-                                        reactions: vm.reactions(for: msg.id)
+                                        reactions: vm.reactions(for: msg.id),
+                                        downloadError: vm.downloadErrors[msg.id],
+                                        onRetryDownload: vm.retryHandler(for: msg)
                                     ).id(msg.id)
                                 }
                             }
