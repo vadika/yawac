@@ -13,3 +13,9 @@ const bridgeVersion = "yawac-bridge/0.1.0"
 func Version() string {
 	return bridgeVersion
 }
+
+// EventSink is implemented on the Swift side and receives bridge events as
+// JSON-encoded payloads. The type field discriminates the JSON shape.
+type EventSink interface {
+	OnEvent(eventType string, jsonPayload string)
+}
