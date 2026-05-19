@@ -59,7 +59,6 @@ func (c *Client) handleWAEvent(evt any) {
 }
 
 // stubs — filled in later tasks
-func (c *Client) dispatchMessage(*events.Message)           {}
 func (c *Client) dispatchReceipt(*events.Receipt)           {}
 func (c *Client) dispatchPresence(*events.Presence)         {}
 func (c *Client) dispatchChatPresence(*events.ChatPresence) {}
