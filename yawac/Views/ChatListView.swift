@@ -7,9 +7,7 @@ struct ChatListView: View {
     var body: some View {
         List(vm.chats, selection: $selection) { chat in
             HStack(alignment: .top, spacing: 8) {
-                Circle().fill(.gray.opacity(0.3))
-                    .frame(width: 40, height: 40)
-                    .overlay(Text(String(chat.name.prefix(1))).bold())
+                AvatarView(jid: chat.jid, name: chat.name, size: 40)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(chat.name).font(.headline).lineLimit(1)
                     Text(chat.lastMessage).font(.subheadline)

@@ -81,6 +81,13 @@ final class WAClient {
         return out
     }
 
+    func fetchProfilePicture(jid: String, outPath: String) throws -> String {
+        var err: NSError?
+        let result = go.fetchProfilePicture(jid, outPath: outPath, error: &err)
+        if let err { throw err }
+        return result
+    }
+
     func listGroups() throws -> [BridgeGroupModel] {
         var err: NSError?
         let json = go.listGroups(&err)

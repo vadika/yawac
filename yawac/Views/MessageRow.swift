@@ -28,11 +28,14 @@ struct MessageRow: View {
     var body: some View {
         HStack {
             if message.fromMe { Spacer(minLength: 60) }
-            VStack(alignment: message.fromMe ? .trailing : .leading, spacing: 2) {
+            VStack(alignment: message.fromMe ? .trailing : .leading, spacing: 4) {
                 if !message.fromMe && isGroupChat {
-                    Text(senderDisplay)
-                        .font(.caption).bold()
-                        .foregroundStyle(.tint)
+                    HStack(spacing: 6) {
+                        AvatarView(jid: message.senderJID, name: senderDisplay, size: 24)
+                        Text(senderDisplay)
+                            .font(.caption).bold()
+                            .foregroundStyle(.tint)
+                    }
                 }
                 bodyView
                 footerView
