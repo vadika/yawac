@@ -31,3 +31,6 @@ targets:
       - path: yawacTests
     dependencies:
       - target: yawac
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
