@@ -1,6 +1,7 @@
 import Foundation
 import Observation
 import SwiftData
+import UniformTypeIdentifiers
 
 @Observable @MainActor
 final class ConversationViewModel {
@@ -143,10 +144,24 @@ final class ConversationViewModel {
         try? client.sendTyping(chatJID, typing)
     }
 
-    func sendImage(at url: URL) async {
+    func sendAttachment(at url: URL) async {
         let caption = draft
+        let type = (try? url.resourceValues(forKeys: [.contentTypeKey]))?.contentType
         do {
-            let res = try client.sendImage(chatJID, path: url.path, caption: caption)
+            let res: BridgeSendResult
+            if let type {
+                if type.conforms(to: .image) {
+                    res = try client.sendImage(chatJID, path: url.path, caption: caption)
+                } else if type.conforms(to: .movie) || type.conforms(to: .video) {
+                    res = try client.sendVideo(chatJID, path: url.path, caption: caption)
+                } else if type.conforms(to: .audio) {
+                    res = try client.sendAudio(chatJID, path: url.path)
+                } else {
+                    res = try client.sendDocument(chatJID, path: url.path, caption: caption)
+                }
+            } else {
+                res = try client.sendDocument(chatJID, path: url.path, caption: caption)
+            }
             receiptStatus[res.messageID] = .sent
             draft = ""
         } catch {
@@ -156,7 +171,7 @@ final class ConversationViewModel {
                 senderJID: "system",
                 fromMe: false,
                 timestamp: .now,
-                body: .system("send image failed: \(error.localizedDescription)")))
+                body: .system("send failed: \(error.localizedDescription)")))
         }
     }
 

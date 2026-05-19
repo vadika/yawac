@@ -75,6 +75,27 @@ final class WAClient {
         return try JSONDecoder().decode(BridgeSendResult.self, from: Data(json.utf8))
     }
 
+    func sendVideo(_ chatJID: String, path: String, caption: String) throws -> BridgeSendResult {
+        var err: NSError?
+        let json = go.sendVideo(chatJID, filePath: path, caption: caption, error: &err)
+        if let err { throw err }
+        return try JSONDecoder().decode(BridgeSendResult.self, from: Data(json.utf8))
+    }
+
+    func sendAudio(_ chatJID: String, path: String) throws -> BridgeSendResult {
+        var err: NSError?
+        let json = go.sendAudio(chatJID, filePath: path, error: &err)
+        if let err { throw err }
+        return try JSONDecoder().decode(BridgeSendResult.self, from: Data(json.utf8))
+    }
+
+    func sendDocument(_ chatJID: String, path: String, caption: String) throws -> BridgeSendResult {
+        var err: NSError?
+        let json = go.sendDocument(chatJID, filePath: path, caption: caption, error: &err)
+        if let err { throw err }
+        return try JSONDecoder().decode(BridgeSendResult.self, from: Data(json.utf8))
+    }
+
     func downloadMedia(_ refJSON: String, to outPath: String) throws -> String {
         var err: NSError?
         let out = go.downloadMedia(refJSON, outPath: outPath, error: &err)

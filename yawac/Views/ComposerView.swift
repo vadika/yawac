@@ -8,7 +8,7 @@ struct ComposerView: View {
     var body: some View {
         HStack {
             Button {
-                attachImage()
+                attachFile()
             } label: {
                 Image(systemName: "paperclip")
             }
@@ -34,14 +34,13 @@ struct ComposerView: View {
         .padding()
     }
 
-    private func attachImage() {
+    private func attachFile() {
         let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.image]
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
         if panel.runModal() == .OK, let url = panel.url {
-            Task { await vm.sendImage(at: url) }
+            Task { await vm.sendAttachment(at: url) }
         }
     }
 }
