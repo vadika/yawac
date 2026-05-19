@@ -17,6 +17,16 @@ final class SessionViewModel {
     var syncedConversations: Int = 0
 
     private var eventTask: Task<Void, Never>?
+    private var syncWatchdog: Task<Void, Never>?
+
+    private func armSyncWatchdog() {
+        syncWatchdog?.cancel()
+        syncWatchdog = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(20))
+            guard !Task.isCancelled else { return }
+            self?.syncing = false
+        }
+    }
 
     func boot() async {
         do {
@@ -46,6 +56,7 @@ final class SessionViewModel {
         try? client?.logout()
         client = nil
         qrCode = nil
+        syncWatchdog?.cancel()
         syncing = false
         syncedConversations = 0
         state = .loading
@@ -66,11 +77,14 @@ final class SessionViewModel {
             qrCode = nil
             state = .ready
             syncing = true
+            armSyncWatchdog()
         case .historySync(let n):
-            syncing = false
             syncedConversations += n
+            armSyncWatchdog()
         case .loggedOut:
             state = .needsPair
+            syncWatchdog?.cancel()
+            syncing = false
         case .disconnected:
             break
         default:
