@@ -34,11 +34,13 @@ func (c *Client) RequestMediaRetry(chatJID, senderJID, msgID string, fromMe bool
 		return fmt.Errorf("parse sender jid: %w", err)
 	}
 
+	isGroup := chat.Server == types.GroupServer
 	info := &types.MessageInfo{
 		MessageSource: types.MessageSource{
 			Chat:     chat,
 			Sender:   sender,
 			IsFromMe: fromMe,
+			IsGroup:  isGroup,
 		},
 		ID: msgID,
 	}
