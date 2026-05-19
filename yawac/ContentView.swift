@@ -1,7 +1,9 @@
 import SwiftUI
+import SwiftData
 
 struct ContentView: View {
     @Environment(SessionViewModel.self) private var session
+    @Environment(\.modelContext) private var modelContext
     @State private var chatList: ChatListViewModel?
     @State private var selectedChat: Chat.ID?
 
@@ -22,7 +24,7 @@ struct ContentView: View {
         }
         .task {
             guard let client = session.client else { return }
-            let vm = ChatListViewModel(client: client)
+            let vm = ChatListViewModel(client: client, context: modelContext)
             self.chatList = vm
             let stream = client.eventStream()
             for await event in stream {

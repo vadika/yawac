@@ -1,8 +1,10 @@
 import SwiftUI
+import SwiftData
 
 struct ConversationView: View {
     let chatJID: String
     @Environment(SessionViewModel.self) private var session
+    @Environment(\.modelContext) private var modelContext
     @State private var vm: ConversationViewModel?
 
     var body: some View {
@@ -40,7 +42,8 @@ struct ConversationView: View {
         .navigationTitle(chatJID)
         .task(id: chatJID) {
             guard let client = session.client else { return }
-            let vm = ConversationViewModel(chatJID: chatJID, client: client)
+            let vm = ConversationViewModel(chatJID: chatJID, client: client, context: modelContext)
+            vm.loadHistory()
             self.vm = vm
             let stream = client.eventStream()
             for await event in stream {
