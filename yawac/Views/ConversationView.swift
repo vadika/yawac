@@ -19,7 +19,8 @@ struct ConversationView: View {
                                     MessageRow(
                                         message: msg,
                                         status: vm.receiptStatus[msg.id],
-                                        senderName: session.displayName(for: msg.senderJID)
+                                        senderName: session.displayName(for: msg.senderJID),
+                                        localPath: vm.localPaths[msg.id]
                                     ).id(msg.id)
                                 }
                             }

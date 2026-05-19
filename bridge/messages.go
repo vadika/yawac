@@ -95,27 +95,95 @@ func classifyMessage(m *waE2E.Message) string {
 }
 
 func mediaFromImage(m *waE2E.ImageMessage) *JMedia {
-	return &JMedia{MimeType: m.GetMimetype(), Caption: m.GetCaption(),
-		Width: int(m.GetWidth()), Height: int(m.GetHeight()),
-		SizeBytes: int64(m.GetFileLength())}
+	return &JMedia{
+		MimeType:  m.GetMimetype(),
+		Caption:   m.GetCaption(),
+		Width:     int(m.GetWidth()),
+		Height:    int(m.GetHeight()),
+		SizeBytes: int64(m.GetFileLength()),
+		Ref: &MediaRef{
+			Kind:          "image",
+			URL:           m.GetURL(),
+			DirectPath:    m.GetDirectPath(),
+			MediaKey:      m.GetMediaKey(),
+			FileEncSHA256: m.GetFileEncSHA256(),
+			FileSHA256:    m.GetFileSHA256(),
+			FileLength:    m.GetFileLength(),
+			Mimetype:      m.GetMimetype(),
+		},
+	}
 }
 
 func mediaFromVideo(m *waE2E.VideoMessage) *JMedia {
-	return &JMedia{MimeType: m.GetMimetype(), Caption: m.GetCaption(),
-		Width: int(m.GetWidth()), Height: int(m.GetHeight()),
-		Duration: int(m.GetSeconds()), SizeBytes: int64(m.GetFileLength())}
+	return &JMedia{
+		MimeType:  m.GetMimetype(),
+		Caption:   m.GetCaption(),
+		Width:     int(m.GetWidth()),
+		Height:    int(m.GetHeight()),
+		Duration:  int(m.GetSeconds()),
+		SizeBytes: int64(m.GetFileLength()),
+		Ref: &MediaRef{
+			Kind:          "video",
+			URL:           m.GetURL(),
+			DirectPath:    m.GetDirectPath(),
+			MediaKey:      m.GetMediaKey(),
+			FileEncSHA256: m.GetFileEncSHA256(),
+			FileSHA256:    m.GetFileSHA256(),
+			FileLength:    m.GetFileLength(),
+			Mimetype:      m.GetMimetype(),
+		},
+	}
 }
 
 func mediaFromAudio(m *waE2E.AudioMessage) *JMedia {
-	return &JMedia{MimeType: m.GetMimetype(),
-		Duration: int(m.GetSeconds()), SizeBytes: int64(m.GetFileLength())}
+	return &JMedia{
+		MimeType:  m.GetMimetype(),
+		Duration:  int(m.GetSeconds()),
+		SizeBytes: int64(m.GetFileLength()),
+		Ref: &MediaRef{
+			Kind:          "audio",
+			URL:           m.GetURL(),
+			DirectPath:    m.GetDirectPath(),
+			MediaKey:      m.GetMediaKey(),
+			FileEncSHA256: m.GetFileEncSHA256(),
+			FileSHA256:    m.GetFileSHA256(),
+			FileLength:    m.GetFileLength(),
+			Mimetype:      m.GetMimetype(),
+		},
+	}
 }
 
 func mediaFromDocument(m *waE2E.DocumentMessage) *JMedia {
-	return &JMedia{MimeType: m.GetMimetype(), Caption: m.GetCaption(),
-		SizeBytes: int64(m.GetFileLength())}
+	return &JMedia{
+		MimeType:  m.GetMimetype(),
+		Caption:   m.GetCaption(),
+		SizeBytes: int64(m.GetFileLength()),
+		Ref: &MediaRef{
+			Kind:          "document",
+			URL:           m.GetURL(),
+			DirectPath:    m.GetDirectPath(),
+			MediaKey:      m.GetMediaKey(),
+			FileEncSHA256: m.GetFileEncSHA256(),
+			FileSHA256:    m.GetFileSHA256(),
+			FileLength:    m.GetFileLength(),
+			Mimetype:      m.GetMimetype(),
+		},
+	}
 }
 
 func mediaFromSticker(m *waE2E.StickerMessage) *JMedia {
-	return &JMedia{MimeType: m.GetMimetype(), SizeBytes: int64(m.GetFileLength())}
+	return &JMedia{
+		MimeType:  m.GetMimetype(),
+		SizeBytes: int64(m.GetFileLength()),
+		Ref: &MediaRef{
+			Kind:          "sticker",
+			URL:           m.GetURL(),
+			DirectPath:    m.GetDirectPath(),
+			MediaKey:      m.GetMediaKey(),
+			FileEncSHA256: m.GetFileEncSHA256(),
+			FileSHA256:    m.GetFileSHA256(),
+			FileLength:    m.GetFileLength(),
+			Mimetype:      m.GetMimetype(),
+		},
+	}
 }

@@ -91,7 +91,8 @@ final class ChatListViewModel {
             kind: m.kind,
             text: m.text,
             mediaPath: m.media?.filePath,
-            mediaCaption: m.media?.caption)
+            mediaCaption: m.media?.caption,
+            mediaRefJSON: m.media?.ref?.json)
         context.insert(row)
         try? context.save()
     }

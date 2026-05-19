@@ -4,11 +4,14 @@ struct MessageRow: View {
     let message: UIMessage
     let status: UIMessage.Status?
     let senderName: String?
+    let localPath: String?
 
-    init(message: UIMessage, status: UIMessage.Status? = nil, senderName: String? = nil) {
+    init(message: UIMessage, status: UIMessage.Status? = nil,
+         senderName: String? = nil, localPath: String? = nil) {
         self.message = message
         self.status = status
         self.senderName = senderName
+        self.localPath = localPath
     }
 
     private var isGroupChat: Bool { message.chatJID.hasSuffix("@g.us") }
@@ -71,15 +74,23 @@ struct MessageRow: View {
 
     @ViewBuilder
     private func mediaView(kind: String, caption: String?, path: String?) -> some View {
+        let effectivePath = localPath ?? path
         VStack(alignment: .leading, spacing: 4) {
             if kind == "image",
-               let path,
-               let img = NSImage(contentsOfFile: path) {
+               let p = effectivePath,
+               let img = NSImage(contentsOfFile: p) {
                 Image(nsImage: img)
                     .resizable()
                     .scaledToFit()
                     .frame(maxWidth: 320, maxHeight: 240)
                     .clipShape(.rect(cornerRadius: 8))
+            } else if kind == "sticker",
+                      let p = effectivePath,
+                      let img = NSImage(contentsOfFile: p) {
+                Image(nsImage: img)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxWidth: 160, maxHeight: 160)
             } else {
                 Label(kind, systemImage: iconName(for: kind))
                     .foregroundStyle(.secondary)

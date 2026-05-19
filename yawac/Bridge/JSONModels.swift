@@ -29,6 +29,7 @@ struct BridgeMedia: Codable {
     let height: Int?
     let duration: Int?
     let sizeBytes: Int64?
+    let ref: BridgeMediaRef?
 
     enum CodingKeys: String, CodingKey {
         case mimeType = "mime_type"
@@ -36,6 +37,34 @@ struct BridgeMedia: Codable {
         case filePath = "file_path"
         case width, height, duration
         case sizeBytes = "size_bytes"
+        case ref
+    }
+}
+
+struct BridgeMediaRef: Codable {
+    let kind: String
+    let url: String
+    let directPath: String
+    let mediaKey: Data
+    let fileEncSHA256: Data
+    let fileSHA256: Data
+    let fileLength: UInt64
+    let mimetype: String
+
+    enum CodingKeys: String, CodingKey {
+        case kind, url
+        case directPath = "direct_path"
+        case mediaKey = "media_key"
+        case fileEncSHA256 = "file_enc_sha256"
+        case fileSHA256 = "file_sha256"
+        case fileLength = "file_length"
+        case mimetype
+    }
+}
+
+extension BridgeMediaRef {
+    var json: String? {
+        (try? JSONEncoder().encode(self)).flatMap { String(data: $0, encoding: .utf8) }
     }
 }
 

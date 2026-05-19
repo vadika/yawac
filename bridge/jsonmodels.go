@@ -15,13 +15,14 @@ type JMessage struct {
 }
 
 type JMedia struct {
-	MimeType  string `json:"mime_type"`
-	Caption   string `json:"caption,omitempty"`
-	FilePath  string `json:"file_path,omitempty"`
-	Width     int    `json:"width,omitempty"`
-	Height    int    `json:"height,omitempty"`
-	Duration  int    `json:"duration,omitempty"` // seconds, audio/video
-	SizeBytes int64  `json:"size_bytes,omitempty"`
+	MimeType  string    `json:"mime_type"`
+	Caption   string    `json:"caption,omitempty"`
+	FilePath  string    `json:"file_path,omitempty"`
+	Width     int       `json:"width,omitempty"`
+	Height    int       `json:"height,omitempty"`
+	Duration  int       `json:"duration,omitempty"` // seconds, audio/video
+	SizeBytes int64     `json:"size_bytes,omitempty"`
+	Ref       *MediaRef `json:"ref,omitempty"`
 }
 
 type JReceipt struct {

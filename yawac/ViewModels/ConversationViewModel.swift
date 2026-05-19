@@ -9,8 +9,10 @@ final class ConversationViewModel {
     var draft: String = ""
     var peerTyping: Bool = false
     var receiptStatus: [String: UIMessage.Status] = [:]
+    var localPaths: [String: String] = [:]
     let client: WAClient
     private let context: ModelContext?
+    private var downloadTasks: [String: Task<Void, Never>] = [:]
 
     init(chatJID: String, client: WAClient, context: ModelContext? = nil) {
         self.chatJID = chatJID
@@ -36,6 +38,49 @@ final class ConversationViewModel {
                         ? .text(p.text ?? "")
                         : .media(kind: p.kind, caption: p.mediaCaption, localPath: p.mediaPath))
             }
+            // Seed localPaths from any persisted media files, then kick off
+            // downloads for media (images/stickers) that we don't have on disk yet.
+            for p in rows {
+                if let path = p.mediaPath, FileManager.default.fileExists(atPath: path) {
+                    localPaths[p.id] = path
+                    continue
+                }
+                guard p.kind == "image" || p.kind == "sticker",
+                      let refJSON = p.mediaRefJSON,
+                      downloadTasks[p.id] == nil else { continue }
+                ensureDownloadFromHistory(id: p.id, kind: p.kind, refJSON: refJSON)
+            }
+        }
+    }
+
+    private func ensureDownload(for message: BridgeMessage) {
+        // v1 scope: only auto-download images + stickers.
+        guard message.kind == "image" || message.kind == "sticker" else { return }
+        guard let ref = message.media?.ref,
+              localPaths[message.id] == nil,
+              downloadTasks[message.id] == nil else { return }
+        guard let refJSON = ref.json else { return }
+        ensureDownloadFromHistory(id: message.id, kind: message.kind, refJSON: refJSON)
+    }
+
+    private func ensureDownloadFromHistory(id: String, kind: String, refJSON: String) {
+        let ext: String
+        switch kind {
+        case "image":    ext = "jpg"
+        case "video":    ext = "mp4"
+        case "audio":    ext = "ogg"
+        case "document": ext = "bin"
+        case "sticker":  ext = "webp"
+        default:         ext = "bin"
+        }
+        let client = self.client
+        downloadTasks[id] = Task { @MainActor [weak self] in
+            let url = await MediaCache.shared.ensure(
+                messageID: id, ext: ext, refJSON: refJSON, using: client)
+            if let url, let self {
+                self.localPaths[id] = url.path
+            }
+            self?.downloadTasks[id] = nil
         }
     }
 
@@ -72,6 +117,7 @@ final class ConversationViewModel {
         if messages.contains(where: { $0.id == b.id }) { return }
         messages.append(UIMessage(b))
         persist(b)
+        ensureDownload(for: b)
     }
 
     func setTyping(_ typing: Bool) {
@@ -106,7 +152,8 @@ final class ConversationViewModel {
             kind: m.kind,
             text: m.text,
             mediaPath: m.media?.filePath,
-            mediaCaption: m.media?.caption)
+            mediaCaption: m.media?.caption,
+            mediaRefJSON: m.media?.ref?.json)
         context.insert(row)
         try? context.save()
     }
