@@ -40,6 +40,38 @@ and apparently doesn't replay individual vote events to companion devices.
 
 **Accepted constraint:** Past poll tallies stay phone-only. Live votes work.
 
+### `@lid` ↔ `@s.whatsapp.net` chat duplication
+
+**Symptom:** The same contact shows up as two chat-list rows. Example:
+`Berk Arslan` (`358xxxxx@s.whatsapp.net` from address book) and `Berk`
+(`123456789@lid` from a group message).
+
+**Root cause:** WhatsApp's privacy-LID feature gives users an opaque
+`@lid` identity. Different message paths surface the same person under
+both namespaces:
+- Address-book contacts come back as `@s.whatsapp.net`.
+- Group participants in lid-protected groups come back as `@lid`.
+- Direct DMs may switch over time.
+
+These are different strings to us, so the chat list keeps them as
+separate rows.
+
+**What we fixed:** Device-suffixed variants
+(`<user>:<device>@<server>`) are now normalized to the bare JID via
+`JIDNormalize.bare(_:)` in `yawac/Models/Chat.swift`. Existing
+device-suffixed rows in `PersistedChat` are collapsed into canonical
+rows on app start (`ChatListViewModel.loadChats`). Unread counts get
+summed, the latest timestamp wins.
+
+**What stays broken:** `@lid` ↔ `@s.whatsapp.net` for the *same person*
+cannot be linked without a server-side identity lookup. whatsmeow's
+`store.Devices` keeps some `lid<->primary` mapping but only for
+devices we have a Signal session with; it's incomplete in practice.
+
+**Workaround:** None automatic. Manual: open the `@lid` chat once so
+the resolved push-name surfaces; you'll at least see the same display
+name on both rows.
+
 ### Other deferred items
 
 - Past media (PDFs/etc) that hash-mismatch on download: `DownloadMediaForce`
