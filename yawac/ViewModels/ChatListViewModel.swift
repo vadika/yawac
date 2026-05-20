@@ -19,19 +19,56 @@ final class ChatListViewModel {
         guard let context else { return }
         let descriptor = FetchDescriptor<PersistedChat>(
             sortBy: [SortDescriptor(\.lastTimestamp, order: .reverse)])
-        if let rows = try? context.fetch(descriptor) {
-            self.chats = rows.map {
+        guard let rows = try? context.fetch(descriptor) else { return }
+
+        // One-time cleanup: collapse rows whose jid only differs by the
+        // device suffix `:<n>@server`. Keep the row with the newest
+        // lastTimestamp; sum unread; delete the rest. Persisted in DB.
+        var keepers: [String: PersistedChat] = [:]
+        var toDelete: [PersistedChat] = []
+        for r in rows {
+            let bare = JIDNormalize.bare(r.jid)
+            if let existing = keepers[bare] {
+                if r.lastTimestamp > existing.lastTimestamp {
+                    existing.lastTimestamp = r.lastTimestamp
+                    existing.lastMessageText = r.lastMessageText ?? existing.lastMessageText
+                    if !r.name.isEmpty { existing.name = r.name }
+                }
+                existing.unread += r.unread
+                toDelete.append(r)
+            } else if r.jid != bare {
+                // Same jid will rebind under canonical key; delete this
+                // device-suffixed row and re-create canonical.
+                let canon = PersistedChat(
+                    jid: bare,
+                    name: r.name,
+                    lastMessageText: r.lastMessageText,
+                    lastTimestamp: r.lastTimestamp,
+                    unread: r.unread)
+                context.insert(canon)
+                keepers[bare] = canon
+                toDelete.append(r)
+            } else {
+                keepers[bare] = r
+            }
+        }
+        for r in toDelete { context.delete(r) }
+        if !toDelete.isEmpty { try? context.save() }
+
+        self.chats = keepers.values
+            .sorted { $0.lastTimestamp > $1.lastTimestamp }
+            .map {
                 Chat(jid: $0.jid, name: $0.name,
                      lastMessage: $0.lastMessageText ?? "",
                      lastTimestamp: Int64($0.lastTimestamp.timeIntervalSince1970),
                      unread: $0.unread)
             }
-        }
     }
 
     func ingest(_ message: BridgeMessage) {
         // Skip protocol/system noise — no UI value
         if message.kind == "protocol" || message.kind == "system" { return }
+        let chatJID = JIDNormalize.bare(message.chatJID)
 
         // Dedupe: if this message id is already persisted, this is a replay
         // (e.g. HistorySync redelivering on reconnect). Skip unread/preview
@@ -68,22 +105,19 @@ final class ChatListViewModel {
         }
 
         let now = message.timestamp
-        if let idx = chats.firstIndex(where: { $0.jid == message.chatJID }) {
+        if let idx = chats.firstIndex(where: { $0.jid == chatJID }) {
             var c = chats[idx]
-            // Always reflect the freshest-by-timestamp message in the preview
-            // so HistorySync replays push newer messages to top across runs.
             if now >= c.lastTimestamp {
                 c.lastMessage = preview
                 c.lastTimestamp = now
             }
-            // Unread counter only grows on genuinely new (un-seen) inbound msgs.
             if !alreadySeen, !message.fromMe { c.unread += 1 }
             chats[idx] = c
             upsertPersisted(c, preview: c.lastMessage)
         } else {
             let c = Chat(
-                jid: message.chatJID,
-                name: message.chatJID,
+                jid: chatJID,
+                name: chatJID,
                 lastMessage: preview,
                 lastTimestamp: now,
                 unread: (!alreadySeen && !message.fromMe) ? 1 : 0)
@@ -93,8 +127,8 @@ final class ChatListViewModel {
         sortChats()
 
         if !alreadySeen, !message.fromMe, !NSApp.isActive, !preview.isEmpty {
-            let title = chats.first(where: { $0.jid == message.chatJID })?.name ?? message.chatJID
-            NotificationService.notify(title: title, body: preview, chatJID: message.chatJID)
+            let title = chats.first(where: { $0.jid == chatJID })?.name ?? chatJID
+            NotificationService.notify(title: title, body: preview, chatJID: chatJID)
         }
     }
 
@@ -102,7 +136,7 @@ final class ChatListViewModel {
         guard let context else { return }
         let row = PersistedMessage(
             id: m.id,
-            chatJID: m.chatJID,
+            chatJID: JIDNormalize.bare(m.chatJID),
             senderJID: m.senderJID,
             fromMe: m.fromMe,
             timestamp: Date(timeIntervalSince1970: TimeInterval(m.timestamp)),
@@ -124,10 +158,12 @@ final class ChatListViewModel {
     }
 
     func mergeGroups(_ gs: [BridgeGroupModel]) {
-        for g in gs where !chats.contains(where: { $0.jid == g.jid }) {
+        for g in gs {
+            let jid = JIDNormalize.bare(g.jid)
+            if chats.contains(where: { $0.jid == jid }) { continue }
             chats.append(Chat(
-                jid: g.jid,
-                name: g.name.isEmpty ? g.jid : g.name,
+                jid: jid,
+                name: g.name.isEmpty ? jid : g.name,
                 lastMessage: g.topic,
                 lastTimestamp: 0,
                 unread: 0))
@@ -137,9 +173,11 @@ final class ChatListViewModel {
     }
 
     func mergeContacts(_ cs: [BridgeContact]) {
-        for c in cs where !chats.contains(where: { $0.jid == c.jid }) {
+        for c in cs {
+            let jid = JIDNormalize.bare(c.jid)
+            if chats.contains(where: { $0.jid == jid }) { continue }
             let chat = Chat(
-                jid: c.jid,
+                jid: jid,
                 name: c.name,
                 lastMessage: "",
                 lastTimestamp: 0,
