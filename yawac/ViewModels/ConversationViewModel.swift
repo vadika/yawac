@@ -24,6 +24,12 @@ final class ConversationViewModel {
     // phone with redundant SendMediaRetryReceipt calls if download retries
     // keep failing.
     private var retriesRequested: Set<String> = []
+    // On-demand older-history state. `loadingOlder` is private(set) so the
+    // view can read it for the spinner; `olderUnavailable` is set when a
+    // RequestOlderHistory call produced no new rows within the wait window,
+    // letting the UI hide the "Load earlier" button.
+    private(set) var loadingOlder = false
+    var olderUnavailable = false
 
     init(chatJID: String, client: WAClient, context: ModelContext? = nil) {
         self.chatJID = chatJID
@@ -112,6 +118,98 @@ final class ConversationViewModel {
                 }
                 ensureDownloadFromHistory(id: p.id, kind: p.kind, refJSON: refJSON)
             }
+        }
+    }
+
+    /// Asks the phone for ~50 messages older than the oldest one we currently
+    /// have loaded for this chat. The phone's reply arrives as a normal
+    /// HistorySync event; messages persist via the existing ChatList path,
+    /// then we re-query PersistedMessage with a bigger window.
+    func requestOlderHistory() {
+        guard !loadingOlder, !olderUnavailable, let context else { return }
+        // Find oldest persisted message for this chat (not just in-memory,
+        // since the in-memory cap is 500).
+        let jid = chatJID
+        var descriptor = FetchDescriptor<PersistedMessage>(
+            predicate: #Predicate { $0.chatJID == jid },
+            sortBy: [SortDescriptor(\.timestamp, order: .forward)])
+        descriptor.fetchLimit = 1
+        guard let anchor = (try? context.fetch(descriptor))?.first else { return }
+        loadingOlder = true
+        let id = anchor.id
+        let senderJID = anchor.senderJID
+        let fromMe = anchor.fromMe
+        let ts = Int64(anchor.timestamp.timeIntervalSince1970)
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.loadingOlder = false }
+            do {
+                try self.client.requestOlderHistory(
+                    chatJID: self.chatJID,
+                    oldestMsgID: id,
+                    oldestSenderJID: senderJID,
+                    oldestFromMe: fromMe,
+                    oldestTimestampSec: ts,
+                    count: 50)
+                // After ~5 s, if no new rows landed, mark unavailable so the
+                // user isn't given an indefinite "Loading…" UI.
+                try? await Task.sleep(for: .seconds(5))
+                let beforeCount = self.messages.count
+                self.loadEarlier(by: 200)
+                if self.messages.count == beforeCount {
+                    self.olderUnavailable = true
+                }
+            } catch {
+                self.messages.insert(UIMessage(
+                    id: UUID().uuidString,
+                    chatJID: self.chatJID,
+                    senderJID: "system",
+                    fromMe: false,
+                    timestamp: .now,
+                    body: .system("history request failed: \(error.localizedDescription)")
+                ), at: 0)
+            }
+        }
+    }
+
+    /// Re-runs the loadHistory query but with a larger fetchLimit so newly-
+    /// arrived older rows become visible.
+    private func loadEarlier(by additional: Int) {
+        let newLimit = max(messages.count + additional, Self.historyLoadLimit)
+        let jid = chatJID
+        guard let context else { return }
+        var descriptor = FetchDescriptor<PersistedMessage>(
+            predicate: #Predicate { $0.chatJID == jid },
+            sortBy: [SortDescriptor(\.timestamp, order: .reverse)])
+        descriptor.fetchLimit = newLimit
+        guard let recentRows = try? context.fetch(descriptor) else { return }
+        let rows = recentRows.reversed().map { $0 }
+        let displayable = rows.filter { p in
+            p.kind != "reaction" && p.kind != "protocol" && p.kind != "system"
+        }
+        self.messages = displayable.map { p in
+            let body: UIMessage.Body
+            switch p.kind {
+            case "text":
+                body = .text(p.text ?? "")
+            case "image", "video", "audio", "document", "sticker":
+                body = .media(kind: p.kind, caption: p.mediaCaption, fileName: p.mediaFileName, localPath: p.mediaPath)
+            case "poll":
+                if let json = p.pollJSON,
+                   let data = json.data(using: .utf8),
+                   let poll = try? JSONDecoder().decode(BridgePoll.self, from: data) {
+                    body = .poll(question: poll.question,
+                                 options: poll.options,
+                                 selectableCount: poll.selectableCount)
+                } else {
+                    body = .system(p.kind)
+                }
+            default:
+                body = .system(p.kind)
+            }
+            return UIMessage(
+                id: p.id, chatJID: p.chatJID, senderJID: p.senderJID,
+                fromMe: p.fromMe, timestamp: p.timestamp, body: body)
         }
     }
 

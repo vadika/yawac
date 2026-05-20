@@ -163,6 +163,21 @@ final class WAClient {
         try go.requestMediaRetry(chatJID, senderJID: senderJID, msgID: msgID, fromMe: fromMe, refJSON: refJSON)
     }
 
+    nonisolated func requestOlderHistory(chatJID: String,
+                                         oldestMsgID: String,
+                                         oldestSenderJID: String,
+                                         oldestFromMe: Bool,
+                                         oldestTimestampSec: Int64,
+                                         count: Int) throws {
+        try go.requestOlderHistory(
+            chatJID,
+            oldestMsgID: oldestMsgID,
+            oldestSenderJID: oldestSenderJID,
+            oldestFromMe: oldestFromMe,
+            oldestTimestampSec: oldestTimestampSec,
+            count: count)
+    }
+
     nonisolated func fetchProfilePicture(jid: String, outPath: String) throws -> String {
         var err: NSError?
         let result = go.fetchProfilePicture(jid, outPath: outPath, error: &err)

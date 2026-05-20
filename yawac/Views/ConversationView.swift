@@ -55,6 +55,27 @@ struct ConversationView: View {
                     ScrollViewReader { proxy in
                         ScrollView {
                             LazyVStack(spacing: 6) {
+                                if !vm.olderUnavailable {
+                                    HStack {
+                                        Spacer()
+                                        Button {
+                                            vm.requestOlderHistory()
+                                        } label: {
+                                            if vm.loadingOlder {
+                                                HStack(spacing: 4) {
+                                                    ProgressView().controlSize(.small)
+                                                    Text("Loading earlier messages…")
+                                                }
+                                            } else {
+                                                Text("Load earlier messages")
+                                            }
+                                        }
+                                        .buttonStyle(.borderless)
+                                        .disabled(vm.loadingOlder)
+                                        .padding(.vertical, 6)
+                                        Spacer()
+                                    }
+                                }
                                 ForEach(Array(timeline().enumerated()), id: \.offset) { _, item in
                                     switch item {
                                     case .dateHeader(let date):
