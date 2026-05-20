@@ -38,6 +38,29 @@ final class PersistedMessage {
 }
 
 @Model
+final class PersistedReaction {
+    /// Composite key as a single string `<messageID>|<senderJID>` so we can
+    /// upsert via SwiftData's @Attribute(.unique) without combining two
+    /// columns.
+    @Attribute(.unique) var compositeKey: String
+    var chatJID: String
+    var targetMessageID: String
+    var senderJID: String
+    var emoji: String
+    var timestamp: Date
+
+    init(chatJID: String, targetMessageID: String,
+         senderJID: String, emoji: String, timestamp: Date) {
+        self.compositeKey = "\(targetMessageID)|\(senderJID)"
+        self.chatJID = chatJID
+        self.targetMessageID = targetMessageID
+        self.senderJID = senderJID
+        self.emoji = emoji
+        self.timestamp = timestamp
+    }
+}
+
+@Model
 final class PersistedChat {
     @Attribute(.unique) var jid: String
     var name: String

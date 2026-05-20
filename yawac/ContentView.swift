@@ -43,6 +43,8 @@ struct ContentView: View {
                 case .message(let m):
                     session.ingestPushName(jid: m.senderJID, name: m.senderPushName)
                     vm.ingest(m)
+                case .reaction(let r):
+                    vm.persistReaction(r)
                 case .historySync:
                     let cs = (try? client.listContacts()) ?? []
                     vm.resolveNames(cs)

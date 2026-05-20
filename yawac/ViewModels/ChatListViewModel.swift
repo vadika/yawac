@@ -157,6 +157,39 @@ final class ChatListViewModel {
         upsertPersisted(chats[i])
     }
 
+    /// Persists every incoming reaction so the conversation view can hydrate
+    /// the chip strip when it later opens (or re-opens) the chat. Live
+    /// reactions arrive once via the global event stream — without this,
+    /// closing/reopening a chat would drop all of them.
+    func persistReaction(_ r: BridgeReaction) {
+        guard let context else { return }
+        let id = r.targetMessageID
+        let sender = r.senderJID
+        let descriptor = FetchDescriptor<PersistedReaction>(
+            predicate: #Predicate {
+                $0.targetMessageID == id && $0.senderJID == sender
+            })
+        let ts = Date(timeIntervalSince1970: TimeInterval(r.timestamp))
+        if r.emoji.isEmpty {
+            if let row = try? context.fetch(descriptor).first {
+                context.delete(row)
+            }
+        } else if let existing = try? context.fetch(descriptor).first {
+            existing.emoji = r.emoji
+            existing.timestamp = ts
+            existing.chatJID = JIDNormalize.bare(r.chatJID)
+        } else {
+            let row = PersistedReaction(
+                chatJID: JIDNormalize.bare(r.chatJID),
+                targetMessageID: r.targetMessageID,
+                senderJID: r.senderJID,
+                emoji: r.emoji,
+                timestamp: ts)
+            context.insert(row)
+        }
+        try? context.save()
+    }
+
     func mergeGroups(_ gs: [BridgeGroupModel]) {
         for g in gs {
             let jid = JIDNormalize.bare(g.jid)

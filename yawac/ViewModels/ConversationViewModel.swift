@@ -82,6 +82,18 @@ final class ConversationViewModel {
                     timestamp: p.timestamp,
                     body: body)
             }
+            // Hydrate reactions for the loaded messages from PersistedReaction.
+            let ids = Set(displayable.map { $0.id })
+            let rxDescriptor = FetchDescriptor<PersistedReaction>(
+                predicate: #Predicate { ids.contains($0.targetMessageID) })
+            if let rxRows = try? context.fetch(rxDescriptor) {
+                for r in rxRows {
+                    var byHash = reactionsBySender[r.targetMessageID] ?? [:]
+                    byHash[r.senderJID] = r.emoji
+                    reactionsBySender[r.targetMessageID] = byHash
+                }
+            }
+
             // Seed localPaths from any persisted media files, then kick off
             // downloads for media (images/stickers) that we don't have on disk yet.
             for p in rows {
@@ -471,6 +483,34 @@ final class ConversationViewModel {
 
     /// Post or clear our reaction on a target message. emoji="" clears it.
     /// Tallies optimistically under voter id "me" — matches castVote.
+    private func persistReactionLocal(_ r: BridgeReaction) {
+        guard let context else { return }
+        let id = r.targetMessageID
+        let sender = r.senderJID
+        let descriptor = FetchDescriptor<PersistedReaction>(
+            predicate: #Predicate {
+                $0.targetMessageID == id && $0.senderJID == sender
+            })
+        let ts = Date(timeIntervalSince1970: TimeInterval(r.timestamp))
+        if r.emoji.isEmpty {
+            if let row = try? context.fetch(descriptor).first {
+                context.delete(row)
+            }
+        } else if let existing = try? context.fetch(descriptor).first {
+            existing.emoji = r.emoji
+            existing.timestamp = ts
+        } else {
+            let row = PersistedReaction(
+                chatJID: JIDNormalize.bare(r.chatJID),
+                targetMessageID: r.targetMessageID,
+                senderJID: r.senderJID,
+                emoji: r.emoji,
+                timestamp: ts)
+            context.insert(row)
+        }
+        try? context.save()
+    }
+
     func sendReaction(messageID: String,
                       targetSenderJID: String,
                       targetFromMe: Bool,
@@ -484,13 +524,15 @@ final class ConversationViewModel {
                     targetSenderJID: targetSenderJID,
                     targetFromMe: targetFromMe,
                     emoji: emoji)
-                self.applyReaction(BridgeReaction(
+                let rx = BridgeReaction(
                     chatJID: self.chatJID,
                     targetMessageID: messageID,
                     targetFromMe: targetFromMe,
                     senderJID: "me",
                     emoji: emoji,
-                    timestamp: Int64(Date().timeIntervalSince1970)))
+                    timestamp: Int64(Date().timeIntervalSince1970))
+                self.applyReaction(rx)
+                self.persistReactionLocal(rx)
             } catch {
                 self.messages.append(UIMessage(
                     id: UUID().uuidString,

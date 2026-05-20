@@ -8,7 +8,10 @@ struct YawacApp: App {
 
     init() {
         do {
-            self.container = try ModelContainer(for: PersistedMessage.self, PersistedChat.self)
+            self.container = try ModelContainer(
+                for: PersistedMessage.self,
+                PersistedChat.self,
+                PersistedReaction.self)
         } catch {
             fatalError("ModelContainer: \(error)")
         }
