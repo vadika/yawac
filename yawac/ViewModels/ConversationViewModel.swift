@@ -294,6 +294,7 @@ final class ConversationViewModel {
 
     func ingest(_ b: BridgeMessage) {
         guard b.chatJID == chatJID else { return }
+        if b.kind == "protocol" || b.kind == "system" { return }
         // Dedupe by id (echo of fromMe send may arrive after local optimistic append)
         if messages.contains(where: { $0.id == b.id }) { return }
         messages.append(UIMessage(b))
