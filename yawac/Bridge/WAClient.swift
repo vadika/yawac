@@ -102,6 +102,23 @@ final class WAClient {
         return try JSONDecoder().decode(BridgeSendResult.self, from: Data(json.utf8))
     }
 
+    func sendReaction(chatJID: String,
+                      targetMsgID: String,
+                      targetSenderJID: String,
+                      targetFromMe: Bool,
+                      emoji: String) throws -> BridgeSendResult {
+        var err: NSError?
+        let json = go.sendReaction(
+            chatJID,
+            targetMsgID: targetMsgID,
+            targetSenderJID: targetSenderJID,
+            targetFromMe: targetFromMe,
+            emoji: emoji,
+            error: &err)
+        if let err { throw err }
+        return try JSONDecoder().decode(BridgeSendResult.self, from: Data(json.utf8))
+    }
+
     func sendPollVote(chatJID: String,
                       pollMsgID: String,
                       pollSenderJID: String,

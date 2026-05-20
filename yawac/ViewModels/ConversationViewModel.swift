@@ -469,6 +469,46 @@ final class ConversationViewModel {
         }
     }
 
+    /// Post or clear our reaction on a target message. emoji="" clears it.
+    /// Tallies optimistically under voter id "me" — matches castVote.
+    func sendReaction(messageID: String,
+                      targetSenderJID: String,
+                      targetFromMe: Bool,
+                      emoji: String) {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                _ = try self.client.sendReaction(
+                    chatJID: self.chatJID,
+                    targetMsgID: messageID,
+                    targetSenderJID: targetSenderJID,
+                    targetFromMe: targetFromMe,
+                    emoji: emoji)
+                self.applyReaction(BridgeReaction(
+                    chatJID: self.chatJID,
+                    targetMessageID: messageID,
+                    targetFromMe: targetFromMe,
+                    senderJID: "me",
+                    emoji: emoji,
+                    timestamp: Int64(Date().timeIntervalSince1970)))
+            } catch {
+                self.messages.append(UIMessage(
+                    id: UUID().uuidString,
+                    chatJID: self.chatJID,
+                    senderJID: "system",
+                    fromMe: false,
+                    timestamp: .now,
+                    body: .system("reaction failed: \(error.localizedDescription)")))
+            }
+        }
+    }
+
+    /// The current user's reaction on a message, if any. Used by MessageRow
+    /// to highlight the active emoji in the quick-pick menu.
+    func myReaction(for messageID: String) -> String? {
+        reactionsBySender[messageID]?["me"]
+    }
+
     func applyReaction(_ r: BridgeReaction) {
         guard r.chatJID == chatJID else { return }
         var byMsg = reactionsBySender[r.targetMessageID] ?? [:]

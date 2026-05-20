@@ -77,6 +77,13 @@ struct ConversationView: View {
                                                             pollSenderJID: msg.senderJID,
                                                             pollFromMe: msg.fromMe)
                                             },
+                                            myReaction: vm.myReaction(for: msg.id),
+                                            onReact: { emoji in
+                                                vm.sendReaction(messageID: msg.id,
+                                                                targetSenderJID: msg.senderJID,
+                                                                targetFromMe: msg.fromMe,
+                                                                emoji: emoji)
+                                            },
                                             mentionResolver: { jid in session.displayName(for: jid) }
                                         ).id(msg.id)
                                     }

@@ -12,6 +12,42 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+// SendReaction posts a reaction to a target message. emoji="" removes our
+// reaction. targetSenderJID is the original message's sender (group:
+// participant, 1:1: chat). targetFromMe indicates whether the original was
+// sent by us.
+//
+// Returns JSON of JSendResult.
+func (c *Client) SendReaction(chatJID, targetMsgID, targetSenderJID string, targetFromMe bool, emoji string) (string, error) {
+	if c.wa == nil {
+		return "", errors.New("client closed")
+	}
+	chat, err := types.ParseJID(chatJID)
+	if err != nil {
+		return "", fmt.Errorf("parse chat: %w", err)
+	}
+	var sender types.JID
+	if targetFromMe {
+		if c.wa.Store != nil && c.wa.Store.ID != nil {
+			sender = c.wa.Store.ID.ToNonAD()
+		} else {
+			sender = chat
+		}
+	} else {
+		sender, err = types.ParseJID(targetSenderJID)
+		if err != nil {
+			return "", fmt.Errorf("parse sender: %w", err)
+		}
+	}
+	msg := c.wa.BuildReaction(chat, sender, targetMsgID, emoji)
+	resp, err := c.wa.SendMessage(context.Background(), chat, msg)
+	if err != nil {
+		return "", fmt.Errorf("send reaction: %w", err)
+	}
+	out, _ := json.Marshal(JSendResult{MessageID: resp.ID, Timestamp: resp.Timestamp.Unix()})
+	return string(out), nil
+}
+
 // SendText sends a plain-text message. Returns JSON of JSendResult.
 func (c *Client) SendText(chatJID, body string) (string, error) {
 	if c.wa == nil {

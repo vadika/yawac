@@ -13,6 +13,8 @@ struct MessageRow: View {
     let voteCounts: [String: Int]
     let mySelections: Set<String>
     let onCastVote: (([String], [BridgePollOption]) -> Void)?
+    let myReaction: String?
+    let onReact: ((String) -> Void)?  // pass "" to clear our reaction
     let mentionResolver: (String) -> String
 
     init(message: UIMessage, status: UIMessage.Status? = nil,
@@ -23,6 +25,8 @@ struct MessageRow: View {
          voteCounts: [String: Int] = [:],
          mySelections: Set<String> = [],
          onCastVote: (([String], [BridgePollOption]) -> Void)? = nil,
+         myReaction: String? = nil,
+         onReact: ((String) -> Void)? = nil,
          mentionResolver: @escaping (String) -> String = { $0 }) {
         self.message = message
         self.status = status
@@ -34,8 +38,12 @@ struct MessageRow: View {
         self.voteCounts = voteCounts
         self.mySelections = mySelections
         self.onCastVote = onCastVote
+        self.myReaction = myReaction
+        self.onReact = onReact
         self.mentionResolver = mentionResolver
     }
+
+    private static let quickReactions = ["👍", "❤️", "😂", "😮", "😢", "🙏"]
 
     private var isGroupChat: Bool { message.chatJID.hasSuffix("@g.us") }
 
@@ -70,12 +78,33 @@ struct MessageRow: View {
                         ? Color.accentColor.opacity(0.2)
                         : Color.gray.opacity(0.15),
                     in: .rect(cornerRadius: 10))
+                .contextMenu { reactionMenu }
                 if !reactions.isEmpty {
                     reactionChips
                 }
             }
             if !message.fromMe { Spacer(minLength: 60) }
         }
+    }
+
+    @ViewBuilder
+    private var reactionMenu: some View {
+        if let onReact, !isSystemBody {
+            Section("React") {
+                ForEach(Self.quickReactions, id: \.self) { e in
+                    Button(myReaction == e ? "\(e) (clear)" : e) {
+                        // Tapping the active emoji clears; tapping a new one
+                        // replaces (WhatsApp allows one reaction per user).
+                        onReact(myReaction == e ? "" : e)
+                    }
+                }
+            }
+        }
+    }
+
+    private var isSystemBody: Bool {
+        if case .system = message.body { return true }
+        return false
     }
 
     @ViewBuilder
