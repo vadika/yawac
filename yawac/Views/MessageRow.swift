@@ -131,11 +131,13 @@ struct MessageRow: View {
                   let full = Range(m.range, in: out),
                   let digits = Range(m.range(at: 1), in: out) else { continue }
             let phone = String(out[digits])
-            let jid = "\(phone)@s.whatsapp.net"
-            let name = mentionResolver(jid)
-            // Only rewrite if resolver produced something other than the phone.
-            if name != phone, !name.isEmpty {
-                out.replaceSubrange(full, with: "@\(name)")
+            let candidates = ["\(phone)@s.whatsapp.net", "\(phone)@lid"]
+            for jid in candidates {
+                let name = mentionResolver(jid)
+                if name != phone, !name.isEmpty {
+                    out.replaceSubrange(full, with: "@\(name)")
+                    break
+                }
             }
         }
         return out
