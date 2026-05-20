@@ -39,13 +39,16 @@ final class PersistedChat {
     @Attribute(.unique) var jid: String
     var name: String
     var lastMessageID: String?
+    var lastMessageText: String?
     var lastTimestamp: Date
     var unread: Int
 
     init(jid: String, name: String,
+         lastMessageText: String? = nil,
          lastTimestamp: Date = .distantPast, unread: Int = 0) {
         self.jid = jid
         self.name = name
+        self.lastMessageText = lastMessageText
         self.lastTimestamp = lastTimestamp
         self.unread = unread
     }

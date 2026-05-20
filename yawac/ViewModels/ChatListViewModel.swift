@@ -22,7 +22,7 @@ final class ChatListViewModel {
         if let rows = try? context.fetch(descriptor) {
             self.chats = rows.map {
                 Chat(jid: $0.jid, name: $0.name,
-                     lastMessage: "",
+                     lastMessage: $0.lastMessageText ?? "",
                      lastTimestamp: Int64($0.lastTimestamp.timeIntervalSince1970),
                      unread: $0.unread)
             }
@@ -50,8 +50,6 @@ final class ChatListViewModel {
         // conversation view hasn't been opened yet.
         persistMessage(message)
 
-        if alreadySeen { return }
-
         let preview: String
         if let text = message.text, !text.isEmpty {
             preview = text
@@ -71,24 +69,29 @@ final class ChatListViewModel {
         let now = message.timestamp
         if let idx = chats.firstIndex(where: { $0.jid == message.chatJID }) {
             var c = chats[idx]
-            c.lastMessage = preview
-            c.lastTimestamp = now
-            if !message.fromMe { c.unread += 1 }
+            // Always reflect the freshest-by-timestamp message in the preview
+            // so HistorySync replays push newer messages to top across runs.
+            if now >= c.lastTimestamp {
+                c.lastMessage = preview
+                c.lastTimestamp = now
+            }
+            // Unread counter only grows on genuinely new (un-seen) inbound msgs.
+            if !alreadySeen, !message.fromMe { c.unread += 1 }
             chats[idx] = c
-            upsertPersisted(c)
+            upsertPersisted(c, preview: c.lastMessage)
         } else {
             let c = Chat(
                 jid: message.chatJID,
                 name: message.chatJID,
                 lastMessage: preview,
                 lastTimestamp: now,
-                unread: message.fromMe ? 0 : 1)
+                unread: (!alreadySeen && !message.fromMe) ? 1 : 0)
             chats.append(c)
-            upsertPersisted(c)
+            upsertPersisted(c, preview: preview)
         }
         sortChats()
 
-        if !message.fromMe, !NSApp.isActive, !preview.isEmpty {
+        if !alreadySeen, !message.fromMe, !NSApp.isActive, !preview.isEmpty {
             let title = chats.first(where: { $0.jid == message.chatJID })?.name ?? message.chatJID
             NotificationService.notify(title: title, body: preview, chatJID: message.chatJID)
         }
@@ -164,7 +167,7 @@ final class ChatListViewModel {
         }
     }
 
-    private func upsertPersisted(_ c: Chat) {
+    private func upsertPersisted(_ c: Chat, preview: String? = nil) {
         guard let context else { return }
         let jid = c.jid
         let descriptor = FetchDescriptor<PersistedChat>(
@@ -173,10 +176,12 @@ final class ChatListViewModel {
             existing.name = c.name
             existing.lastTimestamp = Date(timeIntervalSince1970: TimeInterval(c.lastTimestamp))
             existing.unread = c.unread
+            if let preview { existing.lastMessageText = preview }
         } else {
             let row = PersistedChat(
                 jid: c.jid,
                 name: c.name,
+                lastMessageText: preview,
                 lastTimestamp: Date(timeIntervalSince1970: TimeInterval(c.lastTimestamp)),
                 unread: c.unread)
             context.insert(row)
