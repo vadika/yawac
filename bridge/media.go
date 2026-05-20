@@ -2,7 +2,6 @@ package bridge
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -269,11 +268,6 @@ func (c *Client) DownloadMedia(refJSON, outPath string) (string, error) {
 	if err := json.Unmarshal([]byte(refJSON), &r); err != nil {
 		return "", fmt.Errorf("parse ref: %w", err)
 	}
-	fmt.Fprintf(os.Stderr,
-		"[yawac/download] kind=%s len=%d mime=%s mediaKey=%dB encSHA=%dB plainSHA=%dB dp=%q\n",
-		r.Kind, r.FileLength, r.Mimetype,
-		len(r.MediaKey), len(r.FileEncSHA256), len(r.FileSHA256),
-		r.DirectPath)
 	var dl whatsmeow.DownloadableMessage
 	switch r.Kind {
 	case "image":
@@ -402,10 +396,6 @@ func (c *Client) DownloadMediaForce(refJSON, outPath string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("read: %w", err)
 	}
-	fmt.Fprintf(os.Stderr,
-		"[yawac/download-force] kind=%s expected_len=%d got_len=%d enc_sha_expected_first8=%x got_first8=%x\n",
-		r.Kind, r.FileLength, len(raw),
-		shaPrefix(r.FileEncSHA256), sha256Prefix(raw))
 
 	if len(raw) <= 10 {
 		return "", errors.New("response too short")
@@ -429,18 +419,6 @@ func (c *Client) DownloadMediaForce(refJSON, outPath string) (string, error) {
 		return "", fmt.Errorf("write: %w", err)
 	}
 	return outPath, nil
-}
-
-func shaPrefix(b []byte) []byte {
-	if len(b) >= 8 {
-		return b[:8]
-	}
-	return b
-}
-
-func sha256Prefix(b []byte) []byte {
-	h := sha256.Sum256(b)
-	return h[:8]
 }
 
 // mediaTypeFor maps our MediaRef.Kind to whatsmeow.MediaType (used for key

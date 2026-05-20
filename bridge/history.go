@@ -3,8 +3,6 @@ package bridge
 import (
 	"context"
 	"encoding/json"
-	"fmt"
-	"os"
 
 	waWeb "go.mau.fi/whatsmeow/proto/waWeb"
 	"go.mau.fi/whatsmeow/types"
@@ -57,22 +55,16 @@ func (c *Client) applyHistorySync(evt *events.HistorySync) {
 		// Two-pass: store every message's secret first so subsequent vote
 		// decryption can find creation-message keys regardless of iteration
 		// order in this HistorySync chunk.
-		var pollCreates, pollVotes, withSecret int
 		if c.wa != nil && c.wa.Store != nil && c.wa.Store.MsgSecrets != nil {
 			for _, m := range conv.GetMessages() {
 				wm := m.GetMessage()
 				if wm == nil {
 					continue
 				}
-				if mb := wm.GetMessage(); mb != nil {
-					if isPollCreation(mb) { pollCreates++ }
-					if mb.GetPollUpdateMessage() != nil { pollVotes++ }
-				}
 				secret := wm.GetMessageSecret()
 				if len(secret) == 0 {
 					continue
 				}
-				withSecret++
 				key := wm.GetKey()
 				if key == nil {
 					continue
@@ -92,12 +84,6 @@ func (c *Client) applyHistorySync(evt *events.HistorySync) {
 				_ = c.wa.Store.MsgSecrets.PutMessageSecret(
 					ctx, chatJID, sender, key.GetID(), secret)
 			}
-		}
-
-		if pollCreates+pollVotes > 0 {
-			fmt.Fprintf(os.Stderr,
-				"[yawac/poll-history] conv=%s polls=%d votes=%d with_secret=%d total_msgs=%d\n",
-				chatJIDStr, pollCreates, pollVotes, withSecret, len(conv.GetMessages()))
 		}
 
 		for _, m := range conv.GetMessages() {
@@ -139,16 +125,14 @@ func (c *Client) dispatchWebMessage(chatJID string, wm *waWeb.WebMessageInfo) {
 		return
 	}
 	if msg.GetPollUpdateMessage() != nil {
-		fmt.Fprintf(os.Stderr,
-			"[yawac/poll-history] vote seen chat=%s id=%s from=%s\n",
-			chatJID, key.GetID(), senderJID)
+		// HistorySync rarely (currently never observed) ships vote events,
+		// but if one arrives we try to decrypt + dispatch it. The creation's
+		// MessageSecret was already persisted in the two-pass above so the
+		// per-poll cipher key is available regardless of iteration order.
+		// See docs/TODO.md "Historical poll vote tallies — unrecoverable".
 		if chat, err := types.ParseJID(chatJID); err == nil {
 			if evt, err := c.wa.ParseWebMessage(chat, wm); err == nil {
 				c.dispatchPollVote(evt)
-			} else {
-				fmt.Fprintf(os.Stderr,
-					"[yawac/poll-history] ParseWebMessage fail chat=%s id=%s err=%v\n",
-					chatJID, key.GetID(), err)
 			}
 		}
 		return

@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 
 	waE2E "go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/types"
@@ -160,18 +159,15 @@ func (c *Client) dispatchPollVote(evt *events.Message) {
 	}
 	decrypted, err := c.wa.DecryptPollVote(context.Background(), evt)
 	if err != nil {
-		fmt.Fprintf(os.Stderr,
-			"[yawac/poll-vote] decrypt fail poll=%s voter=%s chat=%s err=%v\n",
-			key.GetID(), evt.Info.Sender.String(), evt.Info.Chat.String(), err)
+		// Vote decryption can fail when the original poll-creation message
+		// was never seen (companion not paired at the time). Not fatal —
+		// Swift just won't tally it.
 		return
 	}
 	hashes := make([]string, 0, len(decrypted.GetSelectedOptions()))
 	for _, h := range decrypted.GetSelectedOptions() {
 		hashes = append(hashes, hex.EncodeToString(h))
 	}
-	fmt.Fprintf(os.Stderr,
-		"[yawac/poll-vote] ok poll=%s voter=%s n_options=%d\n",
-		key.GetID(), evt.Info.Sender.String(), len(hashes))
 	payload := JPollVote{
 		ChatJID:       evt.Info.Chat.String(),
 		PollMessageID: key.GetID(),
