@@ -99,10 +99,22 @@ struct MessageRow: View {
         }
     }
 
-    /// Returns an `AttributedString` with @mentions resolved to display names
-    /// and any URLs auto-linked.
+    /// Returns an `AttributedString` with @mentions styled bold + tinted and
+    /// any URLs auto-linked.
     private func richText(from raw: String) -> AttributedString {
-        var attr = AttributedString(resolveMentions(in: raw))
+        let (rewritten, mentionRanges) = resolveMentions(in: raw)
+        var attr = AttributedString(rewritten)
+        // Style mentions: bold, tint colour, custom URL scheme so taps fire.
+        for mentionText in mentionRanges {
+            if let r = attr.range(of: mentionText) {
+                attr[r].font = .body.bold()
+                attr[r].foregroundColor = .accentColor
+                if let url = URL(string: "yawac://mention/\(mentionText.dropFirst().addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? "")") {
+                    attr[r].link = url
+                }
+            }
+        }
+        // Auto-link any plain URLs in the (possibly-rewritten) text.
         let str = String(attr.characters)
         let detector = try? NSDataDetector(
             types: NSTextCheckingResult.CheckingType.link.rawValue)
@@ -111,6 +123,8 @@ struct MessageRow: View {
             guard let match, let url = match.url,
                   let range = Range(match.range, in: str),
                   let attrRange = attr.range(of: String(str[range])) else { return }
+            // Don't clobber mention styling.
+            if attr[attrRange].link != nil { return }
             attr[attrRange].link = url
             attr[attrRange].foregroundColor = .accentColor
             attr[attrRange].underlineStyle = .single
@@ -118,29 +132,34 @@ struct MessageRow: View {
         return attr
     }
 
-    /// Replaces `@<digits>` mentions with `@<display name>` via the resolver.
-    private func resolveMentions(in s: String) -> String {
-        guard s.contains("@") else { return s }
-        // Match @ followed by 5+ digits (WhatsApp phone numbers).
-        guard let regex = try? NSRegularExpression(pattern: "@(\\d{5,})") else { return s }
+    /// Rewrites `@<digits>` to `@<display name>` and returns both the new
+    /// string + the literal mention substrings so callers can style them.
+    private func resolveMentions(in s: String) -> (String, [String]) {
+        guard s.contains("@"),
+              let regex = try? NSRegularExpression(pattern: "@(\\d{5,})") else {
+            return (s, [])
+        }
         var out = s
+        var styled: [String] = []
         let matches = regex.matches(in: s, range: NSRange(s.startIndex..<s.endIndex, in: s))
-        // Replace from the back so earlier ranges stay valid.
         for m in matches.reversed() {
             guard m.numberOfRanges >= 2,
                   let full = Range(m.range, in: out),
                   let digits = Range(m.range(at: 1), in: out) else { continue }
             let phone = String(out[digits])
             let candidates = ["\(phone)@s.whatsapp.net", "\(phone)@lid"]
+            var replacement = "@\(phone)"
             for jid in candidates {
                 let name = mentionResolver(jid)
                 if name != phone, !name.isEmpty {
-                    out.replaceSubrange(full, with: "@\(name)")
+                    replacement = "@\(name)"
                     break
                 }
             }
+            out.replaceSubrange(full, with: replacement)
+            styled.append(replacement)
         }
-        return out
+        return (out, styled)
     }
 
     @ViewBuilder

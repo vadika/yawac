@@ -22,6 +22,9 @@ struct ContentView: View {
                 Text("Select a chat").foregroundStyle(.secondary)
             }
         }
+        .onChange(of: selectedChat) { _, new in
+            if let new { chatList?.markRead(new) }
+        }
         .task {
             guard let client = session.client else { return }
             let vm = ChatListViewModel(client: client, context: modelContext)

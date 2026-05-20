@@ -33,9 +33,24 @@ final class ChatListViewModel {
         // Skip protocol/system noise — no UI value
         if message.kind == "protocol" || message.kind == "system" { return }
 
+        // Dedupe: if this message id is already persisted, this is a replay
+        // (e.g. HistorySync redelivering on reconnect). Skip unread/preview
+        // bumps so counts don't grow on every restart.
+        let alreadySeen: Bool
+        if let context {
+            let id = message.id
+            let descriptor = FetchDescriptor<PersistedMessage>(
+                predicate: #Predicate { $0.id == id })
+            alreadySeen = (try? context.fetch(descriptor).first) != nil
+        } else {
+            alreadySeen = false
+        }
+
         // Persist every incoming message so history is available even when the
         // conversation view hasn't been opened yet.
         persistMessage(message)
+
+        if alreadySeen { return }
 
         let preview: String
         if let text = message.text, !text.isEmpty {
