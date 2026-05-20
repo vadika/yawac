@@ -3,6 +3,8 @@ package bridge
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"os"
 
 	waWeb "go.mau.fi/whatsmeow/proto/waWeb"
 	"go.mau.fi/whatsmeow/types"
@@ -132,6 +134,10 @@ func (c *Client) dispatchWebMessage(chatJID string, wm *waWeb.WebMessageInfo) {
 		if chat, err := types.ParseJID(chatJID); err == nil {
 			if evt, err := c.wa.ParseWebMessage(chat, wm); err == nil {
 				c.dispatchPollVote(evt)
+			} else {
+				fmt.Fprintf(os.Stderr,
+					"[yawac/poll-history] ParseWebMessage fail chat=%s id=%s err=%v\n",
+					chatJID, key.GetID(), err)
 			}
 		}
 		return
