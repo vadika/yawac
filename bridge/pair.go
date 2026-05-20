@@ -17,6 +17,15 @@ func (c *Client) Connect() error {
 		return errors.New("client closed")
 	}
 	c.wa.AddEventHandler(c.handleWAEvent)
+	// Install (or replace) the lifecycle context that background loops
+	// use to know when the client is closing. Cancel any prior one so we
+	// don't leak ticker goroutines across Connect → Close → Connect
+	// cycles within the same process.
+	if c.cancel != nil {
+		c.cancel()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	c.cancel = cancel
 	c.mu.Unlock()
 
 	if c.wa.Store.ID == nil {
@@ -26,7 +35,14 @@ func (c *Client) Connect() error {
 		}
 		go c.pumpQR(qrChan)
 	}
-	return c.wa.Connect()
+	if err := c.wa.Connect(); err != nil {
+		return err
+	}
+	// Background prekey top-up: whatsmeow only checks the server count
+	// at Connect-time, so long-running sessions can fall below
+	// MinPreKeyCount. We poll every 30 minutes and upload more if so.
+	c.startPrekeyTopUpLoop(ctx)
+	return nil
 }
 
 func (c *Client) pumpQR(ch <-chan whatsmeow.QRChannelItem) {

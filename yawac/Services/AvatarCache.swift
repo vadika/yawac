@@ -5,6 +5,10 @@ actor AvatarCache {
     private var inflight: [String: Task<URL?, Never>] = [:]
     private var negativeCache: Set<String> = []
     private let baseDir: URL
+    // Throttle concurrent profile-picture HTTP calls — too many in
+    // flight at once trips WhatsApp's 429 IQ rate limiter (no global
+    // IQ throttle on the bridge side; see docs/TODO.md "Rate limits").
+    private let semaphore = AvatarSemaphore(limit: 4)
 
     init() {
         let mediaBase = (try? AppPaths.mediaCacheURL()) ??
@@ -28,7 +32,10 @@ actor AvatarCache {
         if FileManager.default.fileExists(atPath: url.path) { return url }
         if let t = inflight[jid] { return await t.value }
 
+        let sem = semaphore
         let task: Task<URL?, Never> = Task.detached(priority: .utility) {
+            await sem.acquire()
+            defer { Task { await sem.release() } }
             do {
                 let result = try client.fetchProfilePicture(jid: jid, outPath: url.path)
                 return result.isEmpty ? nil : URL(filePath: result)
@@ -41,5 +48,36 @@ actor AvatarCache {
         inflight[jid] = nil
         if result == nil { negativeCache.insert(jid) }
         return result
+    }
+}
+
+// Counting semaphore for capping concurrent profile-picture fetches.
+// Implemented as an actor so it's safe to share across detached tasks
+// without locks. Acquire suspends until a permit is free; release
+// either hands the permit to the longest-waiting task or returns it
+// to the pool.
+actor AvatarSemaphore {
+    private var permits: Int
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    init(limit: Int) { self.permits = limit }
+
+    func acquire() async {
+        if permits > 0 {
+            permits -= 1
+            return
+        }
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            waiters.append(cont)
+        }
+    }
+
+    func release() {
+        if let w = waiters.first {
+            waiters.removeFirst()
+            w.resume()
+        } else {
+            permits += 1
+        }
     }
 }

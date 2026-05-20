@@ -129,6 +129,31 @@ func (c *Client) dispatchWebMessage(chatJID string, wm *waWeb.WebMessageInfo) {
 		c.dispatchReaction(chatJID, senderJID, int64(wm.GetMessageTimestamp()), r)
 		return
 	}
+	// Community-announcement encrypted reactions in historical backfills.
+	// DecryptReaction needs a real *events.Message; build one via
+	// ParseWebMessage. We've never actually observed HistorySync ship
+	// these (mirrors the plain reaction case — see docs/TODO.md
+	// "Historical reactions — unrecoverable") but the path is here for
+	// when the protocol changes.
+	if msg.GetEncReactionMessage() != nil {
+		chat, perr := types.ParseJID(chatJID)
+		if perr != nil {
+			return
+		}
+		evt, perr := c.wa.ParseWebMessage(chat, wm)
+		if perr != nil || evt == nil {
+			return
+		}
+		decrypted, err := c.wa.DecryptReaction(context.Background(), evt)
+		if err == nil && decrypted != nil {
+			c.dispatchReaction(chatJID, senderJID, int64(wm.GetMessageTimestamp()), decrypted)
+		} else {
+			fmt.Fprintf(os.Stderr,
+				"[yawac/enc-reaction-history] decrypt fail chat=%s sender=%s err=%v\n",
+				chatJID, senderJID, err)
+		}
+		return
+	}
 	if msg.GetPollUpdateMessage() != nil {
 		// HistorySync rarely (currently never observed) ships vote events,
 		// but if one arrives we try to decrypt + dispatch it. The creation's

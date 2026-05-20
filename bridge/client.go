@@ -68,6 +68,12 @@ func NewClient(dbPath string) (*Client, error) {
 	}
 	log := waLog.Stdout("whatsmeow", "INFO", true)
 	wa := whatsmeow.NewClient(dev, log)
+	// Keep an in-memory copy of outgoing messages so retry receipts
+	// received shortly after a restart can still be served instead of
+	// being dropped. See docs/TODO.md: "Should enable
+	// Client.UseRetryMessageStore = true to survive restarts during
+	// retry windows."
+	wa.UseRetryMessageStore = true
 	return &Client{
 		wa:           wa,
 		dbPath:       dbPath,

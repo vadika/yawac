@@ -84,6 +84,27 @@ func (c *Client) dispatchMessage(evt *events.Message) {
 		)
 		return
 	}
+	// Community-announcement groups wrap reactions in EncReactionMessage
+	// rather than the plain ReactionMessage. Decrypt and dispatch through
+	// the same path so the UI is uniform. See docs/TODO.md "Reactions:
+	// Community-announcement encrypted reactions need explicit
+	// DecryptReaction".
+	if evt.Message.GetEncReactionMessage() != nil {
+		decrypted, err := c.wa.DecryptReaction(context.Background(), evt)
+		if err == nil && decrypted != nil {
+			c.dispatchReaction(
+				evt.Info.Chat.String(),
+				evt.Info.Sender.String(),
+				evt.Info.Timestamp.Unix(),
+				decrypted,
+			)
+		} else {
+			fmt.Fprintf(os.Stderr,
+				"[yawac/enc-reaction] decrypt fail chat=%s sender=%s err=%v\n",
+				evt.Info.Chat.String(), evt.Info.Sender.String(), err)
+		}
+		return
+	}
 	// Poll updates (votes) are not displayed as chat entries — they
 	// become tally updates on the original poll bubble.
 	if evt.Message.GetPollUpdateMessage() != nil {
