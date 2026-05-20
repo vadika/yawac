@@ -57,16 +57,22 @@ func (c *Client) applyHistorySync(evt *events.HistorySync) {
 		// Two-pass: store every message's secret first so subsequent vote
 		// decryption can find creation-message keys regardless of iteration
 		// order in this HistorySync chunk.
+		var pollCreates, pollVotes, withSecret int
 		if c.wa != nil && c.wa.Store != nil && c.wa.Store.MsgSecrets != nil {
 			for _, m := range conv.GetMessages() {
 				wm := m.GetMessage()
 				if wm == nil {
 					continue
 				}
+				if mb := wm.GetMessage(); mb != nil {
+					if isPollCreation(mb) { pollCreates++ }
+					if mb.GetPollUpdateMessage() != nil { pollVotes++ }
+				}
 				secret := wm.GetMessageSecret()
 				if len(secret) == 0 {
 					continue
 				}
+				withSecret++
 				key := wm.GetKey()
 				if key == nil {
 					continue
@@ -86,6 +92,12 @@ func (c *Client) applyHistorySync(evt *events.HistorySync) {
 				_ = c.wa.Store.MsgSecrets.PutMessageSecret(
 					ctx, chatJID, sender, key.GetID(), secret)
 			}
+		}
+
+		if pollCreates+pollVotes > 0 {
+			fmt.Fprintf(os.Stderr,
+				"[yawac/poll-history] conv=%s polls=%d votes=%d with_secret=%d total_msgs=%d\n",
+				chatJIDStr, pollCreates, pollVotes, withSecret, len(conv.GetMessages()))
 		}
 
 		for _, m := range conv.GetMessages() {
@@ -127,10 +139,9 @@ func (c *Client) dispatchWebMessage(chatJID string, wm *waWeb.WebMessageInfo) {
 		return
 	}
 	if msg.GetPollUpdateMessage() != nil {
-		// HistorySync poll votes can now be decrypted because the original
-		// poll creation's MessageSecret has been put into MsgSecretStore
-		// above (for the creation messages) — ParseWebMessage produces the
-		// *events.Message that DecryptPollVote needs.
+		fmt.Fprintf(os.Stderr,
+			"[yawac/poll-history] vote seen chat=%s id=%s from=%s\n",
+			chatJID, key.GetID(), senderJID)
 		if chat, err := types.ParseJID(chatJID); err == nil {
 			if evt, err := c.wa.ParseWebMessage(chat, wm); err == nil {
 				c.dispatchPollVote(evt)
