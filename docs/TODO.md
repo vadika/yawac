@@ -97,6 +97,114 @@ devices we have a Signal session with; it's incomplete in practice.
 the resolved push-name surfaces; you'll at least see the same display
 name on both rows.
 
+### whatsmeow limitations (research pass)
+
+Sourced from `whatsmeow@v0.0.0-20260516102357-8d3700152a69` + upstream
+issues. Items below are protocol-level constraints we can't fix
+client-side; they shape what yawac can sensibly support.
+
+#### Calls
+- Voice/video cannot be initiated or answered from a companion
+  (`call.go:106-121`). Only inbound `RejectCall` is exposed.
+- yawac action: show incoming-call banner; "open phone to answer".
+
+#### Status / broadcast
+- Status post recipient list comes from local contact cache
+  (`broadcast.go:77`); may miss recipients before app-state contact sync
+  completes.
+- No "viewed by X" events surfaced.
+
+#### Newsletter / Channels
+- `Platform == MACOS` triggers `argo decoding is currently broken`
+  (`newsletter.go:173,208`). Keep a non-MACOS UA.
+- `NewsletterMarkViewed` drops the server response (`newsletter.go:78`).
+
+#### Polls
+- `BuildPollCreation` silently clamps invalid `selectableOptionCount` to 0
+  (`msgsecret.go:328`). Validate client-side.
+- No high-level "add option" builder despite `EncSecretPollAddOption`
+  (`msgsecret.go:38`).
+- LID-migration secret-lookup fallback in `msgsecret.go:115` can fail
+  silently. Some PN↔LID vote decrypts will never succeed (upstream #1076).
+
+#### Reactions
+- Community-announcement encrypted reactions need explicit
+  `DecryptReaction` (`msgsecret.go:172`); not auto-decrypted.
+- Same LID-migration silent decrypt failure as polls.
+
+#### Media
+- View-once messages return full payload; yawac must enforce "viewed" state.
+- Sticker packs need a separate `FetchStickerPack(packID)` call
+  (`download.go:209`).
+- Mid-quality variants aren't exposed.
+- `ReturnDownloadWarnings` is a package global (`download.go:330`), not
+  per-client.
+- No chunked upload; large files = single POST.
+- `media_conn` refresh has no client-side throttle beyond TTL — yawac adds
+  its own 30 s cooldown.
+- `ErrMediaNotAvailableOnPhone` from MediaRetry = terminal, do not loop.
+
+#### Groups
+- Community announcement groups still send PN-addressed despite LID
+  context (`send.go:1190` "very hacky hack"). Expect occasional decrypt
+  issues at recipient end.
+- Cached group addressing mode never re-checked (`group.go:973`);
+  invalidate on any `GroupInfo` change.
+- Topic-set sender may be missing (`group.go:734`).
+- Participant-hash mismatch on send doesn't invalidate device list
+  (`send.go:453,458`); some devices may miss messages.
+
+#### Disappearing messages
+- Library does NOT auto-wrap outgoing messages in `EphemeralMessage`.
+  yawac must track per-chat timer and wrap manually.
+- `disappearing_mode` notifications aren't surfaced (`notification.go:496`),
+  so changes to default timer on phone go unnoticed.
+
+#### Encryption / retries
+- Retry receipts capped at 5 (`retry.go:482`). Past that, message is lost.
+- Retry requests drop after 10 internal counts (`retry.go:238`); peer may
+  never receive.
+- Session re-create throttled to 1/hour/peer (`retry.go:157`).
+- Should enable `Client.UseRetryMessageStore = true` to survive restarts
+  during retry windows.
+- Prekey top-up runs only on connect (`prekeys.go:25-30`); long-running
+  sessions risk drift below `MinPreKeyCount`.
+
+#### App-state sync
+- Cannot create new keys (`appstate.go:526`). Lose them → re-pair
+  required. NEVER drop `app_state_sync_keys`.
+- `ClearChatAction.DeleteMedia` may parse wrong (`appstate.go:298`).
+- Key-request retry interval hard-coded 24 h (`appstate.go:469`); mute
+  /archive can lag a day.
+
+#### LID / Privacy
+- Encryption-time LID lookups are local-cache only (`send.go:1290`).
+  Missing entries → send may go to wrong identity.
+- `icdc` identity data not fully stored (`user.go:778,780,792`).
+
+#### Login / re-pair
+- `device_removed` (401) deletes the store automatically
+  (`connectionevents.go:40-47`). yawac should back up the SQLite store
+  before letting this run, or rely on user re-pair.
+- Fresh-pair first outbound may not deliver (upstream #1095). Add 2-3 s
+  delay after pair-success before first send.
+- iOS pairing first attempt often fails (upstream #1039).
+
+#### Rate limits
+- No global IQ throttle. Bursts of `GetUserInfo` / `GetProfilePictureInfo`
+  / HistorySync-fanout queries can hit `ErrIQRateOverLimit` (429).
+  yawac should add a semaphore around these calls.
+
+#### Protocol / version drift
+- `store.SetWAVersion` is NOT auto-updated; outdated builds hit 405
+  `ClientOutdated`.
+- Known data race in FrameSocket (upstream #1085).
+- Unknown server error 463 with no recovery (upstream #1074).
+
+#### Receipts / edits
+- `played-self` not distinguished (`receipt.go:212`).
+- Edit timestamp precision may be lost (`message.go:258`).
+
 ### Other deferred items
 
 - Past media (PDFs/etc) that hash-mismatch on download: `DownloadMediaForce`
