@@ -42,9 +42,13 @@ and apparently doesn't replay individual vote events to companion devices.
 
 ### Other deferred items
 
-- Past media (PDFs/etc) that hash-mismatch on download fall back to
-  `DownloadMediaForce` (skips SHA + HMAC) — file may differ from original
-  upload. No clean fix without server cooperation.
+- Past media (PDFs/etc) that hash-mismatch on download: `DownloadMediaForce`
+  fallback also runs a plaintext-SHA check; when the server returns
+  genuinely-different bytes (file deleted, re-uploaded, or never available
+  to this companion), the bubble shows
+  `plaintext sha mismatch — server returned wrong bytes` instead of saving
+  garbage. MediaRetry receipt may recover when the phone has the original
+  file; otherwise unrecoverable from a companion device.
 - `@<phone>` mentions for users who never sent a message + aren't in
   contacts: leave as raw digits (no push-name source).
 - Multi-select poll UI: tap = replaces current selection; no batch
