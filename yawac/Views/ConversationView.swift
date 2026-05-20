@@ -2,11 +2,51 @@ import SwiftUI
 import SwiftData
 import UniformTypeIdentifiers
 
+private enum TimelineItem {
+    case dateHeader(Date)
+    case message(UIMessage)
+}
+
+private struct DateSeparator: View {
+    let date: Date
+    var body: some View {
+        HStack {
+            VStack { Divider() }
+            Text(date, format: .dateTime.weekday(.abbreviated).day().month(.abbreviated).year())
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 6)
+            VStack { Divider() }
+        }
+        .padding(.vertical, 4)
+    }
+}
+
 struct ConversationView: View {
     let chatJID: String
     @Environment(SessionViewModel.self) private var session
     @Environment(\.modelContext) private var modelContext
     @State private var vm: ConversationViewModel?
+
+    /// Walks messages in chronological order, prepending a `.dateHeader`
+    /// whenever the day changes.
+    private func timeline() -> [TimelineItem] {
+        guard let vm else { return [] }
+        let cal = Calendar.current
+        var out: [TimelineItem] = []
+        var lastDay: DateComponents?
+        for m in vm.messages {
+            let day = cal.dateComponents([.year, .month, .day], from: m.timestamp)
+            if day != lastDay {
+                if let header = cal.date(from: day) {
+                    out.append(.dateHeader(header))
+                }
+                lastDay = day
+            }
+            out.append(.message(m))
+        }
+        return out
+    }
 
     var body: some View {
         Group {
@@ -15,16 +55,22 @@ struct ConversationView: View {
                     ScrollViewReader { proxy in
                         ScrollView {
                             LazyVStack(spacing: 6) {
-                                ForEach(vm.messages) { msg in
-                                    MessageRow(
-                                        message: msg,
-                                        status: vm.receiptStatus[msg.id],
-                                        senderName: session.displayName(for: msg.senderJID),
-                                        localPath: vm.localPaths[msg.id],
-                                        reactions: vm.reactions(for: msg.id),
-                                        downloadError: vm.downloadErrors[msg.id],
-                                        onRetryDownload: vm.retryHandler(for: msg)
-                                    ).id(msg.id)
+                                ForEach(Array(timeline().enumerated()), id: \.offset) { _, item in
+                                    switch item {
+                                    case .dateHeader(let date):
+                                        DateSeparator(date: date)
+                                    case .message(let msg):
+                                        MessageRow(
+                                            message: msg,
+                                            status: vm.receiptStatus[msg.id],
+                                            senderName: session.displayName(for: msg.senderJID),
+                                            localPath: vm.localPaths[msg.id],
+                                            reactions: vm.reactions(for: msg.id),
+                                            downloadError: vm.downloadErrors[msg.id],
+                                            onRetryDownload: vm.retryHandler(for: msg),
+                                            mentionResolver: { jid in session.displayName(for: jid) }
+                                        ).id(msg.id)
+                                    }
                                 }
                             }
                             .padding()

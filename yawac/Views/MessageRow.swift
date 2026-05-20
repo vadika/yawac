@@ -10,12 +10,14 @@ struct MessageRow: View {
     let reactions: [String]
     let downloadError: String?
     let onRetryDownload: (() -> Void)?
+    let mentionResolver: (String) -> String
 
     init(message: UIMessage, status: UIMessage.Status? = nil,
          senderName: String? = nil, localPath: String? = nil,
          reactions: [String] = [],
          downloadError: String? = nil,
-         onRetryDownload: (() -> Void)? = nil) {
+         onRetryDownload: (() -> Void)? = nil,
+         mentionResolver: @escaping (String) -> String = { $0 }) {
         self.message = message
         self.status = status
         self.senderName = senderName
@@ -23,6 +25,7 @@ struct MessageRow: View {
         self.reactions = reactions
         self.downloadError = downloadError
         self.onRetryDownload = onRetryDownload
+        self.mentionResolver = mentionResolver
     }
 
     private var isGroupChat: Bool { message.chatJID.hasSuffix("@g.us") }
@@ -88,12 +91,54 @@ struct MessageRow: View {
     private var bodyView: some View {
         switch message.body {
         case .text(let s):
-            Text(s).textSelection(.enabled)
+            Text(richText(from: s)).textSelection(.enabled)
         case .media(let kind, let caption, let fileName, let path):
             mediaView(kind: kind, caption: caption, fileName: fileName, path: path)
         case .system(let s):
             Text(s).font(.caption).foregroundStyle(.secondary)
         }
+    }
+
+    /// Returns an `AttributedString` with @mentions resolved to display names
+    /// and any URLs auto-linked.
+    private func richText(from raw: String) -> AttributedString {
+        var attr = AttributedString(resolveMentions(in: raw))
+        let str = String(attr.characters)
+        let detector = try? NSDataDetector(
+            types: NSTextCheckingResult.CheckingType.link.rawValue)
+        let nsRange = NSRange(str.startIndex..<str.endIndex, in: str)
+        detector?.enumerateMatches(in: str, range: nsRange) { match, _, _ in
+            guard let match, let url = match.url,
+                  let range = Range(match.range, in: str),
+                  let attrRange = attr.range(of: String(str[range])) else { return }
+            attr[attrRange].link = url
+            attr[attrRange].foregroundColor = .accentColor
+            attr[attrRange].underlineStyle = .single
+        }
+        return attr
+    }
+
+    /// Replaces `@<digits>` mentions with `@<display name>` via the resolver.
+    private func resolveMentions(in s: String) -> String {
+        guard s.contains("@") else { return s }
+        // Match @ followed by 5+ digits (WhatsApp phone numbers).
+        guard let regex = try? NSRegularExpression(pattern: "@(\\d{5,})") else { return s }
+        var out = s
+        let matches = regex.matches(in: s, range: NSRange(s.startIndex..<s.endIndex, in: s))
+        // Replace from the back so earlier ranges stay valid.
+        for m in matches.reversed() {
+            guard m.numberOfRanges >= 2,
+                  let full = Range(m.range, in: out),
+                  let digits = Range(m.range(at: 1), in: out) else { continue }
+            let phone = String(out[digits])
+            let jid = "\(phone)@s.whatsapp.net"
+            let name = mentionResolver(jid)
+            // Only rewrite if resolver produced something other than the phone.
+            if name != phone, !name.isEmpty {
+                out.replaceSubrange(full, with: "@\(name)")
+            }
+        }
+        return out
     }
 
     @ViewBuilder
