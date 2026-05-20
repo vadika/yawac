@@ -128,8 +128,9 @@ client-side; they shape what yawac can sensibly support.
   silently. Some PN↔LID vote decrypts will never succeed (upstream #1076).
 
 #### Reactions
-- Community-announcement encrypted reactions need explicit
-  `DecryptReaction` (`msgsecret.go:172`); not auto-decrypted.
+- ~~Community-announcement encrypted reactions need explicit
+  `DecryptReaction`~~ — handled in `bridge/messages.go` +
+  `bridge/history.go` (both live and history-sync paths).
 - Same LID-migration silent decrypt failure as polls.
 
 #### Media
@@ -165,10 +166,11 @@ client-side; they shape what yawac can sensibly support.
 - Retry requests drop after 10 internal counts (`retry.go:238`); peer may
   never receive.
 - Session re-create throttled to 1/hour/peer (`retry.go:157`).
-- Should enable `Client.UseRetryMessageStore = true` to survive restarts
-  during retry windows.
-- Prekey top-up runs only on connect (`prekeys.go:25-30`); long-running
-  sessions risk drift below `MinPreKeyCount`.
+- ~~Should enable `Client.UseRetryMessageStore = true`~~ — applied in
+  `bridge/client.go`.
+- ~~Prekey top-up runs only on connect~~ — `bridge/prekeys.go` runs a
+  30 min loop calling `DangerousInternals.GetServerPreKeyCount` +
+  `UploadPreKeys` while connected.
 
 #### App-state sync
 - Cannot create new keys (`appstate.go:526`). Lose them → re-pair
@@ -191,9 +193,10 @@ client-side; they shape what yawac can sensibly support.
 - iOS pairing first attempt often fails (upstream #1039).
 
 #### Rate limits
-- No global IQ throttle. Bursts of `GetUserInfo` / `GetProfilePictureInfo`
-  / HistorySync-fanout queries can hit `ErrIQRateOverLimit` (429).
-  yawac should add a semaphore around these calls.
+- No global IQ throttle in whatsmeow. yawac mitigates via:
+  - `AvatarSemaphore(limit: 4)` around `FetchProfilePicture` calls.
+  - 30 s cooldown on force `RefreshMediaConn` (`bridge/client.go`).
+  - Still vulnerable on `GetUserInfo` bursts — wrap if needed.
 
 #### Protocol / version drift
 - `store.SetWAVersion` is NOT auto-updated; outdated builds hit 405
