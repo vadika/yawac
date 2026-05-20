@@ -229,7 +229,10 @@ final class ConversationViewModel {
     private func tryRequestMediaRetry(messageID: String, reason: String) {
         guard !retriesRequested.contains(messageID) else { return }
         let lower = reason.lowercased()
-        let triggers = ["403", "404", "410", "hash of media ciphertext"]
+        let triggers = ["403", "404", "410",
+                        "hash of media ciphertext",
+                        "plaintext sha mismatch",
+                        "sha mismatch"]
         guard triggers.contains(where: { lower.contains($0) }) else { return }
         guard let context else { return }
         let descriptor = FetchDescriptor<PersistedMessage>(predicate: #Predicate { $0.id == messageID })
