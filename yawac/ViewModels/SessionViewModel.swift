@@ -25,6 +25,14 @@ final class SessionViewModel {
         for g in gs where !g.name.isEmpty { contactNames[g.jid] = g.name }
     }
 
+    /// Records a sender's push-name (the name they set on their phone)
+    /// against their JID. Lower priority than explicit contact names —
+    /// only inserted when no other name is known.
+    func ingestPushName(jid: String, name: String?) {
+        guard let name, !name.isEmpty, contactNames[jid] == nil else { return }
+        contactNames[jid] = name
+    }
+
     func displayName(for jid: String) -> String {
         if let n = contactNames[jid] { return n }
         if let at = jid.firstIndex(of: "@") {

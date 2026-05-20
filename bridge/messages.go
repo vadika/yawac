@@ -48,12 +48,13 @@ func (c *Client) dispatchMessage(evt *events.Message) {
 		return
 	}
 	jm := JMessage{
-		ID:        evt.Info.ID,
-		ChatJID:   evt.Info.Chat.String(),
-		SenderJID: evt.Info.Sender.String(),
-		FromMe:    evt.Info.IsFromMe,
-		Timestamp: evt.Info.Timestamp.Unix(),
-		Kind:      classifyMessage(evt.Message),
+		ID:             evt.Info.ID,
+		ChatJID:        evt.Info.Chat.String(),
+		SenderJID:      evt.Info.Sender.String(),
+		SenderPushName: evt.Info.PushName,
+		FromMe:         evt.Info.IsFromMe,
+		Timestamp:      evt.Info.Timestamp.Unix(),
+		Kind:           classifyMessage(evt.Message),
 	}
 	switch {
 	case evt.Message.GetConversation() != "":

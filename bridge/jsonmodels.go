@@ -3,15 +3,16 @@ package bridge
 // All JSON payloads exchanged with Swift are defined here for review.
 
 type JMessage struct {
-	ID        string  `json:"id"`
-	ChatJID   string  `json:"chat_jid"`
-	SenderJID string  `json:"sender_jid"`
-	FromMe    bool    `json:"from_me"`
-	Timestamp int64   `json:"timestamp"`
-	Kind      string  `json:"kind"` // text, image, video, audio, document, sticker, location, system
-	Text      string  `json:"text,omitempty"`
-	Media     *JMedia `json:"media,omitempty"`
-	QuotedID  string  `json:"quoted_id,omitempty"`
+	ID             string  `json:"id"`
+	ChatJID        string  `json:"chat_jid"`
+	SenderJID      string  `json:"sender_jid"`
+	SenderPushName string  `json:"sender_push_name,omitempty"`
+	FromMe         bool    `json:"from_me"`
+	Timestamp      int64   `json:"timestamp"`
+	Kind           string  `json:"kind"` // text, image, video, audio, document, sticker, location, system
+	Text           string  `json:"text,omitempty"`
+	Media          *JMedia `json:"media,omitempty"`
+	QuotedID       string  `json:"quoted_id,omitempty"`
 }
 
 type JMedia struct {

@@ -38,6 +38,7 @@ struct ContentView: View {
             for await event in stream {
                 switch event {
                 case .message(let m):
+                    session.ingestPushName(jid: m.senderJID, name: m.senderPushName)
                     vm.ingest(m)
                 case .historySync:
                     let cs = (try? client.listContacts()) ?? []

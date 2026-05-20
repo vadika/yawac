@@ -116,6 +116,7 @@ struct ConversationView: View {
             for await event in stream {
                 switch event {
                 case .message(let m):
+                    session.ingestPushName(jid: m.senderJID, name: m.senderPushName)
                     vm.ingest(m)
                 case .chatPresence(let chat, _, let typing) where chat == chatJID:
                     vm.peerTyping = typing

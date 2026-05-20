@@ -91,12 +91,13 @@ func (c *Client) dispatchWebMessage(chatJID string, wm *waWeb.WebMessageInfo) {
 		return // skip noise
 	}
 	jm := JMessage{
-		ID:        key.GetID(),
-		ChatJID:   chatJID,
-		SenderJID: senderJID,
-		FromMe:    key.GetFromMe(),
-		Timestamp: int64(wm.GetMessageTimestamp()),
-		Kind:      kind,
+		ID:             key.GetID(),
+		ChatJID:        chatJID,
+		SenderJID:      senderJID,
+		SenderPushName: wm.GetPushName(),
+		FromMe:         key.GetFromMe(),
+		Timestamp:      int64(wm.GetMessageTimestamp()),
+		Kind:           kind,
 	}
 	switch {
 	case msg.GetConversation() != "":

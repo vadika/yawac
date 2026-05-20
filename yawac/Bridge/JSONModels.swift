@@ -4,6 +4,7 @@ struct BridgeMessage: Codable, Identifiable {
     let id: String
     let chatJID: String
     let senderJID: String
+    let senderPushName: String?
     let fromMe: Bool
     let timestamp: Int64
     let kind: String
@@ -15,6 +16,7 @@ struct BridgeMessage: Codable, Identifiable {
         case id
         case chatJID = "chat_jid"
         case senderJID = "sender_jid"
+        case senderPushName = "sender_push_name"
         case fromMe = "from_me"
         case timestamp, kind, text, media
         case quotedID = "quoted_id"
