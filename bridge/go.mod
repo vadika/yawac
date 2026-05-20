@@ -37,3 +37,7 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
 )
+
+// Local fork carrying upstream PRs #1120 (appstate auto-recovery) and #1148
+// (LID privacy tokens). See /Users/vadikas/Work/yawac/docs/whatsmeow-patches.md.
+replace go.mau.fi/whatsmeow => /Users/vadikas/Work/vendor/whatsmeow-fork
