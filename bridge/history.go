@@ -52,6 +52,40 @@ func (c *Client) applyHistorySync(evt *events.HistorySync) {
 			_ = c.wa.Store.Contacts.PutContactName(ctx, chatJID, name, "")
 		}
 
+		// Two-pass: store every message's secret first so subsequent vote
+		// decryption can find creation-message keys regardless of iteration
+		// order in this HistorySync chunk.
+		if c.wa != nil && c.wa.Store != nil && c.wa.Store.MsgSecrets != nil {
+			for _, m := range conv.GetMessages() {
+				wm := m.GetMessage()
+				if wm == nil {
+					continue
+				}
+				secret := wm.GetMessageSecret()
+				if len(secret) == 0 {
+					continue
+				}
+				key := wm.GetKey()
+				if key == nil {
+					continue
+				}
+				senderStr := key.GetParticipant()
+				if senderStr == "" {
+					if key.GetFromMe() && c.wa.Store.ID != nil {
+						senderStr = c.wa.Store.ID.String()
+					} else {
+						senderStr = chatJIDStr
+					}
+				}
+				sender, err := types.ParseJID(senderStr)
+				if err != nil {
+					continue
+				}
+				_ = c.wa.Store.MsgSecrets.PutMessageSecret(
+					ctx, chatJID, sender, key.GetID(), secret)
+			}
+		}
+
 		for _, m := range conv.GetMessages() {
 			wm := m.GetMessage()
 			if wm == nil {
@@ -82,14 +116,24 @@ func (c *Client) dispatchWebMessage(chatJID string, wm *waWeb.WebMessageInfo) {
 			senderJID = c.wa.Store.ID.String()
 		}
 	}
+
+	// Note: per-message MessageSecret is persisted by applyHistorySync's
+	// two-pass loop above so vote decryption can find any creation key
+	// regardless of HistorySync iteration order.
 	if r := msg.GetReactionMessage(); r != nil {
 		c.dispatchReaction(chatJID, senderJID, int64(wm.GetMessageTimestamp()), r)
 		return
 	}
-	// Skip poll-vote updates from history sync — we cannot decrypt them
-	// without the live *events.Message context that DecryptPollVote needs.
-	// Live votes received post-pair will still be tallied.
 	if msg.GetPollUpdateMessage() != nil {
+		// HistorySync poll votes can now be decrypted because the original
+		// poll creation's MessageSecret has been put into MsgSecretStore
+		// above (for the creation messages) — ParseWebMessage produces the
+		// *events.Message that DecryptPollVote needs.
+		if chat, err := types.ParseJID(chatJID); err == nil {
+			if evt, err := c.wa.ParseWebMessage(chat, wm); err == nil {
+				c.dispatchPollVote(evt)
+			}
+		}
 		return
 	}
 	kind := classifyMessage(msg)
