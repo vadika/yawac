@@ -2,6 +2,31 @@
 
 ## Known limitations
 
+### Historical reactions — unrecoverable
+
+**Symptom:** Reactions on messages received before pairing don't show.
+Only reactions cast by us after pair appear (via optimistic local
+tally + DB hydration on chat re-open).
+
+**Root cause:** WhatsApp's `HistorySync` payload doesn't include
+`ReactionMessage` events. Diagnostic confirmation across multiple
+conversations:
+
+```
+history reactions: 0
+live dispatches: 0     (when no live reactions during the window)
+```
+
+`bridge/history.go` walks every `Conversation.GetMessages()` and
+checks each `WebMessageInfo.GetMessage().GetReactionMessage()` — none
+ever match. The phone aggregates reactions internally and replays
+neither the individual reaction events nor any aggregate to companion
+devices.
+
+**Accepted constraint:** Past reaction state stays phone-only. Live
+reactions after pair work, persist via `PersistedReaction`, and
+hydrate on chat re-open.
+
 ### Historical poll vote tallies — unrecoverable
 
 **Symptom:** Polls created before pairing show 0 votes in yawac even when the
