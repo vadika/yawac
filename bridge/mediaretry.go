@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 
 	"go.mau.fi/whatsmeow"
 	waMmsRetry "go.mau.fi/whatsmeow/proto/waMmsRetry"
@@ -73,6 +74,17 @@ func (c *Client) handleMediaRetry(evt *events.MediaRetry) {
 		// Not one of ours — could be a retry triggered by another device.
 		return
 	}
+
+	hasError := evt.Error != nil
+	hasCipher := evt.Ciphertext != nil
+	errCode := 0
+	if evt.Error != nil {
+		errCode = evt.Error.Code
+	}
+	fmt.Fprintf(os.Stderr,
+		"[yawac/media-retry] evt msgID=%s mediaKey=%dB cipher=%dB iv=%dB error=%v code=%d\n",
+		msgID, len(ref.MediaKey), len(evt.Ciphertext), len(evt.IV), hasError, errCode)
+	_ = hasCipher
 
 	retryData, err := whatsmeow.DecryptMediaRetryNotification(evt, ref.MediaKey)
 	if err != nil {

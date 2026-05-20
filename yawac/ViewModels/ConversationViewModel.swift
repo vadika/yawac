@@ -107,6 +107,9 @@ final class ConversationViewModel {
         downloadErrors[messageID] = nil
         downloadTasks[messageID]?.cancel()
         downloadTasks[messageID] = nil
+        // User-tap retry clears the once-per-session MediaRetry guard so the
+        // phone can be re-asked.
+        retriesRequested.remove(messageID)
         ensureDownloadFromHistory(id: messageID, kind: kind, refJSON: refJSON)
     }
 
