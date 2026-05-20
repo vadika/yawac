@@ -14,6 +14,8 @@ final class ConversationViewModel {
     // Per-message reactions: targetMessageID -> senderJID -> emoji.
     // Nested so removing/updating a sender's reaction is O(1).
     var reactionsBySender: [String: [String: String]] = [:]
+    // Per-poll vote tally: pollMessageID -> optionHash -> Set<voterJID>.
+    var pollVotes: [String: [String: Set<String>]] = [:]
     var downloadErrors: [String: String] = [:]
     let client: WAClient
     private let context: ModelContext?
@@ -59,6 +61,16 @@ final class ConversationViewModel {
                     body = .text(p.text ?? "")
                 case "image", "video", "audio", "document", "sticker":
                     body = .media(kind: p.kind, caption: p.mediaCaption, fileName: p.mediaFileName, localPath: p.mediaPath)
+                case "poll":
+                    if let json = p.pollJSON,
+                       let data = json.data(using: .utf8),
+                       let poll = try? JSONDecoder().decode(BridgePoll.self, from: data) {
+                        body = .poll(question: poll.question,
+                                     options: poll.options,
+                                     selectableCount: poll.selectableCount)
+                    } else {
+                        body = .system(p.kind)
+                    }
                 default:
                     body = .system(p.kind)
                 }
@@ -350,7 +362,8 @@ final class ConversationViewModel {
             mediaPath: m.media?.filePath,
             mediaCaption: m.media?.caption,
             mediaFileName: m.media?.fileName,
-            mediaRefJSON: m.media?.ref?.json)
+            mediaRefJSON: m.media?.ref?.json,
+            pollJSON: m.poll?.json)
         context.insert(row)
         try? context.save()
     }
@@ -367,6 +380,75 @@ final class ConversationViewModel {
     /// Emoji aggregated for a message (one per unique sender, latest emoji wins).
     func reactions(for messageID: String) -> [String] {
         Array((reactionsBySender[messageID] ?? [:]).values)
+    }
+
+    /// Per-option vote counts for a given poll, keyed by option hash.
+    func voteCounts(for pollMessageID: String) -> [String: Int] {
+        guard let byHash = pollVotes[pollMessageID] else { return [:] }
+        var out: [String: Int] = [:]
+        for (hash, voters) in byHash {
+            out[hash] = voters.count
+        }
+        return out
+    }
+
+    func applyPollVote(pollMessageID: String, voterJID: String, optionHashes: [String]) {
+        var byHash = pollVotes[pollMessageID] ?? [:]
+        // A new vote from this voter replaces any prior selections — matches
+        // WhatsApp semantics for both single- and multi-select polls.
+        for hash in byHash.keys {
+            byHash[hash]?.remove(voterJID)
+            if byHash[hash]?.isEmpty == true {
+                byHash.removeValue(forKey: hash)
+            }
+        }
+        for hash in optionHashes {
+            var set = byHash[hash] ?? []
+            set.insert(voterJID)
+            byHash[hash] = set
+        }
+        if byHash.isEmpty {
+            pollVotes.removeValue(forKey: pollMessageID)
+        } else {
+            pollVotes[pollMessageID] = byHash
+        }
+    }
+
+    /// Cast a vote on the poll with the given message ID. `hashes` is the
+    /// list of option hashes the user picked; `options` is the full option
+    /// list from the original poll so the bridge can map hashes → names.
+    func castVote(messageID: String,
+                  hashes: [String],
+                  options: [BridgePollOption],
+                  pollSenderJID: String,
+                  pollFromMe: Bool) {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                _ = try self.client.sendPollVote(
+                    chatJID: self.chatJID,
+                    pollMsgID: messageID,
+                    pollSenderJID: pollSenderJID,
+                    pollFromMe: pollFromMe,
+                    optionHashes: hashes,
+                    pollOptions: options)
+                // Optimistically tally our own vote so the bubble updates
+                // immediately. The phone's PollUpdate echo (decryption may
+                // not fire for our own votes) won't overwrite this.
+                let me = "me"
+                self.applyPollVote(pollMessageID: messageID,
+                                   voterJID: me,
+                                   optionHashes: hashes)
+            } catch {
+                self.messages.append(UIMessage(
+                    id: UUID().uuidString,
+                    chatJID: self.chatJID,
+                    senderJID: "system",
+                    fromMe: false,
+                    timestamp: .now,
+                    body: .system("vote failed: \(error.localizedDescription)")))
+            }
+        }
     }
 
     func applyReaction(_ r: BridgeReaction) {

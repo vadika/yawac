@@ -86,6 +86,12 @@ func (c *Client) dispatchWebMessage(chatJID string, wm *waWeb.WebMessageInfo) {
 		c.dispatchReaction(chatJID, senderJID, int64(wm.GetMessageTimestamp()), r)
 		return
 	}
+	// Skip poll-vote updates from history sync — we cannot decrypt them
+	// without the live *events.Message context that DecryptPollVote needs.
+	// Live votes received post-pair will still be tallied.
+	if msg.GetPollUpdateMessage() != nil {
+		return
+	}
 	kind := classifyMessage(msg)
 	if kind == "protocol" || kind == "system" {
 		return // skip noise
@@ -115,6 +121,9 @@ func (c *Client) dispatchWebMessage(chatJID string, wm *waWeb.WebMessageInfo) {
 		jm.Media = mediaFromDocument(dm)
 	} else if sm := msg.GetStickerMessage(); sm != nil {
 		jm.Media = mediaFromSticker(sm)
+	}
+	if p := extractPoll(msg); p != nil {
+		jm.Poll = p
 	}
 	b, _ := json.Marshal(jm)
 	c.dispatch("Message", string(b))

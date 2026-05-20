@@ -14,12 +14,14 @@ final class PersistedMessage {
     var mediaCaption: String?
     var mediaFileName: String?
     var mediaRefJSON: String?
+    var pollJSON: String?
 
     init(id: String, chatJID: String, senderJID: String, fromMe: Bool,
          timestamp: Date, kind: String, text: String? = nil,
          mediaPath: String? = nil, mediaCaption: String? = nil,
          mediaFileName: String? = nil,
-         mediaRefJSON: String? = nil) {
+         mediaRefJSON: String? = nil,
+         pollJSON: String? = nil) {
         self.id = id
         self.chatJID = chatJID
         self.senderJID = senderJID
@@ -31,6 +33,7 @@ final class PersistedMessage {
         self.mediaCaption = mediaCaption
         self.mediaFileName = mediaFileName
         self.mediaRefJSON = mediaRefJSON
+        self.pollJSON = pollJSON
     }
 }
 

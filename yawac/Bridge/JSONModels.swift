@@ -10,6 +10,7 @@ struct BridgeMessage: Codable, Identifiable {
     let kind: String
     let text: String?
     let media: BridgeMedia?
+    let poll: BridgePoll?
     let quotedID: String?
 
     enum CodingKeys: String, CodingKey {
@@ -18,8 +19,30 @@ struct BridgeMessage: Codable, Identifiable {
         case senderJID = "sender_jid"
         case senderPushName = "sender_push_name"
         case fromMe = "from_me"
-        case timestamp, kind, text, media
+        case timestamp, kind, text, media, poll
         case quotedID = "quoted_id"
+    }
+}
+
+struct BridgePoll: Codable, Hashable {
+    let question: String
+    let options: [BridgePollOption]
+    let selectableCount: Int
+
+    enum CodingKeys: String, CodingKey {
+        case question, options
+        case selectableCount = "selectable_count"
+    }
+}
+
+struct BridgePollOption: Codable, Hashable {
+    let name: String
+    let hash: String
+}
+
+extension BridgePoll {
+    var json: String? {
+        (try? JSONEncoder().encode(self)).flatMap { String(data: $0, encoding: .utf8) }
     }
 }
 

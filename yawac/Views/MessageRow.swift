@@ -10,6 +10,8 @@ struct MessageRow: View {
     let reactions: [String]
     let downloadError: String?
     let onRetryDownload: (() -> Void)?
+    let voteCounts: [String: Int]
+    let onCastVote: (([String], [BridgePollOption]) -> Void)?
     let mentionResolver: (String) -> String
 
     init(message: UIMessage, status: UIMessage.Status? = nil,
@@ -17,6 +19,8 @@ struct MessageRow: View {
          reactions: [String] = [],
          downloadError: String? = nil,
          onRetryDownload: (() -> Void)? = nil,
+         voteCounts: [String: Int] = [:],
+         onCastVote: (([String], [BridgePollOption]) -> Void)? = nil,
          mentionResolver: @escaping (String) -> String = { $0 }) {
         self.message = message
         self.status = status
@@ -25,6 +29,8 @@ struct MessageRow: View {
         self.reactions = reactions
         self.downloadError = downloadError
         self.onRetryDownload = onRetryDownload
+        self.voteCounts = voteCounts
+        self.onCastVote = onCastVote
         self.mentionResolver = mentionResolver
     }
 
@@ -94,9 +100,53 @@ struct MessageRow: View {
             Text(richText(from: s)).textSelection(.enabled)
         case .media(let kind, let caption, let fileName, let path):
             mediaView(kind: kind, caption: caption, fileName: fileName, path: path)
+        case .poll(let q, let options, let selectable):
+            pollView(question: q, options: options, selectableCount: selectable)
         case .system(let s):
             Text(s).font(.caption).foregroundStyle(.secondary)
         }
+    }
+
+    @ViewBuilder
+    private func pollView(question: String,
+                          options: [BridgePollOption],
+                          selectableCount: Int) -> some View {
+        let totalVotes = voteCounts.values.reduce(0, +)
+        VStack(alignment: .leading, spacing: 6) {
+            Text(question).font(.callout).bold()
+            ForEach(options, id: \.hash) { opt in
+                let count = voteCounts[opt.hash] ?? 0
+                Button {
+                    onCastVote?([opt.hash], options)
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: selectableCount > 1 ? "square" : "circle")
+                            .foregroundStyle(.secondary)
+                        Text(opt.name)
+                        Spacer(minLength: 8)
+                        if count > 0 {
+                            Text("\(count)")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .disabled(onCastVote == nil)
+                .padding(.vertical, 2)
+            }
+            HStack(spacing: 6) {
+                Text(selectableCount > 1 ? "Multiple choices" : "Single choice")
+                if totalVotes > 0 {
+                    Text("·")
+                    Text("\(totalVotes) vote\(totalVotes == 1 ? "" : "s")")
+                }
+            }
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: 320, alignment: .leading)
     }
 
     /// Returns an `AttributedString` with @mentions styled bold + tinted and

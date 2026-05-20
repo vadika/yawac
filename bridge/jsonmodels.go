@@ -9,10 +9,30 @@ type JMessage struct {
 	SenderPushName string  `json:"sender_push_name,omitempty"`
 	FromMe         bool    `json:"from_me"`
 	Timestamp      int64   `json:"timestamp"`
-	Kind           string  `json:"kind"` // text, image, video, audio, document, sticker, location, system
+	Kind           string  `json:"kind"` // text, image, video, audio, document, sticker, location, poll, system
 	Text           string  `json:"text,omitempty"`
 	Media          *JMedia `json:"media,omitempty"`
+	Poll           *JPoll  `json:"poll,omitempty"`
 	QuotedID       string  `json:"quoted_id,omitempty"`
+}
+
+type JPoll struct {
+	Question        string        `json:"question"`
+	Options         []JPollOption `json:"options"`
+	SelectableCount int           `json:"selectable_count"` // 1 = single-choice, >1 = multi
+}
+
+type JPollOption struct {
+	Name string `json:"name"`
+	Hash string `json:"hash"` // hex-encoded SHA256(name) — opaque id used for vote tallies
+}
+
+type JPollVote struct {
+	ChatJID       string   `json:"chat_jid"`
+	PollMessageID string   `json:"poll_message_id"`
+	VoterJID      string   `json:"voter_jid"`
+	OptionHashes  []string `json:"option_hashes"`
+	Timestamp     int64    `json:"timestamp"`
 }
 
 type JMedia struct {

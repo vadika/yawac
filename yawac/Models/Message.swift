@@ -11,6 +11,7 @@ struct UIMessage: Identifiable, Hashable {
     enum Body: Hashable {
         case text(String)
         case media(kind: String, caption: String?, fileName: String?, localPath: String?)
+        case poll(question: String, options: [BridgePollOption], selectableCount: Int)
         case system(String)
     }
 }
@@ -39,6 +40,14 @@ extension UIMessage {
                                caption: b.media?.caption,
                                fileName: b.media?.fileName,
                                localPath: b.media?.filePath)
+        case "poll":
+            if let p = b.poll {
+                self.body = .poll(question: p.question,
+                                  options: p.options,
+                                  selectableCount: p.selectableCount)
+            } else {
+                self.body = .system(b.kind)
+            }
         default:
             self.body = .system(b.kind)
         }

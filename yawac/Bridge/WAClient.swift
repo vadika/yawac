@@ -12,6 +12,7 @@ final class WAClient {
         case message(BridgeMessage)
         case receipt(BridgeReceipt)
         case reaction(BridgeReaction)
+        case pollVote(chatJID: String, pollMessageID: String, voterJID: String, optionHashes: [String])
         case presence(jid: String, online: Bool, lastSeen: Int64)
         case chatPresence(chat: String, sender: String, typing: Bool)
         case historySync(conversations: Int)
@@ -97,6 +98,29 @@ final class WAClient {
     func sendDocument(_ chatJID: String, path: String, caption: String) throws -> BridgeSendResult {
         var err: NSError?
         let json = go.sendDocument(chatJID, filePath: path, caption: caption, error: &err)
+        if let err { throw err }
+        return try JSONDecoder().decode(BridgeSendResult.self, from: Data(json.utf8))
+    }
+
+    func sendPollVote(chatJID: String,
+                      pollMsgID: String,
+                      pollSenderJID: String,
+                      pollFromMe: Bool,
+                      optionHashes: [String],
+                      pollOptions: [BridgePollOption]) throws -> BridgeSendResult {
+        let hashesJSON = (try? JSONEncoder().encode(optionHashes))
+            .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+        let optionsJSON = (try? JSONEncoder().encode(pollOptions))
+            .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+        var err: NSError?
+        let json = go.sendPollVote(
+            chatJID,
+            pollMsgID: pollMsgID,
+            pollSenderJID: pollSenderJID,
+            pollFromMe: pollFromMe,
+            selectedHashesJSON: hashesJSON,
+            pollOptionsJSON: optionsJSON,
+            error: &err)
         if let err { throw err }
         return try JSONDecoder().decode(BridgeSendResult.self, from: Data(json.utf8))
     }
@@ -204,6 +228,27 @@ final class WAClient {
         case "Reaction":
             if let r = try? dec.decode(BridgeReaction.self, from: data) {
                 return .reaction(r)
+            }
+        case "PollVote":
+            struct PV: Codable {
+                let chatJID: String
+                let pollMessageID: String
+                let voterJID: String
+                let optionHashes: [String]
+                let timestamp: Int64
+                enum CodingKeys: String, CodingKey {
+                    case chatJID = "chat_jid"
+                    case pollMessageID = "poll_message_id"
+                    case voterJID = "voter_jid"
+                    case optionHashes = "option_hashes"
+                    case timestamp
+                }
+            }
+            if let pv = try? dec.decode(PV.self, from: data) {
+                return .pollVote(chatJID: pv.chatJID,
+                                 pollMessageID: pv.pollMessageID,
+                                 voterJID: pv.voterJID,
+                                 optionHashes: pv.optionHashes)
             }
         case "Presence":
             struct P: Codable {

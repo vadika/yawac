@@ -61,6 +61,7 @@ final class ChatListViewModel {
             case "document": preview = "📄 Document"
             case "sticker":  preview = "Sticker"
             case "location": preview = "📍 Location"
+            case "poll":     preview = "📊 \(message.poll?.question ?? "Poll")"
             case "protocol", "system": preview = ""  // hide
             default:         preview = "[\(message.kind)]"
             }
@@ -110,7 +111,8 @@ final class ChatListViewModel {
             mediaPath: m.media?.filePath,
             mediaCaption: m.media?.caption,
             mediaFileName: m.media?.fileName,
-            mediaRefJSON: m.media?.ref?.json)
+            mediaRefJSON: m.media?.ref?.json,
+            pollJSON: m.poll?.json)
         context.insert(row)
         try? context.save()
     }

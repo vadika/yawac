@@ -47,6 +47,12 @@ func (c *Client) dispatchMessage(evt *events.Message) {
 		)
 		return
 	}
+	// Poll updates (votes) are not displayed as chat entries — they
+	// become tally updates on the original poll bubble.
+	if evt.Message.GetPollUpdateMessage() != nil {
+		c.dispatchPollVote(evt)
+		return
+	}
 	jm := JMessage{
 		ID:             evt.Info.ID,
 		ChatJID:        evt.Info.Chat.String(),
@@ -73,6 +79,9 @@ func (c *Client) dispatchMessage(evt *events.Message) {
 	} else if m := evt.Message.GetStickerMessage(); m != nil {
 		jm.Media = mediaFromSticker(m)
 	}
+	if p := extractPoll(evt.Message); p != nil {
+		jm.Poll = p
+	}
 	b, _ := json.Marshal(jm)
 	c.dispatch("Message", string(b))
 }
@@ -97,6 +106,10 @@ func classifyMessage(m *waE2E.Message) string {
 		return "location"
 	case m.GetReactionMessage() != nil:
 		return "reaction"
+	case isPollCreation(m):
+		return "poll"
+	case m.GetPollUpdateMessage() != nil:
+		return "poll_vote"
 	case m.GetProtocolMessage() != nil:
 		return "protocol"
 	default:
