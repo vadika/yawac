@@ -392,6 +392,18 @@ final class ConversationViewModel {
         return out
     }
 
+    /// Option hashes the current user has selected (used to highlight the
+    /// radio/checkbox in the poll UI). Voter id "me" is what `castVote`
+    /// optimistically stores.
+    func mySelections(for pollMessageID: String) -> Set<String> {
+        guard let byHash = pollVotes[pollMessageID] else { return [] }
+        var out: Set<String> = []
+        for (hash, voters) in byHash where voters.contains("me") {
+            out.insert(hash)
+        }
+        return out
+    }
+
     func applyPollVote(pollMessageID: String, voterJID: String, optionHashes: [String]) {
         var byHash = pollVotes[pollMessageID] ?? [:]
         // A new vote from this voter replaces any prior selections — matches

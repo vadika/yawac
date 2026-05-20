@@ -11,6 +11,7 @@ struct MessageRow: View {
     let downloadError: String?
     let onRetryDownload: (() -> Void)?
     let voteCounts: [String: Int]
+    let mySelections: Set<String>
     let onCastVote: (([String], [BridgePollOption]) -> Void)?
     let mentionResolver: (String) -> String
 
@@ -20,6 +21,7 @@ struct MessageRow: View {
          downloadError: String? = nil,
          onRetryDownload: (() -> Void)? = nil,
          voteCounts: [String: Int] = [:],
+         mySelections: Set<String> = [],
          onCastVote: (([String], [BridgePollOption]) -> Void)? = nil,
          mentionResolver: @escaping (String) -> String = { $0 }) {
         self.message = message
@@ -30,6 +32,7 @@ struct MessageRow: View {
         self.downloadError = downloadError
         self.onRetryDownload = onRetryDownload
         self.voteCounts = voteCounts
+        self.mySelections = mySelections
         self.onCastVote = onCastVote
         self.mentionResolver = mentionResolver
     }
@@ -116,13 +119,15 @@ struct MessageRow: View {
             Text(question).font(.callout).bold()
             ForEach(options, id: \.hash) { opt in
                 let count = voteCounts[opt.hash] ?? 0
+                let picked = mySelections.contains(opt.hash)
                 Button {
                     onCastVote?([opt.hash], options)
                 } label: {
                     HStack(spacing: 8) {
-                        Image(systemName: selectableCount > 1 ? "square" : "circle")
-                            .foregroundStyle(.secondary)
+                        Image(systemName: pollIconName(selectable: selectableCount, picked: picked))
+                            .foregroundStyle(picked ? Color.accentColor : Color.secondary)
                         Text(opt.name)
+                            .fontWeight(picked ? .semibold : .regular)
                         Spacer(minLength: 8)
                         if count > 0 {
                             Text("\(count)")
@@ -351,6 +356,16 @@ struct MessageRow: View {
                 ProgressView().controlSize(.small)
                 Text("Downloading…").font(.caption).foregroundStyle(.secondary)
             }
+        }
+    }
+
+    private func pollIconName(selectable: Int, picked: Bool) -> String {
+        let multi = selectable > 1
+        switch (multi, picked) {
+        case (true, true):   return "checkmark.square.fill"
+        case (true, false):  return "square"
+        case (false, true):  return "largecircle.fill.circle"
+        case (false, false): return "circle"
         }
     }
 

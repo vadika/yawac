@@ -69,6 +69,7 @@ struct ConversationView: View {
                                             downloadError: vm.downloadErrors[msg.id],
                                             onRetryDownload: vm.retryHandler(for: msg),
                                             voteCounts: vm.voteCounts(for: msg.id),
+                                            mySelections: vm.mySelections(for: msg.id),
                                             onCastVote: { hashes, options in
                                                 vm.castVote(messageID: msg.id,
                                                             hashes: hashes,
