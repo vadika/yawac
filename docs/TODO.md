@@ -49,6 +49,15 @@ and apparently doesn't replay individual vote events to companion devices.
   `plaintext sha mismatch — server returned wrong bytes` instead of saving
   garbage. MediaRetry receipt may recover when the phone has the original
   file; otherwise unrecoverable from a companion device.
+- MediaRetry decryption fails with `cipher: message authentication failed`
+  for some historical media even though the phone successfully re-uploads
+  (we receive valid ciphertext, just 200 bytes of encrypted retry
+  notification). Cause: our stored `mediaKey` (from HistorySync's
+  DocumentMessage) does not match the key the phone uses for the retry
+  receipt. Likely the original message was edited/superseded on phone
+  with a new mediaKey, but HistorySync surfaced the old proto.
+  **Workaround:** ask the original sender to forward the file again,
+  producing a fresh message with mediaKey that we will receive live.
 - `@<phone>` mentions for users who never sent a message + aren't in
   contacts: leave as raw digits (no push-name source).
 - Multi-select poll UI: tap = replaces current selection; no batch

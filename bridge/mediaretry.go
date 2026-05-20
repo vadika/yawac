@@ -81,9 +81,13 @@ func (c *Client) handleMediaRetry(evt *events.MediaRetry) {
 	if evt.Error != nil {
 		errCode = evt.Error.Code
 	}
+	mkPrefix := ""
+	if len(ref.MediaKey) >= 4 {
+		mkPrefix = fmt.Sprintf("%x", ref.MediaKey[:4])
+	}
 	fmt.Fprintf(os.Stderr,
-		"[yawac/media-retry] evt msgID=%s mediaKey=%dB cipher=%dB iv=%dB error=%v code=%d\n",
-		msgID, len(ref.MediaKey), len(evt.Ciphertext), len(evt.IV), hasError, errCode)
+		"[yawac/media-retry] evt msgID=%s mk_prefix=%s mediaKey=%dB cipher=%dB iv=%dB error=%v code=%d\n",
+		msgID, mkPrefix, len(ref.MediaKey), len(evt.Ciphertext), len(evt.IV), hasError, errCode)
 	_ = hasCipher
 
 	retryData, err := whatsmeow.DecryptMediaRetryNotification(evt, ref.MediaKey)
