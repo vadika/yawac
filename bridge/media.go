@@ -1,7 +1,9 @@
 package bridge
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -410,6 +412,17 @@ func (c *Client) DownloadMediaForce(refJSON, outPath string) (string, error) {
 	plain, err := cbcutil.Decrypt(cipherKey, iv, ciphertext)
 	if err != nil {
 		return "", fmt.Errorf("decrypt: %w", err)
+	}
+
+	// Plaintext integrity check: if the server gave us bytes that decrypted
+	// without protocol-level errors but don't match the expected plaintext
+	// hash, we have garbage. Refuse to write — it would only mislead the
+	// user into thinking the file is intact.
+	if len(r.FileSHA256) == 32 {
+		got := sha256.Sum256(plain)
+		if !bytes.Equal(got[:], r.FileSHA256) {
+			return "", fmt.Errorf("plaintext sha mismatch — server returned wrong bytes")
+		}
 	}
 
 	if err := os.MkdirAll(filepath.Dir(outPath), 0o700); err != nil {
