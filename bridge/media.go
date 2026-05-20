@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -375,28 +376,48 @@ func (c *Client) DownloadMediaForce(refJSON, outPath string) (string, error) {
 	if len(mediaConn.Hosts) == 0 {
 		return "", errors.New("no media hosts")
 	}
-	host := mediaConn.Hosts[0].Hostname
-	urlStr := fmt.Sprintf("https://%s%s&mms-type=%s&hash=", host, r.DirectPath, mmsType)
 
-	req, err := http.NewRequest("GET", urlStr, nil)
-	if err != nil {
-		return "", fmt.Errorf("new req: %w", err)
-	}
-	req.Header.Set("Origin", "https://web.whatsapp.com")
-	req.Header.Set("Referer", "https://web.whatsapp.com/")
-	req.Header.Set("Accept-Encoding", "identity")
+	hashB64 := base64.URLEncoding.EncodeToString(r.FileEncSHA256)
 
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("http get: %w", err)
+	// Try every advertised host (matches whatsmeow's own host-rotation loop).
+	var raw []byte
+	var lastErr error
+	for _, host := range mediaConn.Hosts {
+		urlStr := fmt.Sprintf("https://%s%s&hash=%s&mms-type=%s&__wa-mms=",
+			host.Hostname, r.DirectPath, hashB64, mmsType)
+		req, err := http.NewRequest("GET", urlStr, nil)
+		if err != nil {
+			lastErr = fmt.Errorf("new req: %w", err)
+			continue
+		}
+		req.Header.Set("Origin", "https://web.whatsapp.com")
+		req.Header.Set("Referer", "https://web.whatsapp.com/")
+		req.Header.Set("Accept-Encoding", "identity")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			lastErr = fmt.Errorf("http get %s: %w", host.Hostname, err)
+			continue
+		}
+		if resp.StatusCode != 200 {
+			resp.Body.Close()
+			lastErr = fmt.Errorf("%s http status %d", host.Hostname, resp.StatusCode)
+			continue
+		}
+		body, readErr := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if readErr != nil {
+			lastErr = fmt.Errorf("read %s: %w", host.Hostname, readErr)
+			continue
+		}
+		raw = body
+		lastErr = nil
+		break
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		return "", fmt.Errorf("http status %d", resp.StatusCode)
-	}
-	raw, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("read: %w", err)
+	if raw == nil {
+		if lastErr != nil {
+			return "", lastErr
+		}
+		return "", errors.New("all hosts failed")
 	}
 
 	if len(raw) <= 10 {
