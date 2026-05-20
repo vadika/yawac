@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 
 	waE2E "go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/types"
@@ -240,6 +241,9 @@ func (c *Client) dispatchReaction(chatJID, senderJID string, ts int64, r *waE2E.
 	if key == nil {
 		return
 	}
+	fmt.Fprintf(os.Stderr,
+		"[yawac/reaction] dispatch chat=%s sender=%s target=%s emoji=%q\n",
+		chatJID, senderJID, key.GetID(), r.GetText())
 	payload := JReaction{
 		ChatJID:         chatJID,
 		TargetMessageID: key.GetID(),

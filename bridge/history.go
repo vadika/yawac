@@ -3,6 +3,8 @@ package bridge
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"os"
 
 	waWeb "go.mau.fi/whatsmeow/proto/waWeb"
 	"go.mau.fi/whatsmeow/types"
@@ -121,6 +123,9 @@ func (c *Client) dispatchWebMessage(chatJID string, wm *waWeb.WebMessageInfo) {
 	// two-pass loop above so vote decryption can find any creation key
 	// regardless of HistorySync iteration order.
 	if r := msg.GetReactionMessage(); r != nil {
+		fmt.Fprintf(os.Stderr,
+			"[yawac/reaction-history] chat=%s sender=%s target=%s\n",
+			chatJID, senderJID, r.GetKey().GetID())
 		c.dispatchReaction(chatJID, senderJID, int64(wm.GetMessageTimestamp()), r)
 		return
 	}
