@@ -407,6 +407,9 @@ struct MessageRow: View {
                 .scaledToFit()
                 .frame(maxWidth: 320, maxHeight: 240)
                 .clipShape(.rect(cornerRadius: 8))
+                .onTapGesture {
+                    NSWorkspace.shared.open(URL(fileURLWithPath: p))
+                }
         } else {
             downloadingPlaceholder("photo")
         }
