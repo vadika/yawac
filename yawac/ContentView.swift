@@ -25,6 +25,11 @@ struct ContentView: View {
         .onChange(of: selectedChat) { _, new in
             if let new { chatList?.markRead(new) }
         }
+        .onChange(of: session.pendingChatSelection) { _, new in
+            guard let new else { return }
+            selectedChat = new
+            session.pendingChatSelection = nil
+        }
         .task {
             guard let client = session.client else { return }
             let vm = ChatListViewModel(client: client, context: modelContext)

@@ -16,6 +16,13 @@ final class SessionViewModel {
     var syncing: Bool = false
     var syncedConversations: Int = 0
     var contactNames: [String: String] = [:]
+    /// When non-nil, the chat list / detail pane should focus this JID.
+    /// Consumed and cleared by `ContentView` via `.onChange`.
+    var pendingChatSelection: String?
+
+    func requestSelectChat(_ jid: String) {
+        pendingChatSelection = JIDNormalize.canonical(jid, client: client)
+    }
 
     func ingestContacts(_ cs: [BridgeContact]) {
         for c in cs { contactNames[c.jid] = c.name }

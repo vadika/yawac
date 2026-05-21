@@ -16,6 +16,15 @@ struct MessageRow: View {
     let myReaction: String?
     let onReact: ((String) -> Void)?  // pass "" to clear our reaction
     let mentionResolver: (String) -> String
+    let onOpenChat: ((String) -> Void)?
+
+    @State private var mentionPopover: MentionTarget?
+
+    struct MentionTarget: Identifiable {
+        let id = UUID()
+        let jid: String
+        let displayName: String
+    }
 
     init(message: UIMessage, status: UIMessage.Status? = nil,
          senderName: String? = nil, localPath: String? = nil,
@@ -27,7 +36,8 @@ struct MessageRow: View {
          onCastVote: (([String], [BridgePollOption]) -> Void)? = nil,
          myReaction: String? = nil,
          onReact: ((String) -> Void)? = nil,
-         mentionResolver: @escaping (String) -> String = { $0 }) {
+         mentionResolver: @escaping (String) -> String = { $0 },
+         onOpenChat: ((String) -> Void)? = nil) {
         self.message = message
         self.status = status
         self.senderName = senderName
@@ -41,6 +51,7 @@ struct MessageRow: View {
         self.myReaction = myReaction
         self.onReact = onReact
         self.mentionResolver = mentionResolver
+        self.onOpenChat = onOpenChat
     }
 
     private static let quickReactions = ["👍", "❤️", "😂", "😮", "😢", "🙏"]
@@ -79,12 +90,77 @@ struct MessageRow: View {
                         : Color.gray.opacity(0.15),
                     in: .rect(cornerRadius: 10))
                 .contextMenu { reactionMenu }
+                .popover(item: $mentionPopover) { target in
+                    mentionPopoverContent(target: target)
+                }
                 if !reactions.isEmpty {
                     reactionChips
                 }
             }
             if !message.fromMe { Spacer(minLength: 60) }
         }
+        .environment(\.openURL, OpenURLAction { url in
+            if url.scheme == "yawac", url.host == "mention" {
+                let raw = url.path.hasPrefix("/")
+                    ? String(url.path.dropFirst())
+                    : url.path
+                let jid = raw.removingPercentEncoding ?? raw
+                let name = mentionResolver(jid)
+                let display = (name.isEmpty || name == jid) ? fallbackDisplay(for: jid) : name
+                mentionPopover = MentionTarget(jid: jid, displayName: display)
+                return .handled
+            }
+            return .systemAction
+        })
+    }
+
+    private func fallbackDisplay(for jid: String) -> String {
+        if let at = jid.firstIndex(of: "@") {
+            return String(jid[..<at])
+        }
+        return jid
+    }
+
+    @ViewBuilder
+    private func mentionPopoverContent(target: MentionTarget) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                AvatarView(jid: target.jid, name: target.displayName, size: 40)
+                VStack(alignment: .leading) {
+                    Text(target.displayName).font(.headline)
+                    Text(target.jid)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
+            }
+            Divider()
+            Button {
+                onOpenChat?(target.jid)
+                mentionPopover = nil
+            } label: {
+                Label("Send message", systemImage: "message")
+            }
+            .buttonStyle(.borderless)
+            Button {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(target.displayName, forType: .string)
+                mentionPopover = nil
+            } label: {
+                Label("Copy name", systemImage: "doc.on.doc")
+            }
+            .buttonStyle(.borderless)
+            Button {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(target.jid, forType: .string)
+                mentionPopover = nil
+            } label: {
+                Label("Copy JID", systemImage: "doc.on.doc.fill")
+            }
+            .buttonStyle(.borderless)
+        }
+        .padding(12)
+        .frame(minWidth: 220)
     }
 
     @ViewBuilder
@@ -186,14 +262,15 @@ struct MessageRow: View {
     /// Returns an `AttributedString` with @mentions styled bold + tinted and
     /// any URLs auto-linked.
     private func richText(from raw: String) -> AttributedString {
-        let (rewritten, mentionRanges) = resolveMentions(in: raw)
+        let (rewritten, mentions) = resolveMentions(in: raw)
         var attr = AttributedString(rewritten)
         // Style mentions: bold, tint colour, custom URL scheme so taps fire.
-        for mentionText in mentionRanges {
-            if let r = attr.range(of: mentionText) {
+        for entry in mentions {
+            if let r = attr.range(of: entry.replacement) {
                 attr[r].font = .body.bold()
                 attr[r].foregroundColor = .accentColor
-                if let url = URL(string: "yawac://mention/\(mentionText.dropFirst().addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? "")") {
+                let encoded = entry.jid.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? entry.jid
+                if let url = URL(string: "yawac://mention/\(encoded)") {
                     attr[r].link = url
                 }
             }
@@ -217,14 +294,16 @@ struct MessageRow: View {
     }
 
     /// Rewrites `@<digits>` to `@<display name>` and returns both the new
-    /// string + the literal mention substrings so callers can style them.
-    private func resolveMentions(in s: String) -> (String, [String]) {
+    /// string + each mention's literal replacement substring paired with the
+    /// JID it should resolve to when tapped.
+    private func resolveMentions(in s: String)
+        -> (String, [(replacement: String, jid: String)]) {
         guard s.contains("@"),
               let regex = try? NSRegularExpression(pattern: "@(\\d{5,})") else {
             return (s, [])
         }
         var out = s
-        var styled: [String] = []
+        var styled: [(replacement: String, jid: String)] = []
         let matches = regex.matches(in: s, range: NSRange(s.startIndex..<s.endIndex, in: s))
         for m in matches.reversed() {
             guard m.numberOfRanges >= 2,
@@ -233,15 +312,17 @@ struct MessageRow: View {
             let phone = String(out[digits])
             let candidates = ["\(phone)@s.whatsapp.net", "\(phone)@lid"]
             var replacement = "@\(phone)"
+            var resolvedJID = phone
             for jid in candidates {
                 let name = mentionResolver(jid)
                 if name != phone, !name.isEmpty {
                     replacement = "@\(name)"
+                    resolvedJID = jid
                     break
                 }
             }
             out.replaceSubrange(full, with: replacement)
-            styled.append(replacement)
+            styled.append((replacement: replacement, jid: resolvedJID))
         }
         return (out, styled)
     }

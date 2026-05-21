@@ -105,7 +105,10 @@ struct ConversationView: View {
                                                                 targetFromMe: msg.fromMe,
                                                                 emoji: emoji)
                                             },
-                                            mentionResolver: { jid in session.displayName(for: jid) }
+                                            mentionResolver: { jid in session.displayName(for: jid) },
+                                            onOpenChat: { jid in
+                                                session.requestSelectChat(jid)
+                                            }
                                         ).id(msg.id)
                                     }
                                 }
