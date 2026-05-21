@@ -279,7 +279,7 @@ struct MessageRow: View {
                     .foregroundStyle(.secondary)
             }
             if let caption, !caption.isEmpty {
-                Text(caption)
+                Text(richText(from: caption)).textSelection(.enabled)
             }
         }
     }
