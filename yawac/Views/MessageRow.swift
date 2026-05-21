@@ -81,12 +81,7 @@ struct MessageRow: View {
             VStack(alignment: message.fromMe ? .trailing : .leading, spacing: 2) {
                 VStack(alignment: message.fromMe ? .trailing : .leading, spacing: 4) {
                     if !message.fromMe && isGroupChat {
-                        HStack(spacing: 6) {
-                            AvatarView(jid: message.senderJID, name: senderDisplay, size: 24)
-                            Text(senderDisplay)
-                                .font(.caption).bold()
-                                .foregroundStyle(.tint)
-                        }
+                        senderHeader
                     }
                     bodyView
                     footerView
@@ -120,6 +115,37 @@ struct MessageRow: View {
             }
             return .systemAction
         })
+    }
+
+    /// Sender avatar + name. Left-click switches to that contact's 1:1
+    /// chat; right-click opens the same user menu as @mention popovers.
+    @ViewBuilder
+    private var senderHeader: some View {
+        Button {
+            onOpenChat?(message.senderJID)
+        } label: {
+            HStack(spacing: 6) {
+                AvatarView(jid: message.senderJID, name: senderDisplay, size: 24)
+                Text(senderDisplay)
+                    .font(.caption).bold()
+                    .foregroundStyle(.tint)
+            }
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .contextMenu {
+            Button("Send message") {
+                onOpenChat?(message.senderJID)
+            }
+            Button("Copy name") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(senderDisplay, forType: .string)
+            }
+            Button("Copy JID") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(message.senderJID, forType: .string)
+            }
+        }
     }
 
     private func fallbackDisplay(for jid: String) -> String {
