@@ -41,6 +41,8 @@ final class SessionViewModel {
     }
 
     func displayName(for jid: String) -> String {
+        if jid == "status@broadcast" { return "Status updates" }
+        if jid.hasSuffix("@broadcast") { return "Broadcast" }
         if let n = contactNames[jid] { return n }
         if let at = jid.firstIndex(of: "@") {
             return String(jid[..<at])

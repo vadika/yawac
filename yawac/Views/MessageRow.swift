@@ -56,7 +56,15 @@ struct MessageRow: View {
 
     private static let quickReactions = ["👍", "❤️", "😂", "😮", "😢", "🙏"]
 
-    private var isGroupChat: Bool { message.chatJID.hasSuffix("@g.us") }
+    /// Returns true when the bubble should render the sender header
+    /// (avatar + name). Applies to multi-poster chats: groups, broadcast
+    /// lists, and the Status feed (`status@broadcast`).
+    private var isGroupChat: Bool {
+        let jid = message.chatJID
+        return jid.hasSuffix("@g.us")
+            || jid.hasSuffix("@broadcast")
+            || jid == "status@broadcast"
+    }
 
     private var senderDisplay: String {
         if let senderName, !senderName.isEmpty { return senderName }
