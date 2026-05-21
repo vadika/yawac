@@ -163,6 +163,16 @@ final class WAClient {
         try go.requestMediaRetry(chatJID, senderJID: senderJID, msgID: msgID, fromMe: fromMe, refJSON: refJSON)
     }
 
+    /// Resolves an `@lid` JID to its bare `@s.whatsapp.net` form via
+    /// whatsmeow's local LID map. Returns the input unchanged when no
+    /// mapping is known (mapping is learned from group/sender events).
+    nonisolated func resolveLIDToPN(_ jid: String) -> String {
+        var err: NSError?
+        let result = go.resolveLID(toPN: jid, error: &err)
+        if err != nil || result.isEmpty { return jid }
+        return result
+    }
+
     nonisolated func requestOlderHistory(chatJID: String,
                                          oldestMsgID: String,
                                          oldestSenderJID: String,

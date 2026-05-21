@@ -27,7 +27,7 @@ final class ChatListViewModel {
         var keepers: [String: PersistedChat] = [:]
         var toDelete: [PersistedChat] = []
         for r in rows {
-            let bare = JIDNormalize.bare(r.jid)
+            let bare = JIDNormalize.canonical(r.jid, client: client)
             if let existing = keepers[bare] {
                 if r.lastTimestamp > existing.lastTimestamp {
                     existing.lastTimestamp = r.lastTimestamp
@@ -68,7 +68,7 @@ final class ChatListViewModel {
     func ingest(_ message: BridgeMessage) {
         // Skip protocol/system noise — no UI value
         if message.kind == "protocol" || message.kind == "system" { return }
-        let chatJID = JIDNormalize.bare(message.chatJID)
+        let chatJID = JIDNormalize.canonical(message.chatJID, client: client)
 
         // Dedupe: if this message id is already persisted, this is a replay
         // (e.g. HistorySync redelivering on reconnect). Skip unread/preview
@@ -136,7 +136,7 @@ final class ChatListViewModel {
         guard let context else { return }
         let row = PersistedMessage(
             id: m.id,
-            chatJID: JIDNormalize.bare(m.chatJID),
+            chatJID: JIDNormalize.canonical(m.chatJID, client: client),
             senderJID: m.senderJID,
             fromMe: m.fromMe,
             timestamp: Date(timeIntervalSince1970: TimeInterval(m.timestamp)),
@@ -177,10 +177,10 @@ final class ChatListViewModel {
         } else if let existing = try? context.fetch(descriptor).first {
             existing.emoji = r.emoji
             existing.timestamp = ts
-            existing.chatJID = JIDNormalize.bare(r.chatJID)
+            existing.chatJID = JIDNormalize.canonical(r.chatJID, client: client)
         } else {
             let row = PersistedReaction(
-                chatJID: JIDNormalize.bare(r.chatJID),
+                chatJID: JIDNormalize.canonical(r.chatJID, client: client),
                 targetMessageID: r.targetMessageID,
                 senderJID: r.senderJID,
                 emoji: r.emoji,
@@ -192,7 +192,7 @@ final class ChatListViewModel {
 
     func mergeGroups(_ gs: [BridgeGroupModel]) {
         for g in gs {
-            let jid = JIDNormalize.bare(g.jid)
+            let jid = JIDNormalize.canonical(g.jid, client: client)
             if chats.contains(where: { $0.jid == jid }) { continue }
             chats.append(Chat(
                 jid: jid,
