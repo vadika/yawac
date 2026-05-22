@@ -202,6 +202,13 @@ final class WAClient {
         return try JSONDecoder().decode([BridgeGroupModel].self, from: Data(json.utf8))
     }
 
+    func getGroupInfo(jid: String) throws -> BridgeGroupModel {
+        var err: NSError?
+        let json = go.getGroupInfo(jid, error: &err)
+        if let err { throw err }
+        return try JSONDecoder().decode(BridgeGroupModel.self, from: Data(json.utf8))
+    }
+
     func listContacts() throws -> [BridgeContact] {
         var err: NSError?
         let json = go.listContacts(&err)

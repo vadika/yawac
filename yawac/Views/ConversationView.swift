@@ -29,6 +29,7 @@ struct ConversationView: View {
     @State private var vm: ConversationViewModel?
     @State private var didInitialScroll = false
     @State private var lastSeenCount = 0
+    @State private var showInfo = false
 
     /// Walks messages in chronological order, prepending a `.dateHeader`
     /// whenever the day changes.
@@ -153,6 +154,20 @@ struct ConversationView: View {
             }
         }
         .navigationTitle(session.displayName(for: chatJID))
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    showInfo.toggle()
+                } label: {
+                    Image(systemName: "info.circle")
+                }
+                .help("Chat info")
+            }
+        }
+        .inspector(isPresented: $showInfo) {
+            ChatInfoView(chatJID: chatJID)
+                .inspectorColumnWidth(min: 280, ideal: 340, max: 480)
+        }
         .onDrop(of: [.fileURL], isTargeted: nil) { providers in
             guard let vm else { return false }
             for p in providers {

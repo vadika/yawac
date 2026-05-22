@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/types"
@@ -69,6 +70,45 @@ func (c *Client) ListGroups() (string, error) {
 			})
 		}
 		out = append(out, jg)
+	}
+	b, _ := json.Marshal(out)
+	return string(b), nil
+}
+
+// GetGroupInfo returns JSON of a single JGroup for `jid`, including
+// fresh participants. Uses whatsmeow's GetGroupInfo (which queries the
+// server). Returns ("", error) on failure.
+func (c *Client) GetGroupInfo(jidStr string) (string, error) {
+	if c.wa == nil {
+		return "", errors.New("client closed")
+	}
+	jid, err := types.ParseJID(jidStr)
+	if err != nil {
+		return "", fmt.Errorf("parse jid: %w", err)
+	}
+	g, err := c.wa.GetGroupInfo(context.Background(), jid)
+	if err != nil {
+		return "", fmt.Errorf("get group: %w", err)
+	}
+	out := JGroup{
+		JID:               g.JID.String(),
+		Name:              g.Name,
+		Topic:             g.Topic,
+		OwnerJID:          g.OwnerJID.String(),
+		Created:           g.GroupCreated.Unix(),
+		IsParent:          g.GroupParent.IsParent,
+		LinkedParentJID:   g.GroupLinkedParent.LinkedParentJID.String(),
+		IsDefaultSubGroup: g.GroupIsDefaultSub.IsDefaultSubGroup,
+	}
+	if !strings.HasSuffix(out.LinkedParentJID, "@g.us") {
+		out.LinkedParentJID = ""
+	}
+	for _, p := range g.Participants {
+		out.Participants = append(out.Participants, JParticipant{
+			JID:     p.JID.String(),
+			IsAdmin: p.IsAdmin,
+			IsSuper: p.IsSuperAdmin,
+		})
 	}
 	b, _ := json.Marshal(out)
 	return string(b), nil
