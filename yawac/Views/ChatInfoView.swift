@@ -130,8 +130,14 @@ struct ChatInfoView: View {
 
     private func participantRow(_ p: BridgeParticipantModel) -> some View {
         Button {
-            session.requestSelectChat(p.jid)
+            // Defer mutation past the inspector's dismiss so we don't
+            // trigger a reentrant NSTableView delegate update.
+            let jid = p.jid
             dismiss()
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(50))
+                session.requestSelectChat(jid)
+            }
         } label: {
             HStack(spacing: 8) {
                 AvatarView(jid: p.jid, name: session.displayName(for: p.jid), size: 28)
