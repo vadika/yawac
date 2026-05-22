@@ -6,6 +6,8 @@ struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
     @State private var chatList: ChatListViewModel?
     @State private var selectedChat: Chat.ID?
+    /// Last selected chat JID, persisted across launches.
+    @AppStorage("yawac.lastSelectedChatJID") private var lastSelectedChatJID: String = ""
 
     var body: some View {
         NavigationSplitView {
@@ -24,6 +26,7 @@ struct ContentView: View {
         }
         .onChange(of: selectedChat) { _, new in
             guard let new else { return }
+            lastSelectedChatJID = new
             chatList?.markRead(new)
             // If user selected a community parent that has a default sub-group,
             // redirect selection to that sub-group so they land in Announcements.
@@ -43,6 +46,11 @@ struct ContentView: View {
             guard let client = session.client else { return }
             let vm = ChatListViewModel(client: client, context: modelContext)
             self.chatList = vm
+            // Restore last-opened chat if it's in our chats list.
+            if !lastSelectedChatJID.isEmpty,
+               vm.chats.contains(where: { $0.jid == lastSelectedChatJID }) {
+                selectedChat = lastSelectedChatJID
+            }
             let groups = GroupsViewModel(client: client)
             await groups.refresh()
             vm.mergeGroups(groups.groups)
