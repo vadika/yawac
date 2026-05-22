@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import AppKit
 
 @main
 struct YawacApp: App {
@@ -34,6 +35,46 @@ struct YawacApp: App {
                 }
                 .keyboardShortcut("Q", modifiers: [.command, .shift])
             }
+        }
+
+        MenuBarExtra("yawac", systemImage: "bubble.left.and.bubble.right.fill") {
+            Button("Show / Hide Window") {
+                WindowToggler.toggleMain()
+            }
+            .keyboardShortcut("h", modifiers: [.command, .shift])
+            Divider()
+            Button("Quit yawac") {
+                NSApp.terminate(nil)
+            }
+            .keyboardShortcut("q", modifiers: .command)
+        }
+        .menuBarExtraStyle(.menu)
+    }
+}
+
+/// Helper that brings the main yawac window forward or hides it,
+/// implementing classic tray-icon behaviour.
+enum WindowToggler {
+    static func toggleMain() {
+        let app = NSApp!
+        // Find a non-popover, non-status visible window of our app.
+        let windows = app.windows.filter { w in
+            !(w is NSPanel) && w.canBecomeKey
+        }
+        if let visible = windows.first(where: { $0.isVisible && !$0.isMiniaturized }) {
+            visible.orderOut(nil)
+        } else if let hidden = windows.first {
+            if hidden.isMiniaturized {
+                hidden.deminiaturize(nil)
+            }
+            app.activate(ignoringOtherApps: true)
+            hidden.makeKeyAndOrderFront(nil)
+        } else {
+            // No window exists (closed by user) — ask the WindowGroup to
+            // open a fresh one via the open-window environment action.
+            // Done via NSApp's reopen path:
+            NSApp.activate(ignoringOtherApps: true)
+            NSApp.sendAction(#selector(NSApplication.unhide(_:)), to: nil, from: nil)
         }
     }
 }
