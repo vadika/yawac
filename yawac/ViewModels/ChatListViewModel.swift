@@ -245,6 +245,19 @@ final class ChatListViewModel {
             context.insert(row)
         }
         try? context.save()
+
+        // Notify only when somebody reacts to OUR message (`targetFromMe`)
+        // and the window isn't focused. Skip self-reactions and clears.
+        guard !r.emoji.isEmpty,
+              r.targetFromMe,
+              r.senderJID != "me",
+              !NSApp.isActive else { return }
+        let canonChat = JIDNormalize.canonical(r.chatJID, client: client)
+        let chatName = chats.first(where: { $0.jid == canonChat })?.name ?? canonChat
+        NotificationService.notify(
+            title: chatName,
+            body: "\(r.emoji) reacted to your message",
+            chatJID: canonChat)
     }
 
     func mergeGroups(_ gs: [BridgeGroupModel]) {
