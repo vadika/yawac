@@ -129,26 +129,42 @@ struct ChatInfoView: View {
     }
 
     private func participantRow(_ p: BridgeParticipantModel) -> some View {
-        HStack(spacing: 8) {
-            AvatarView(jid: p.jid, name: session.displayName(for: p.jid), size: 28)
-            VStack(alignment: .leading, spacing: 0) {
-                Text(session.displayName(for: p.jid))
-                    .font(.callout)
-                Text(p.jid)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .textSelection(.enabled)
+        Button {
+            session.requestSelectChat(p.jid)
+            dismiss()
+        } label: {
+            HStack(spacing: 8) {
+                AvatarView(jid: p.jid, name: session.displayName(for: p.jid), size: 28)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(session.displayName(for: p.jid))
+                        .font(.callout)
+                    Text(p.jid)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer()
+                if p.isSuper {
+                    Text("super").font(.caption2)
+                        .padding(.horizontal, 4).padding(.vertical, 2)
+                        .background(.purple.opacity(0.2), in: .capsule)
+                } else if p.isAdmin {
+                    Text("admin").font(.caption2)
+                        .padding(.horizontal, 4).padding(.vertical, 2)
+                        .background(.blue.opacity(0.2), in: .capsule)
+                }
             }
-            Spacer()
-            if p.isSuper {
-                Text("super").font(.caption2)
-                    .padding(.horizontal, 4).padding(.vertical, 2)
-                    .background(.purple.opacity(0.2), in: .capsule)
-            } else if p.isAdmin {
-                Text("admin").font(.caption2)
-                    .padding(.horizontal, 4).padding(.vertical, 2)
-                    .background(.blue.opacity(0.2), in: .capsule)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .contextMenu {
+            Button("Copy JID") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(p.jid, forType: .string)
+            }
+            Button("Copy name") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(session.displayName(for: p.jid), forType: .string)
             }
         }
     }
