@@ -21,39 +21,68 @@ final class ChatListViewModel {
             sortBy: [SortDescriptor(\.lastTimestamp, order: .reverse)])
         guard let rows = try? context.fetch(descriptor) else { return }
 
-        // One-time cleanup: collapse rows whose jid only differs by the
-        // device suffix `:<n>@server`. Keep the row with the newest
-        // lastTimestamp; sum unread; delete the rest. Persisted in DB.
+        // Two-pass cleanup: collapse rows whose canonical jid matches
+        // (device-suffix dedupe + LID→PN resolution). First pass prefers
+        // canonical-form rows as anchors so we don't accidentally
+        // spawn duplicate PersistedChats that violate the unique JID
+        // constraint.
         var keepers: [String: PersistedChat] = [:]
         var toDelete: [PersistedChat] = []
+
+        // Pass 1: bind only the rows whose stored jid already IS the
+        // canonical form. These become the merge targets for everything
+        // else.
         for r in rows {
             let bare = JIDNormalize.canonical(r.jid, client: client)
-            if let existing = keepers[bare] {
-                if r.lastTimestamp > existing.lastTimestamp {
-                    existing.lastTimestamp = r.lastTimestamp
-                    existing.lastMessageText = r.lastMessageText ?? existing.lastMessageText
-                    if !r.name.isEmpty { existing.name = r.name }
-                }
-                existing.unread += r.unread
-                toDelete.append(r)
-            } else if r.jid != bare {
-                // Same jid will rebind under canonical key; delete this
-                // device-suffixed row and re-create canonical.
-                let canon = PersistedChat(
-                    jid: bare,
-                    name: r.name,
-                    lastMessageText: r.lastMessageText,
-                    lastTimestamp: r.lastTimestamp,
-                    unread: r.unread)
-                context.insert(canon)
-                keepers[bare] = canon
-                toDelete.append(r)
-            } else {
+            if r.jid == bare {
                 keepers[bare] = r
             }
         }
+
+        // Pass 2: handle non-canonical (e.g. `@lid` or `:device@server`)
+        // rows. Merge into existing canonical anchor if present;
+        // otherwise mutate-in-place to adopt the canonical jid.
+        for r in rows {
+            let bare = JIDNormalize.canonical(r.jid, client: client)
+            if r.jid == bare { continue }
+            if let anchor = keepers[bare] {
+                if r.lastTimestamp > anchor.lastTimestamp {
+                    anchor.lastTimestamp = r.lastTimestamp
+                    anchor.lastMessageText = r.lastMessageText ?? anchor.lastMessageText
+                    if !r.name.isEmpty { anchor.name = r.name }
+                }
+                anchor.unread += r.unread
+                toDelete.append(r)
+            } else {
+                // No canonical row yet — rebind this one in place so it
+                // becomes the anchor. Avoids creating a phantom row that
+                // would collide with a yet-to-arrive PN row.
+                r.jid = bare
+                keepers[bare] = r
+            }
+        }
+
+        // Pass 3: secondary merges where a now-rebound row collides with
+        // another canonical row that appeared later in pass 1.
+        // (Defensive — should be rare since pass 1 ran first.)
+        var seen: [String: PersistedChat] = [:]
+        for (jid, row) in keepers {
+            if let existing = seen[jid], existing !== row {
+                if row.lastTimestamp > existing.lastTimestamp {
+                    existing.lastTimestamp = row.lastTimestamp
+                    existing.lastMessageText = row.lastMessageText ?? existing.lastMessageText
+                    if !row.name.isEmpty { existing.name = row.name }
+                }
+                existing.unread += row.unread
+                toDelete.append(row)
+            } else {
+                seen[jid] = row
+            }
+        }
+
         for r in toDelete { context.delete(r) }
         if !toDelete.isEmpty { try? context.save() }
+        keepers = seen
 
         self.chats = keepers.values
             .sorted { $0.lastTimestamp > $1.lastTimestamp }
