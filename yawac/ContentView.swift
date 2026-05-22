@@ -23,7 +23,16 @@ struct ContentView: View {
             }
         }
         .onChange(of: selectedChat) { _, new in
-            if let new { chatList?.markRead(new) }
+            guard let new else { return }
+            chatList?.markRead(new)
+            // If user selected a community parent that has a default sub-group,
+            // redirect selection to that sub-group so they land in Announcements.
+            if let parent = chatList?.chats.first(where: { $0.jid == new && $0.isCommunityParent }),
+               let defaultSub = chatList?.chats.first(where: {
+                   $0.communityParentJID == parent.jid && $0.isDefaultSubGroup
+               }) {
+                selectedChat = defaultSub.jid
+            }
         }
         .onChange(of: session.pendingChatSelection) { _, new in
             guard let new else { return }

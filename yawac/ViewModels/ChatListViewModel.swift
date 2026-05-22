@@ -61,7 +61,10 @@ final class ChatListViewModel {
                 Chat(jid: $0.jid, name: $0.name,
                      lastMessage: $0.lastMessageText ?? "",
                      lastTimestamp: Int64($0.lastTimestamp.timeIntervalSince1970),
-                     unread: $0.unread)
+                     unread: $0.unread,
+                     isCommunityParent: $0.isCommunityParent,
+                     communityParentJID: $0.communityParentJID,
+                     isDefaultSubGroup: $0.isDefaultSubGroup)
             }
     }
 
@@ -193,13 +196,33 @@ final class ChatListViewModel {
     func mergeGroups(_ gs: [BridgeGroupModel]) {
         for g in gs {
             let jid = JIDNormalize.canonical(g.jid, client: client)
-            if chats.contains(where: { $0.jid == jid }) { continue }
+            let parentJID: String? = {
+                guard let p = g.linkedParentJID, !p.isEmpty,
+                      p.hasSuffix("@g.us") else { return nil }
+                return p
+            }()
+            if let idx = chats.firstIndex(where: { $0.jid == jid }) {
+                // Refresh community fields on existing chats so a previously
+                // synced regular-group row gets promoted to a community
+                // parent / sub-group if whatsmeow now reports it that way.
+                var c = chats[idx]
+                c.isCommunityParent = g.isParent
+                c.communityParentJID = parentJID
+                c.isDefaultSubGroup = g.isDefaultSubGroup
+                if c.name == jid && !g.name.isEmpty { c.name = g.name }
+                chats[idx] = c
+                upsertPersisted(c)
+                continue
+            }
             chats.append(Chat(
                 jid: jid,
                 name: g.name.isEmpty ? jid : g.name,
                 lastMessage: g.topic,
                 lastTimestamp: 0,
-                unread: 0))
+                unread: 0,
+                isCommunityParent: g.isParent,
+                communityParentJID: parentJID,
+                isDefaultSubGroup: g.isDefaultSubGroup))
             upsertPersisted(chats[chats.count - 1])
         }
         sortChats()
@@ -249,6 +272,9 @@ final class ChatListViewModel {
             existing.name = c.name
             existing.lastTimestamp = Date(timeIntervalSince1970: TimeInterval(c.lastTimestamp))
             existing.unread = c.unread
+            existing.communityParentJID = c.communityParentJID
+            existing.isCommunityParent = c.isCommunityParent
+            existing.isDefaultSubGroup = c.isDefaultSubGroup
             if let preview { existing.lastMessageText = preview }
         } else {
             let row = PersistedChat(
@@ -256,7 +282,10 @@ final class ChatListViewModel {
                 name: c.name,
                 lastMessageText: preview,
                 lastTimestamp: Date(timeIntervalSince1970: TimeInterval(c.lastTimestamp)),
-                unread: c.unread)
+                unread: c.unread,
+                communityParentJID: c.communityParentJID,
+                isCommunityParent: c.isCommunityParent,
+                isDefaultSubGroup: c.isDefaultSubGroup)
             context.insert(row)
         }
         try? context.save()

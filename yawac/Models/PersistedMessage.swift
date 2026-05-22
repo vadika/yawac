@@ -68,14 +68,25 @@ final class PersistedChat {
     var lastMessageText: String?
     var lastTimestamp: Date
     var unread: Int
+    // Community linkage. Optional / defaulted so existing rows migrate
+    // lightweight.
+    var communityParentJID: String?
+    var isCommunityParent: Bool = false
+    var isDefaultSubGroup: Bool = false
 
     init(jid: String, name: String,
          lastMessageText: String? = nil,
-         lastTimestamp: Date = .distantPast, unread: Int = 0) {
+         lastTimestamp: Date = .distantPast, unread: Int = 0,
+         communityParentJID: String? = nil,
+         isCommunityParent: Bool = false,
+         isDefaultSubGroup: Bool = false) {
         self.jid = jid
         self.name = name
         self.lastMessageText = lastMessageText
         self.lastTimestamp = lastTimestamp
         self.unread = unread
+        self.communityParentJID = communityParentJID
+        self.isCommunityParent = isCommunityParent
+        self.isDefaultSubGroup = isDefaultSubGroup
     }
 }

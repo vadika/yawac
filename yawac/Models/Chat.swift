@@ -7,6 +7,10 @@ struct Chat: Identifiable, Hashable {
     var lastTimestamp: Int64
     var unread: Int
     var isGroup: Bool { jid.hasSuffix("@g.us") }
+    // Community linkage (zero/empty for normal chats):
+    var isCommunityParent: Bool = false
+    var communityParentJID: String? = nil
+    var isDefaultSubGroup: Bool = false
     var id: String { jid }
 }
 

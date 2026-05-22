@@ -12,12 +12,15 @@ import (
 
 // JGroup is the JSON-friendly view of a WhatsApp group.
 type JGroup struct {
-	JID          string         `json:"jid"`
-	Name         string         `json:"name"`
-	Topic        string         `json:"topic"`
-	OwnerJID     string         `json:"owner_jid"`
-	Created      int64          `json:"created"`
-	Participants []JParticipant `json:"participants"`
+	JID               string         `json:"jid"`
+	Name              string         `json:"name"`
+	Topic             string         `json:"topic"`
+	OwnerJID          string         `json:"owner_jid"`
+	Created           int64          `json:"created"`
+	IsParent          bool           `json:"is_parent,omitempty"`
+	LinkedParentJID   string         `json:"linked_parent_jid,omitempty"`
+	IsDefaultSubGroup bool           `json:"is_default_sub_group,omitempty"`
+	Participants      []JParticipant `json:"participants"`
 }
 
 // JParticipant represents a single member of a group.
@@ -40,12 +43,22 @@ func (c *Client) ListGroups() (string, error) {
 	}
 	out := make([]JGroup, 0, len(gs))
 	for _, g := range gs {
+		// LinkedParentJID may come back as the zero JID (rendered as the
+		// bare default server, e.g. "@s.whatsapp.net") when whatsmeow has
+		// no parent set. Treat anything that isn't a `@g.us` JID as none.
+		linked := g.GroupLinkedParent.LinkedParentJID.String()
+		if linked != "" && len(linked) >= 5 && linked[len(linked)-5:] != "@g.us" {
+			linked = ""
+		}
 		jg := JGroup{
-			JID:      g.JID.String(),
-			Name:     g.Name,  // promoted from embedded GroupName
-			Topic:    g.Topic, // promoted from embedded GroupTopic
-			OwnerJID: g.OwnerJID.String(),
-			Created:  g.GroupCreated.Unix(),
+			JID:               g.JID.String(),
+			Name:              g.Name,  // promoted from embedded GroupName
+			Topic:             g.Topic, // promoted from embedded GroupTopic
+			OwnerJID:          g.OwnerJID.String(),
+			Created:           g.GroupCreated.Unix(),
+			IsParent:          g.GroupParent.IsParent,
+			LinkedParentJID:   linked,
+			IsDefaultSubGroup: g.GroupIsDefaultSub.IsDefaultSubGroup,
 		}
 		jg.Participants = make([]JParticipant, 0, len(g.Participants))
 		for _, p := range g.Participants {

@@ -129,10 +129,51 @@ struct BridgeGroupModel: Codable, Identifiable {
     let ownerJID: String
     let created: Int64
     let participants: [BridgeParticipantModel]
+    let isParent: Bool
+    let linkedParentJID: String?
+    let isDefaultSubGroup: Bool
+
     enum CodingKeys: String, CodingKey {
         case jid, name, topic
         case ownerJID = "owner_jid"
         case created, participants
+        case isParent = "is_parent"
+        case linkedParentJID = "linked_parent_jid"
+        case isDefaultSubGroup = "is_default_sub_group"
+    }
+
+    init(jid: String, name: String, topic: String, ownerJID: String,
+         created: Int64, participants: [BridgeParticipantModel],
+         isParent: Bool = false, linkedParentJID: String? = nil,
+         isDefaultSubGroup: Bool = false) {
+        self.jid = jid
+        self.name = name
+        self.topic = topic
+        self.ownerJID = ownerJID
+        self.created = created
+        self.participants = participants
+        self.isParent = isParent
+        self.linkedParentJID = linkedParentJID
+        self.isDefaultSubGroup = isDefaultSubGroup
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        jid = try c.decode(String.self, forKey: .jid)
+        name = try c.decode(String.self, forKey: .name)
+        topic = try c.decode(String.self, forKey: .topic)
+        ownerJID = try c.decode(String.self, forKey: .ownerJID)
+        created = try c.decode(Int64.self, forKey: .created)
+        participants = try c.decode([BridgeParticipantModel].self, forKey: .participants)
+        isParent = try c.decodeIfPresent(Bool.self, forKey: .isParent) ?? false
+        let linked = try c.decodeIfPresent(String.self, forKey: .linkedParentJID)
+        // Treat empty strings or non-`@g.us` zero JIDs as no parent.
+        if let l = linked, !l.isEmpty, l.hasSuffix("@g.us") {
+            linkedParentJID = l
+        } else {
+            linkedParentJID = nil
+        }
+        isDefaultSubGroup = try c.decodeIfPresent(Bool.self, forKey: .isDefaultSubGroup) ?? false
     }
 }
 
