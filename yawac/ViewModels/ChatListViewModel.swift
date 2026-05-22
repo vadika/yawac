@@ -21,6 +21,26 @@ final class ChatListViewModel {
             sortBy: [SortDescriptor(\.lastTimestamp, order: .reverse)])
         guard let rows = try? context.fetch(descriptor) else { return }
 
+        // In-memory dedupe only: SwiftData refuses to persist deletions of
+        // these unique-key rows in our setup (verified — post-exit WAL is
+        // empty, rows remain on disk). Instead we filter them at read time
+        // so the UI is clean. The hidden @lid rows stay in the DB but are
+        // never surfaced. Future writes via ingest still go through
+        // JIDNormalize.canonical so new rows land under the PN form.
+        let pnJIDs = Set(
+            rows
+                .filter { $0.jid.hasSuffix("@s.whatsapp.net") }
+                .map { $0.jid }
+        )
+        var hiddenLIDs = Set<String>()
+        for r in rows where r.jid.hasSuffix("@lid") {
+            let canon = client.resolveLIDToPN(r.jid)
+            if canon != r.jid, pnJIDs.contains(canon) {
+                hiddenLIDs.insert(r.jid)
+            }
+        }
+        let rowsAfter = rows.filter { !hiddenLIDs.contains($0.jid) }
+
         // Two-pass cleanup: collapse rows whose canonical jid matches
         // (device-suffix dedupe + LID→PN resolution). First pass prefers
         // canonical-form rows as anchors so we don't accidentally
@@ -32,7 +52,7 @@ final class ChatListViewModel {
         // Pass 1: bind only the rows whose stored jid already IS the
         // canonical form. These become the merge targets for everything
         // else.
-        for r in rows {
+        for r in rowsAfter {
             let bare = JIDNormalize.canonical(r.jid, client: client)
             if r.jid == bare {
                 keepers[bare] = r
@@ -42,7 +62,7 @@ final class ChatListViewModel {
         // Pass 2: handle non-canonical (e.g. `@lid` or `:device@server`)
         // rows. Merge into existing canonical anchor if present;
         // otherwise mutate-in-place to adopt the canonical jid.
-        for r in rows {
+        for r in rowsAfter {
             let bare = JIDNormalize.canonical(r.jid, client: client)
             if r.jid == bare { continue }
             if let anchor = keepers[bare] {
@@ -80,8 +100,13 @@ final class ChatListViewModel {
             }
         }
 
+        let deleteCount = toDelete.count
         for r in toDelete { context.delete(r) }
-        if !toDelete.isEmpty { try? context.save() }
+        var saveErr: String = "ok"
+        if !toDelete.isEmpty {
+            do { try context.save() } catch { saveErr = String(describing: error) }
+        }
+        NSLog("[yawac/loadChats] toDelete=%d save=%@", deleteCount, saveErr)
         keepers = seen
 
         self.chats = keepers.values
