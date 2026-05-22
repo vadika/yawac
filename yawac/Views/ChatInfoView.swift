@@ -130,12 +130,11 @@ struct ChatInfoView: View {
 
     private func participantRow(_ p: BridgeParticipantModel) -> some View {
         Button {
-            // Defer mutation past the inspector's dismiss so we don't
-            // trigger a reentrant NSTableView delegate update.
+            // Switch chat without dismissing inspector — dismiss+select
+            // races SwiftUI's NSTableView updates and freezes the app.
+            // The inspector's chatJID binding refreshes via .task(id:).
             let jid = p.jid
-            dismiss()
             Task { @MainActor in
-                try? await Task.sleep(for: .milliseconds(50))
                 session.requestSelectChat(jid)
             }
         } label: {
