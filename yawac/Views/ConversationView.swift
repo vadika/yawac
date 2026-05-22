@@ -27,6 +27,8 @@ struct ConversationView: View {
     @Environment(SessionViewModel.self) private var session
     @Environment(\.modelContext) private var modelContext
     @State private var vm: ConversationViewModel?
+    @State private var didInitialScroll = false
+    @State private var lastSeenCount = 0
 
     /// Walks messages in chronological order, prepending a `.dateHeader`
     /// whenever the day changes.
@@ -115,9 +117,25 @@ struct ConversationView: View {
                             }
                             .padding()
                         }
-                        .onChange(of: vm.messages.count) { _, _ in
-                            if let last = vm.messages.last {
+                        .onChange(of: vm.messages.count) { _, newCount in
+                            // First population: anchor to initialAnchorID
+                            // (first-unread, or latest if all read).
+                            // Subsequent growth: auto-scroll only if user
+                            // hasn't scrolled away (we just always follow
+                            // for now since we don't track scroll offset).
+                            if !didInitialScroll {
+                                let anchor = vm.initialAnchorID ?? vm.messages.last?.id
+                                guard let anchor else { return }
+                                let position: UnitPoint =
+                                    anchor == vm.messages.last?.id ? .bottom : .top
+                                DispatchQueue.main.async {
+                                    proxy.scrollTo(anchor, anchor: position)
+                                    didInitialScroll = true
+                                    lastSeenCount = newCount
+                                }
+                            } else if newCount > lastSeenCount, let last = vm.messages.last {
                                 proxy.scrollTo(last.id, anchor: .bottom)
+                                lastSeenCount = newCount
                             }
                         }
                     }
@@ -148,6 +166,9 @@ struct ConversationView: View {
         }
         .task(id: chatJID) {
             guard let client = session.client else { return }
+            // Reset scroll bookkeeping for the new chat.
+            didInitialScroll = false
+            lastSeenCount = 0
             let vm = ConversationViewModel(chatJID: chatJID, client: client, context: modelContext)
             vm.loadHistory()
             self.vm = vm

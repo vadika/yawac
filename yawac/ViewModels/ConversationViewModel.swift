@@ -42,6 +42,12 @@ final class ConversationViewModel {
     /// rows remain in storage and can be paged in later.
     static let historyLoadLimit = 500
 
+    /// Message id to anchor the initial scroll position to. Set in
+    /// `loadHistory` based on the chat's persisted unread count: anchors
+    /// to the first unread message when there are unread messages,
+    /// otherwise to the latest (bottom).
+    private(set) var initialAnchorID: String?
+
     func loadHistory() {
         guard let context else { return }
         let jid = chatJID
@@ -117,6 +123,19 @@ final class ConversationViewModel {
                     continue
                 }
                 ensureDownloadFromHistory(id: p.id, kind: p.kind, refJSON: refJSON)
+            }
+
+            // Pick initial scroll anchor: if there are unread inbound
+            // messages, jump to the first one (so the user starts reading
+            // where they left off). Otherwise stick to the latest.
+            let pcDescriptor = FetchDescriptor<PersistedChat>(
+                predicate: #Predicate { $0.jid == jid })
+            let unread = (try? context.fetch(pcDescriptor))?.first?.unread ?? 0
+            if unread > 0 && unread <= self.messages.count {
+                let firstUnreadIdx = self.messages.count - unread
+                self.initialAnchorID = self.messages[firstUnreadIdx].id
+            } else {
+                self.initialAnchorID = self.messages.last?.id
             }
         }
     }
