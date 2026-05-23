@@ -3,6 +3,30 @@ import SwiftUI
 struct ChatListView: View {
     @Environment(ChatListViewModel.self) private var vm
     @Binding var selection: Chat.ID?
+    @AppStorage("yawac.chatListScope") private var scopeRaw: String = Scope.all.rawValue
+
+    enum Scope: String, CaseIterable, Identifiable {
+        case all, chats, groups, communities
+        var id: String { rawValue }
+        var label: String {
+            switch self {
+            case .all:         return "All"
+            case .chats:       return "Chats"
+            case .groups:      return "Groups"
+            case .communities: return "Communities"
+            }
+        }
+        var icon: String {
+            switch self {
+            case .all:         return "tray.full"
+            case .chats:       return "person"
+            case .groups:      return "person.3"
+            case .communities: return "building.2"
+            }
+        }
+    }
+
+    private var scope: Scope { Scope(rawValue: scopeRaw) ?? .all }
 
     private var communities: [Chat] {
         vm.chats.filter { $0.isCommunityParent }
@@ -23,36 +47,59 @@ struct ChatListView: View {
     }
 
     var body: some View {
-        List(selection: $selection) {
-            if !communities.isEmpty {
-                Section("Communities") {
-                    ForEach(communities, id: \.jid) { parent in
-                        DisclosureGroup {
-                            ForEach(subGroups(for: parent.jid), id: \.jid) { sub in
-                                chatRow(sub).tag(sub.id)
+        VStack(spacing: 0) {
+            Picker("", selection: Binding(
+                get: { scope },
+                set: { scopeRaw = $0.rawValue }
+            )) {
+                ForEach(Scope.allCases) { s in
+                    Image(systemName: s.icon).tag(s)
+                        .help(s.label)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .padding(.horizontal, 8)
+            .padding(.top, 8)
+            .padding(.bottom, 4)
+
+            List(selection: $selection) {
+                if scope == .all || scope == .communities {
+                    if !communities.isEmpty {
+                        Section("Communities") {
+                            ForEach(communities, id: \.jid) { parent in
+                                DisclosureGroup {
+                                    ForEach(subGroups(for: parent.jid), id: \.jid) { sub in
+                                        chatRow(sub).tag(sub.id)
+                                    }
+                                } label: {
+                                    chatRow(parent).tag(parent.id)
+                                }
                             }
-                        } label: {
-                            chatRow(parent).tag(parent.id)
+                        }
+                    }
+                }
+                if scope == .all || scope == .groups {
+                    if !standaloneGroups.isEmpty {
+                        Section("Groups") {
+                            ForEach(standaloneGroups, id: \.jid) { g in
+                                chatRow(g).tag(g.id)
+                            }
+                        }
+                    }
+                }
+                if scope == .all || scope == .chats {
+                    if !directChats.isEmpty {
+                        Section("Chats") {
+                            ForEach(directChats, id: \.jid) { c in
+                                chatRow(c).tag(c.id)
+                            }
                         }
                     }
                 }
             }
-            if !standaloneGroups.isEmpty {
-                Section("Groups") {
-                    ForEach(standaloneGroups, id: \.jid) { g in
-                        chatRow(g).tag(g.id)
-                    }
-                }
-            }
-            if !directChats.isEmpty {
-                Section("Chats") {
-                    ForEach(directChats, id: \.jid) { c in
-                        chatRow(c).tag(c.id)
-                    }
-                }
-            }
+            .listStyle(.sidebar)
         }
-        .listStyle(.sidebar)
     }
 
     @ViewBuilder
