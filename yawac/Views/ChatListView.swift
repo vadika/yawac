@@ -68,12 +68,9 @@ struct ChatListView: View {
                     if !communities.isEmpty {
                         Section("Communities") {
                             ForEach(communities, id: \.jid) { parent in
-                                DisclosureGroup {
-                                    ForEach(subGroups(for: parent.jid), id: \.jid) { sub in
-                                        chatRow(sub).tag(sub.id)
-                                    }
-                                } label: {
-                                    chatRow(parent).tag(parent.id)
+                                chatRow(parent).tag(parent.id)
+                                ForEach(subGroups(for: parent.jid), id: \.jid) { sub in
+                                    chatRow(sub, indent: 16).tag(sub.id)
                                 }
                             }
                         }
@@ -103,8 +100,11 @@ struct ChatListView: View {
     }
 
     @ViewBuilder
-    private func chatRow(_ chat: Chat) -> some View {
+    private func chatRow(_ chat: Chat, indent: CGFloat = 0) -> some View {
         HStack(alignment: .top, spacing: 8) {
+            if indent > 0 {
+                Color.clear.frame(width: indent)
+            }
             AvatarView(jid: chat.jid, name: chat.name, size: 40)
             VStack(alignment: .leading, spacing: 2) {
                 Text(chat.name).font(.headline).lineLimit(1)
