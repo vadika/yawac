@@ -109,16 +109,63 @@ final class ChatListViewModel {
         NSLog("[yawac/loadChats] toDelete=%d save=%@", deleteCount, saveErr)
         keepers = seen
 
+        // Derive a fresh per-chat (lastTimestamp, lastMessageText) from
+        // the actual messages on disk, ignoring the PersistedChat columns
+        // which SwiftData sometimes refuses to commit (verified earlier
+        // for @lid dedupe). This makes the sidebar order match reality
+        // even when upsertPersisted's save was a no-op.
+        let msgDescriptor = FetchDescriptor<PersistedMessage>(
+            sortBy: [SortDescriptor(\.timestamp, order: .reverse)])
+        var latestByChat: [String: (ts: Date, text: String)] = [:]
+        if let allMessages = try? context.fetch(msgDescriptor) {
+            for m in allMessages {
+                if latestByChat[m.chatJID] != nil { continue }
+                let preview: String
+                if let t = m.text, !t.isEmpty {
+                    preview = t
+                } else {
+                    switch m.kind {
+                    case "image":    preview = "📷 Photo"
+                    case "video":    preview = "🎥 Video"
+                    case "audio":    preview = "🎤 Audio"
+                    case "document": preview = "📄 Document"
+                    case "sticker":  preview = "Sticker"
+                    case "location": preview = "📍 Location"
+                    case "poll":     preview = "📊 Poll"
+                    default:         preview = "[\(m.kind)]"
+                    }
+                }
+                latestByChat[m.chatJID] = (m.timestamp, preview)
+            }
+        }
+
         self.chats = keepers.values
-            .sorted { $0.lastTimestamp > $1.lastTimestamp }
-            .map {
-                Chat(jid: $0.jid, name: $0.name,
-                     lastMessage: $0.lastMessageText ?? "",
-                     lastTimestamp: Int64($0.lastTimestamp.timeIntervalSince1970),
-                     unread: $0.unread,
-                     isCommunityParent: $0.isCommunityParent,
-                     communityParentJID: $0.communityParentJID,
-                     isDefaultSubGroup: $0.isDefaultSubGroup)
+            .map { row -> Chat in
+                let derived = latestByChat[row.jid]
+                let ts = max(
+                    row.lastTimestamp.timeIntervalSince1970,
+                    derived?.ts.timeIntervalSince1970 ?? -.infinity)
+                let preview: String = {
+                    if let d = derived,
+                       d.ts.timeIntervalSince1970 >= row.lastTimestamp.timeIntervalSince1970 {
+                        return d.text
+                    }
+                    return row.lastMessageText ?? ""
+                }()
+                return Chat(
+                    jid: row.jid, name: row.name,
+                    lastMessage: preview,
+                    lastTimestamp: Int64(ts.isFinite ? ts : 0),
+                    unread: row.unread,
+                    isCommunityParent: row.isCommunityParent,
+                    communityParentJID: row.communityParentJID,
+                    isDefaultSubGroup: row.isDefaultSubGroup)
+            }
+            .sorted { a, b in
+                if a.lastTimestamp != b.lastTimestamp {
+                    return a.lastTimestamp > b.lastTimestamp
+                }
+                return a.name.localizedCaseInsensitiveCompare(b.name) == .orderedAscending
             }
     }
 
