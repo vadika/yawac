@@ -359,10 +359,7 @@ final class ChatListViewModel {
     }
 
     private func sortChats() {
-        // Replace whole array rather than in-place sort so SwiftUI's List
-        // diff sees an array-level change and animates row reordering
-        // reliably (in-place mutation sometimes doesn't trigger reorder).
-        chats = chats.sorted { a, b in
+        chats.sort { a, b in
             if a.lastTimestamp != b.lastTimestamp {
                 return a.lastTimestamp > b.lastTimestamp
             }
