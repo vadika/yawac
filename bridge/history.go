@@ -97,6 +97,49 @@ func (c *Client) applyHistorySync(evt *events.HistorySync) {
 			c.dispatchWebMessage(chatJIDStr, wm)
 		}
 	}
+
+	// Surface every poll's bundled historical vote tally in one sweep.
+	// Helper added upstream — see tulir/whatsmeow PR #1151 — which
+	// flattens WebMessageInfo.PollUpdates across the whole blob so we
+	// don't have to walk it per-message ourselves.
+	c.emitHistoricalPollUpdatesFromBlob(evt)
+}
+
+// emitHistoricalPollUpdatesFromBlob dispatches one synthetic "PollVote"
+// event per record returned by events.HistorySync.HistoricalPollUpdates().
+// The helper already produces SHA-256(optionName) hashes — identical to
+// what DecryptPollVote yields for live votes — so the Swift tally path
+// is uniform across live and historical sources.
+func (c *Client) emitHistoricalPollUpdatesFromBlob(evt *events.HistorySync) {
+	records := evt.HistoricalPollUpdates()
+	if len(records) == 0 {
+		return
+	}
+	fmt.Fprintf(os.Stderr,
+		"[yawac/poll-history] sweep %d records\n", len(records))
+	for _, r := range records {
+		voterStr := r.Voter.String()
+		// Self-vote: helper leaves Voter empty when the update key has
+		// FromMe=true and no Participant. Substitute our own bare JID
+		// so the Swift side keys this against client.ownJID.
+		if voterStr == "" && r.PollCreationFromMe &&
+			c.wa != nil && c.wa.Store != nil && c.wa.Store.ID != nil {
+			voterStr = c.wa.Store.ID.ToNonAD().String()
+		}
+		hashes := make([]string, 0, len(r.SelectedOptionHashes))
+		for _, h := range r.SelectedOptionHashes {
+			hashes = append(hashes, hex.EncodeToString(h))
+		}
+		payload := JPollVote{
+			ChatJID:       r.Chat.String(),
+			PollMessageID: r.PollCreationID,
+			VoterJID:      voterStr,
+			OptionHashes:  hashes,
+			Timestamp:     r.Timestamp.Unix(),
+		}
+		b, _ := json.Marshal(payload)
+		c.dispatch("PollVote", string(b))
+	}
 }
 
 // dispatchWebMessage converts a WebMessageInfo (from history sync)
@@ -203,70 +246,6 @@ func (c *Client) dispatchWebMessage(chatJID string, wm *waWeb.WebMessageInfo) {
 	}
 	b, _ := json.Marshal(jm)
 	c.dispatch("Message", string(b))
-
-	// Historical poll-vote tallies. WebMessageInfo.pollUpdates is the
-	// primary phone's bundled-up record of all PollUpdate (vote)
-	// messages that landed on the poll *before* this companion paired.
-	// Each entry has the already-decrypted PollVoteMessage (raw SHA-256
-	// option hashes) plus the voter's JID on the update's MessageKey.
-	// whatsmeow defines the proto field but never consumes it — patch
-	// that gap here so on first sync we can render past tallies that
-	// the official client shows but our companion otherwise can't see.
-	if isPollCreation(msg) {
-		c.emitHistoricalPollUpdates(chatJID, key.GetID(), wm)
-	}
-}
-
-// emitHistoricalPollUpdates surfaces the embedded historical vote
-// records on a WebMessageInfo (poll-creation message) by dispatching
-// one synthetic "PollVote" event per voter. Hashes are already in
-// SHA-256-of-option-name form, matching what dispatchPollVote emits
-// from live events, so the Swift tallying path is identical.
-func (c *Client) emitHistoricalPollUpdates(chatJID, pollMsgID string, wm *waWeb.WebMessageInfo) {
-	updates := wm.GetPollUpdates()
-	if len(updates) == 0 {
-		return
-	}
-	fmt.Fprintf(os.Stderr,
-		"[yawac/poll-history] chat=%s poll=%s nUpdates=%d\n",
-		chatJID, pollMsgID, len(updates))
-	for _, pu := range updates {
-		vote := pu.GetVote()
-		if vote == nil {
-			continue
-		}
-		voteKey := pu.GetPollUpdateMessageKey()
-		voterJID := ""
-		var voteTS int64
-		if voteKey != nil {
-			if p := voteKey.GetParticipant(); p != "" {
-				voterJID = p
-			} else if voteKey.GetFromMe() &&
-				c.wa != nil && c.wa.Store != nil && c.wa.Store.ID != nil {
-				voterJID = c.wa.Store.ID.ToNonAD().String()
-			} else {
-				// 1:1 polls have no participant on the key; voter is
-				// the chat peer (or us if fromMe).
-				voterJID = chatJID
-			}
-		}
-		if ts := pu.GetSenderTimestampMS(); ts > 0 {
-			voteTS = ts / 1000
-		} else {
-			voteTS = int64(wm.GetMessageTimestamp())
-		}
-		hashes := make([]string, 0, len(vote.GetSelectedOptions()))
-		for _, h := range vote.GetSelectedOptions() {
-			hashes = append(hashes, hex.EncodeToString(h))
-		}
-		payload := JPollVote{
-			ChatJID:       chatJID,
-			PollMessageID: pollMsgID,
-			VoterJID:      voterJID,
-			OptionHashes:  hashes,
-			Timestamp:     voteTS,
-		}
-		b, _ := json.Marshal(payload)
-		c.dispatch("PollVote", string(b))
-	}
+	// Historical poll tallies are now surfaced once per HistorySync blob
+	// via emitHistoricalPollUpdatesFromBlob (called from applyHistorySync).
 }
