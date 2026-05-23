@@ -24,6 +24,13 @@ struct AvatarView: View {
         .frame(width: size, height: size)
         .clipShape(.circle)
         .task(id: jid) {
+            // Fast path: skip the actor hop + bridge call when the
+            // avatar is already cached on disk.
+            if let cached = AvatarCache.cachedURL(for: jid),
+               FileManager.default.fileExists(atPath: cached.path) {
+                imageURL = cached
+                return
+            }
             guard let client = session.client else { return }
             imageURL = await AvatarCache.shared.ensure(jid: jid, using: client)
         }

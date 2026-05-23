@@ -18,6 +18,23 @@ actor AvatarCache {
         self.baseDir = dir
     }
 
+    /// Returns the deterministic cache URL for a JID (file may not
+    /// exist). Public + nonisolated so SwiftUI views can sync-probe
+    /// without an actor hop.
+    nonisolated static func cachedURL(for jid: String) -> URL? {
+        let fm = FileManager.default
+        guard let caches = try? fm.url(for: .cachesDirectory, in: .userDomainMask,
+                                       appropriateFor: nil, create: false) else {
+            return nil
+        }
+        let dir = caches.appendingPathComponent("yawac-media/avatars",
+                                                isDirectory: true)
+        let safe = jid.replacingOccurrences(of: "@", with: "_")
+                      .replacingOccurrences(of: "/", with: "_")
+                      .replacingOccurrences(of: ":", with: "_")
+        return dir.appendingPathComponent("\(safe).jpg")
+    }
+
     private func file(for jid: String) -> URL {
         // Sanitize JID for filename (replace @ and / with _)
         let safe = jid.replacingOccurrences(of: "@", with: "_")

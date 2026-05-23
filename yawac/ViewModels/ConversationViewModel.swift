@@ -116,6 +116,16 @@ final class ConversationViewModel {
                 let downloadable: Set<String> = ["image", "sticker", "video", "audio", "document"]
                 guard downloadable.contains(p.kind) else { continue }
                 if downloadTasks[p.id] != nil { continue }
+
+                // Fast path: probe the deterministic cache path before
+                // queueing a Task. Most chats reopen with everything
+                // already cached — avoids spawning hundreds of no-op
+                // download tasks that flood the actor.
+                if let cached = cachedFilePath(for: p) {
+                    localPaths[p.id] = cached
+                    continue
+                }
+
                 guard let refJSON = p.mediaRefJSON else {
                     // Persisted before mediaRefJSON column existed — no way to
                     // fetch. Surface so user isn't stuck on infinite spinner.
@@ -274,6 +284,38 @@ final class ConversationViewModel {
 
         guard let refJSON = ref.json else { return }
         ensureDownloadFromHistory(id: message.id, kind: kind, refJSON: refJSON)
+    }
+
+    /// Returns the cached MediaCache file path if the file is already on
+    /// disk, otherwise nil. Used as a fast path to skip download Task
+    /// spawning on chat re-open when everything is already cached.
+    private func cachedFilePath(for p: PersistedMessage) -> String? {
+        let fm = FileManager.default
+        let base: URL
+        do {
+            let caches = try fm.url(for: .cachesDirectory, in: .userDomainMask,
+                                    appropriateFor: nil, create: false)
+            base = caches.appendingPathComponent("yawac-media", isDirectory: true)
+        } catch { return nil }
+        // Try the document's stored filename extension first.
+        var candidates: [String] = []
+        if p.kind == "document", let fn = p.mediaFileName {
+            let e = (fn as NSString).pathExtension.lowercased()
+            if !e.isEmpty { candidates.append(e) }
+        }
+        switch p.kind {
+        case "image":    candidates.append(contentsOf: ["jpg", "png", "webp", "gif"])
+        case "video":    candidates.append(contentsOf: ["mp4", "mov", "webm"])
+        case "audio":    candidates.append(contentsOf: ["ogg", "mp3", "m4a", "opus", "wav"])
+        case "sticker":  candidates.append("webp")
+        case "document": candidates.append(contentsOf: ["pdf", "bin"])
+        default:         candidates.append("bin")
+        }
+        for ext in candidates {
+            let path = base.appendingPathComponent("\(p.id).\(ext)").path
+            if fm.fileExists(atPath: path) { return path }
+        }
+        return nil
     }
 
     /// Picks a sensible on-disk extension so macOS opens the file with the
