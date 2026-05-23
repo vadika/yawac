@@ -110,33 +110,28 @@ final class ChatListViewModel {
         keepers = seen
 
         // Derive a fresh per-chat (lastTimestamp, lastMessageText) from
-        // the actual messages on disk, ignoring the PersistedChat columns
-        // which SwiftData sometimes refuses to commit (verified earlier
-        // for @lid dedupe). This makes the sidebar order match reality
-        // even when upsertPersisted's save was a no-op.
-        let msgDescriptor = FetchDescriptor<PersistedMessage>(
-            sortBy: [SortDescriptor(\.timestamp, order: .reverse)])
+        // raw SQLite — going through SwiftData materialises every row
+        // and freezes main on chats with thousands of messages.
         var latestByChat: [String: (ts: Date, text: String)] = [:]
-        if let allMessages = try? context.fetch(msgDescriptor) {
-            for m in allMessages {
-                if latestByChat[m.chatJID] != nil { continue }
-                let preview: String
-                if let t = m.text, !t.isEmpty {
-                    preview = t
-                } else {
-                    switch m.kind {
-                    case "image":    preview = "📷 Photo"
-                    case "video":    preview = "🎥 Video"
-                    case "audio":    preview = "🎤 Audio"
-                    case "document": preview = "📄 Document"
-                    case "sticker":  preview = "Sticker"
-                    case "location": preview = "📍 Location"
-                    case "poll":     preview = "📊 Poll"
-                    default:         preview = "[\(m.kind)]"
-                    }
+        for row in SQLiteDedupe.latestMessagePerChat() {
+            // SwiftData stores Date as Apple-epoch seconds; convert.
+            let date = Date(timeIntervalSinceReferenceDate: row.timestampAppleEpoch)
+            let preview: String
+            if let t = row.text, !t.isEmpty {
+                preview = t
+            } else {
+                switch row.kind {
+                case "image":    preview = "📷 Photo"
+                case "video":    preview = "🎥 Video"
+                case "audio":    preview = "🎤 Audio"
+                case "document": preview = "📄 Document"
+                case "sticker":  preview = "Sticker"
+                case "location": preview = "📍 Location"
+                case "poll":     preview = "📊 Poll"
+                default:         preview = "[\(row.kind)]"
                 }
-                latestByChat[m.chatJID] = (m.timestamp, preview)
             }
+            latestByChat[row.chatJID] = (date, preview)
         }
 
         self.chats = keepers.values
