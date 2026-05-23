@@ -4,12 +4,32 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"sync"
+	"syscall"
 	"time"
 
 	"go.mau.fi/whatsmeow"
 	waLog "go.mau.fi/whatsmeow/util/log"
 )
+
+// redirectStderr is run once at package init so logs (whatsmeow's
+// chatty INFO/WARN stream + our own fprintf traces) survive when the
+// app is launched via LaunchServices (`open`), which otherwise routes
+// stderr to /dev/null. Append-mode so multiple launches accumulate.
+func init() {
+	const logPath = "/tmp/yawac.log"
+	f, err := os.OpenFile(logPath,
+		os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return
+	}
+	_ = syscall.Dup2(int(f.Fd()), int(os.Stderr.Fd()))
+	_ = syscall.Dup2(int(f.Fd()), int(os.Stdout.Fd()))
+	fmt.Fprintf(os.Stderr,
+		"[yawac] === bridge init %s ===\n",
+		time.Now().Format(time.RFC3339))
+}
 
 // Client wraps a *whatsmeow.Client and is the primary handle exposed to Swift.
 type Client struct {
@@ -97,4 +117,15 @@ func (c *Client) Close() {
 // IsLoggedIn reports whether the underlying device has registration creds.
 func (c *Client) IsLoggedIn() bool {
 	return c.wa != nil && c.wa.Store.ID != nil
+}
+
+// OwnJID returns the bare (non-AD) JID of this device's account, or
+// "" if not logged in. Used by Swift to attribute optimistic poll
+// votes / reactions so they don't double-tally against the phone's
+// echo (which arrives with the account's real JID, not "me").
+func (c *Client) OwnJID() string {
+	if c.wa == nil || c.wa.Store == nil || c.wa.Store.ID == nil {
+		return ""
+	}
+	return c.wa.Store.ID.ToNonAD().String()
 }

@@ -63,6 +63,8 @@ final class WAClient {
     }
 
     var isLoggedIn: Bool { go.isLoggedIn() }
+    /// Bare JID of the paired account, empty when not paired.
+    var ownJID: String { go.ownJID() }
 
     func connect() throws { try go.connect() }
     func logout() throws { try go.logout() }

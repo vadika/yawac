@@ -176,6 +176,107 @@ enum SQLiteDedupe {
         return updated
     }
 
+    /// Read-only scan: returns `(bareSenderJID, mostRecentPushName)` for
+    /// every distinct sender that has at least one persisted push name.
+    /// Used at startup to rebuild `SessionViewModel.contactNames` so
+    /// historical messages render with names instead of raw user ids.
+    static func sendersWithPushNames() -> [(jid: String, name: String)] {
+        let supportDir: URL
+        do {
+            supportDir = try FileManager.default.url(
+                for: .applicationSupportDirectory, in: .userDomainMask,
+                appropriateFor: nil, create: false)
+        } catch { return [] }
+        let storeURL = supportDir.appendingPathComponent("default.store")
+        guard FileManager.default.fileExists(atPath: storeURL.path) else { return [] }
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(storeURL.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK,
+              let db else { return [] }
+        defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 1000)
+        // Pick the most-recent push name per sender via MAX(timestamp).
+        let sql = """
+            SELECT m.ZSENDERJID, m.ZSENDERPUSHNAME
+            FROM ZPERSISTEDMESSAGE m
+            JOIN (
+                SELECT ZSENDERJID, MAX(ZTIMESTAMP) AS mx
+                FROM ZPERSISTEDMESSAGE
+                WHERE ZSENDERPUSHNAME IS NOT NULL AND ZSENDERPUSHNAME != ''
+                GROUP BY ZSENDERJID
+            ) j ON j.ZSENDERJID = m.ZSENDERJID AND j.mx = m.ZTIMESTAMP
+            WHERE m.ZSENDERPUSHNAME IS NOT NULL AND m.ZSENDERPUSHNAME != ''
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(stmt) }
+        var out: [(String, String)] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            guard let jidPtr = sqlite3_column_text(stmt, 0),
+                  let namePtr = sqlite3_column_text(stmt, 1) else { continue }
+            out.append((String(cString: jidPtr), String(cString: namePtr)))
+        }
+        return out
+    }
+
+    /// Upserts a poll vote (one row per (pollMessageID, voterJID) pair).
+    /// SwiftData's @Attribute(.unique) gives us a UNIQUE INDEX on
+    /// ZCOMPOSITEKEY; we use INSERT ... ON CONFLICT to replace the
+    /// optionHashes + timestamp atomically, matching WhatsApp's "latest
+    /// vote replaces priors" semantics. Raw SQLite because writes from
+    /// background event handlers through SwiftData have repeatedly
+    /// failed to commit in this app.
+    static func upsertPollVote(chatJID: String, pollMessageID: String,
+                               voterJID: String, optionHashesJSON: String,
+                               timestamp: Date) {
+        let supportDir: URL
+        do {
+            supportDir = try FileManager.default.url(
+                for: .applicationSupportDirectory, in: .userDomainMask,
+                appropriateFor: nil, create: false)
+        } catch { return }
+        let storeURL = supportDir.appendingPathComponent("default.store")
+        guard FileManager.default.fileExists(atPath: storeURL.path) else { return }
+        var db: OpaquePointer?
+        guard sqlite3_open(storeURL.path, &db) == SQLITE_OK, let db else { return }
+        defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 2000)
+        sqlite3_exec(db, "PRAGMA journal_mode=WAL;", nil, nil, nil)
+        sqlite3_exec(db, "PRAGMA synchronous=NORMAL;", nil, nil, nil)
+        let composite = "\(pollMessageID)|\(voterJID)"
+        // Timestamp goes in CoreData/SwiftData's Apple-epoch double
+        // (seconds since 2001-01-01). PersistedReaction etc. use the
+        // same convention; consistency keeps round-trip through SwiftData
+        // queries clean.
+        let appleEpoch = timestamp.timeIntervalSinceReferenceDate
+        let sql = """
+            INSERT INTO ZPERSISTEDPOLLVOTE
+              (ZCOMPOSITEKEY, ZCHATJID, ZPOLLMESSAGEID, ZVOTERJID,
+               ZOPTIONHASHESJSON, ZTIMESTAMP)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(ZCOMPOSITEKEY) DO UPDATE SET
+              ZOPTIONHASHESJSON = excluded.ZOPTIONHASHESJSON,
+              ZTIMESTAMP = excluded.ZTIMESTAMP;
+        """
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) != SQLITE_OK {
+            let msg = String(cString: sqlite3_errmsg(db))
+            NSLog("[yawac/sqlite] poll upsert prepare failed: %@", msg)
+            return
+        }
+        defer { sqlite3_finalize(stmt) }
+        let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+        sqlite3_bind_text(stmt, 1, composite, -1, transient)
+        sqlite3_bind_text(stmt, 2, chatJID, -1, transient)
+        sqlite3_bind_text(stmt, 3, pollMessageID, -1, transient)
+        sqlite3_bind_text(stmt, 4, voterJID, -1, transient)
+        sqlite3_bind_text(stmt, 5, optionHashesJSON, -1, transient)
+        sqlite3_bind_double(stmt, 6, appleEpoch)
+        if sqlite3_step(stmt) != SQLITE_DONE {
+            let msg = String(cString: sqlite3_errmsg(db))
+            NSLog("[yawac/sqlite] poll upsert step failed: %@", msg)
+        }
+    }
+
     private static func execStep(db: OpaquePointer, sql: String, args: [String]) -> Bool {
         var stmt: OpaquePointer?
         let prep = sqlite3_prepare_v2(db, sql, -1, &stmt, nil)

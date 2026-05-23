@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 
 	waE2E "go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/types"
@@ -159,9 +160,14 @@ func (c *Client) dispatchPollVote(evt *events.Message) {
 	}
 	decrypted, err := c.wa.DecryptPollVote(context.Background(), evt)
 	if err != nil {
-		// Vote decryption can fail when the original poll-creation message
-		// was never seen (companion not paired at the time). Not fatal —
-		// Swift just won't tally it.
+		// Vote decryption can fail when the original poll-creation
+		// message's MsgSecret was never persisted locally (companion
+		// not paired at the time, or history-sync truncation). Log so
+		// the Swift side has visibility into how often this happens —
+		// the UI silently misses tallies otherwise.
+		fmt.Fprintf(os.Stderr,
+			"[yawac/poll-vote] decrypt fail chat=%s sender=%s poll=%s err=%v\n",
+			evt.Info.Chat.String(), evt.Info.Sender.String(), key.GetID(), err)
 		return
 	}
 	hashes := make([]string, 0, len(decrypted.GetSelectedOptions()))

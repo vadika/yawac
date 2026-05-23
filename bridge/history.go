@@ -2,6 +2,7 @@ package bridge
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -202,4 +203,70 @@ func (c *Client) dispatchWebMessage(chatJID string, wm *waWeb.WebMessageInfo) {
 	}
 	b, _ := json.Marshal(jm)
 	c.dispatch("Message", string(b))
+
+	// Historical poll-vote tallies. WebMessageInfo.pollUpdates is the
+	// primary phone's bundled-up record of all PollUpdate (vote)
+	// messages that landed on the poll *before* this companion paired.
+	// Each entry has the already-decrypted PollVoteMessage (raw SHA-256
+	// option hashes) plus the voter's JID on the update's MessageKey.
+	// whatsmeow defines the proto field but never consumes it — patch
+	// that gap here so on first sync we can render past tallies that
+	// the official client shows but our companion otherwise can't see.
+	if isPollCreation(msg) {
+		c.emitHistoricalPollUpdates(chatJID, key.GetID(), wm)
+	}
+}
+
+// emitHistoricalPollUpdates surfaces the embedded historical vote
+// records on a WebMessageInfo (poll-creation message) by dispatching
+// one synthetic "PollVote" event per voter. Hashes are already in
+// SHA-256-of-option-name form, matching what dispatchPollVote emits
+// from live events, so the Swift tallying path is identical.
+func (c *Client) emitHistoricalPollUpdates(chatJID, pollMsgID string, wm *waWeb.WebMessageInfo) {
+	updates := wm.GetPollUpdates()
+	if len(updates) == 0 {
+		return
+	}
+	fmt.Fprintf(os.Stderr,
+		"[yawac/poll-history] chat=%s poll=%s nUpdates=%d\n",
+		chatJID, pollMsgID, len(updates))
+	for _, pu := range updates {
+		vote := pu.GetVote()
+		if vote == nil {
+			continue
+		}
+		voteKey := pu.GetPollUpdateMessageKey()
+		voterJID := ""
+		var voteTS int64
+		if voteKey != nil {
+			if p := voteKey.GetParticipant(); p != "" {
+				voterJID = p
+			} else if voteKey.GetFromMe() &&
+				c.wa != nil && c.wa.Store != nil && c.wa.Store.ID != nil {
+				voterJID = c.wa.Store.ID.ToNonAD().String()
+			} else {
+				// 1:1 polls have no participant on the key; voter is
+				// the chat peer (or us if fromMe).
+				voterJID = chatJID
+			}
+		}
+		if ts := pu.GetSenderTimestampMS(); ts > 0 {
+			voteTS = ts / 1000
+		} else {
+			voteTS = int64(wm.GetMessageTimestamp())
+		}
+		hashes := make([]string, 0, len(vote.GetSelectedOptions()))
+		for _, h := range vote.GetSelectedOptions() {
+			hashes = append(hashes, hex.EncodeToString(h))
+		}
+		payload := JPollVote{
+			ChatJID:       chatJID,
+			PollMessageID: pollMsgID,
+			VoterJID:      voterJID,
+			OptionHashes:  hashes,
+			Timestamp:     voteTS,
+		}
+		b, _ := json.Marshal(payload)
+		c.dispatch("PollVote", string(b))
+	}
 }

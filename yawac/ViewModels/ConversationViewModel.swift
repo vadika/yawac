@@ -117,6 +117,28 @@ final class ConversationViewModel {
                 }
             }
 
+            // Hydrate poll vote tallies. Only seed entries for polls in the
+            // current window — older polls re-hydrate when scrolled back in.
+            let pollIDs = Set(displayable.filter { $0.kind == "poll" }.map { $0.id })
+            if !pollIDs.isEmpty {
+                let pvDescriptor = FetchDescriptor<PersistedPollVote>(
+                    predicate: #Predicate { pollIDs.contains($0.pollMessageID) })
+                if let pvRows = try? context.fetch(pvDescriptor) {
+                    for v in pvRows {
+                        guard let data = v.optionHashesJSON.data(using: .utf8),
+                              let hashes = try? JSONDecoder().decode([String].self, from: data)
+                        else { continue }
+                        var byHash = pollVotes[v.pollMessageID] ?? [:]
+                        for h in hashes {
+                            var set = byHash[h] ?? []
+                            set.insert(v.voterJID)
+                            byHash[h] = set
+                        }
+                        pollVotes[v.pollMessageID] = byHash
+                    }
+                }
+            }
+
             // Seed localPaths from any persisted media files, then kick off
             // downloads for media (images/stickers) that we don't have on disk yet.
             for p in rows {
@@ -598,7 +620,8 @@ final class ConversationViewModel {
             mediaCaption: m.media?.caption,
             mediaFileName: m.media?.fileName,
             mediaRefJSON: m.media?.ref?.json,
-            pollJSON: m.poll?.json)
+            pollJSON: m.poll?.json,
+            senderPushName: m.senderPushName)
         context.insert(row)
         try? context.save()
     }
@@ -628,12 +651,15 @@ final class ConversationViewModel {
     }
 
     /// Option hashes the current user has selected (used to highlight the
-    /// radio/checkbox in the poll UI). Voter id "me" is what `castVote`
-    /// optimistically stores.
+    /// radio/checkbox in the poll UI). Matches against the account's own
+    /// JID — the phone's echo of our own vote comes back with that JID
+    /// (not "me"), and historical hydrated votes are keyed the same way.
     func mySelections(for pollMessageID: String) -> Set<String> {
         guard let byHash = pollVotes[pollMessageID] else { return [] }
+        let me = client.ownJID
+        guard !me.isEmpty else { return [] }
         var out: Set<String> = []
-        for (hash, voters) in byHash where voters.contains("me") {
+        for (hash, voters) in byHash where voters.contains(me) {
             out.insert(hash)
         }
         return out
@@ -680,12 +706,15 @@ final class ConversationViewModel {
                     optionHashes: hashes,
                     pollOptions: options)
                 // Optimistically tally our own vote so the bubble updates
-                // immediately. The phone's PollUpdate echo (decryption may
-                // not fire for our own votes) won't overwrite this.
-                let me = "me"
-                self.applyPollVote(pollMessageID: messageID,
-                                   voterJID: me,
-                                   optionHashes: hashes)
+                // immediately. Use the account's bare JID so the phone's
+                // PollUpdate echo coalesces with this entry instead of
+                // double-counting.
+                let me = self.client.ownJID
+                if !me.isEmpty {
+                    self.applyPollVote(pollMessageID: messageID,
+                                       voterJID: me,
+                                       optionHashes: hashes)
+                }
             } catch {
                 self.messages.append(UIMessage(
                     id: UUID().uuidString,

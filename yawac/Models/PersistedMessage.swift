@@ -18,6 +18,10 @@ final class PersistedMessage {
     // Delivery state for fromMe messages: "sent" | "delivered" | "read" | "played".
     // Defaulted so existing rows migrate lightweight.
     var deliveryStatus: String = "sent"
+    // Push name (the name the sender set on their phone) captured at
+    // message receive time. Persisted so cold-start can rebuild the
+    // contactNames map without waiting for a live message to re-arrive.
+    var senderPushName: String? = nil
 
     init(id: String, chatJID: String, senderJID: String, fromMe: Bool,
          timestamp: Date, kind: String, text: String? = nil,
@@ -25,7 +29,8 @@ final class PersistedMessage {
          mediaFileName: String? = nil,
          mediaRefJSON: String? = nil,
          pollJSON: String? = nil,
-         deliveryStatus: String = "sent") {
+         deliveryStatus: String = "sent",
+         senderPushName: String? = nil) {
         self.id = id
         self.chatJID = chatJID
         self.senderJID = senderJID
@@ -39,6 +44,7 @@ final class PersistedMessage {
         self.mediaRefJSON = mediaRefJSON
         self.pollJSON = pollJSON
         self.deliveryStatus = deliveryStatus
+        self.senderPushName = senderPushName
     }
 }
 
@@ -61,6 +67,32 @@ final class PersistedReaction {
         self.targetMessageID = targetMessageID
         self.senderJID = senderJID
         self.emoji = emoji
+        self.timestamp = timestamp
+    }
+}
+
+/// Last known vote from a voter on a specific poll. Composite key
+/// `<pollMessageID>|<voterJID>` so a new vote upserts (matches
+/// WhatsApp semantics — a voter's latest update replaces priors,
+/// for both single- and multi-select polls).
+@Model
+final class PersistedPollVote {
+    @Attribute(.unique) var compositeKey: String
+    var chatJID: String
+    var pollMessageID: String
+    var voterJID: String
+    /// JSON array of hex-encoded option hashes (the same hashes
+    /// emitted by the bridge from SHA256(optionName)).
+    var optionHashesJSON: String
+    var timestamp: Date
+
+    init(chatJID: String, pollMessageID: String, voterJID: String,
+         optionHashesJSON: String, timestamp: Date) {
+        self.compositeKey = "\(pollMessageID)|\(voterJID)"
+        self.chatJID = chatJID
+        self.pollMessageID = pollMessageID
+        self.voterJID = voterJID
+        self.optionHashesJSON = optionHashesJSON
         self.timestamp = timestamp
     }
 }

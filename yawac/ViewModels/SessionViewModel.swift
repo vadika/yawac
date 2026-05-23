@@ -36,18 +36,25 @@ final class SessionViewModel {
     /// against their JID. Lower priority than explicit contact names —
     /// only inserted when no other name is known.
     func ingestPushName(jid: String, name: String?) {
-        guard let name, !name.isEmpty, contactNames[jid] == nil else { return }
-        contactNames[jid] = name
+        guard let name, !name.isEmpty else { return }
+        let key = JIDNormalize.bare(jid)
+        if contactNames[key] == nil { contactNames[key] = name }
     }
 
     func displayName(for jid: String) -> String {
         if jid == "status@broadcast" { return "Status updates" }
         if jid.hasSuffix("@broadcast") { return "Broadcast" }
-        if let n = contactNames[jid] { return n }
-        if let at = jid.firstIndex(of: "@") {
-            return String(jid[..<at])
+        // Senders in groups arrive with a `:<device>` suffix that the
+        // contact map is keyed without — strip before lookup, then also
+        // try the LID→PN canonical form for `@lid` senders.
+        let bare = JIDNormalize.bare(jid)
+        if let n = contactNames[bare] { return n }
+        let canonical = JIDNormalize.canonical(jid, client: client)
+        if canonical != bare, let n = contactNames[canonical] { return n }
+        if let at = bare.firstIndex(of: "@") {
+            return String(bare[..<at])
         }
-        return jid
+        return bare
     }
 
     private var eventTask: Task<Void, Never>?
@@ -69,9 +76,20 @@ final class SessionViewModel {
             self.client = c
             try c.connect()
             self.state = c.isLoggedIn ? .ready : .needsPair
+            hydratePushNamesFromStore()
             consumeEvents()
         } catch {
             state = .error(error.localizedDescription)
+        }
+    }
+
+    /// Rebuilds the in-memory contactNames map from persisted push names
+    /// captured on prior sessions so cold-start renders names instead of
+    /// raw user ids — even for chats the user never opens this session.
+    private func hydratePushNamesFromStore() {
+        for (jid, name) in SQLiteDedupe.sendersWithPushNames() {
+            let key = JIDNormalize.bare(jid)
+            if contactNames[key] == nil { contactNames[key] = name }
         }
     }
 
@@ -121,8 +139,16 @@ final class SessionViewModel {
             syncing = false
         case .disconnected:
             break
+        case .message(let m):
+            // Capture pushName globally so closed chats also build the
+            // contactNames map — otherwise senders are only learned when
+            // their chat happens to be open.
+            ingestPushName(jid: m.senderJID, name: m.senderPushName)
         case .receipt(let r):
             persistReceipt(r)
+        case .pollVote(let chat, let pmid, let voter, let hashes):
+            persistPollVote(chatJID: chat, pollMessageID: pmid,
+                            voterJID: voter, optionHashes: hashes)
         default:
             break
         }
@@ -135,6 +161,22 @@ final class SessionViewModel {
         Task.detached(priority: .utility) {
             _ = SQLiteDedupe.applyReceiptStatus(
                 messageIDs: r.messageIDs, status: r.status)
+        }
+    }
+
+    private nonisolated func persistPollVote(chatJID: String,
+                                             pollMessageID: String,
+                                             voterJID: String,
+                                             optionHashes: [String]) {
+        let json = (try? JSONEncoder().encode(optionHashes))
+            .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+        Task.detached(priority: .utility) {
+            SQLiteDedupe.upsertPollVote(
+                chatJID: chatJID,
+                pollMessageID: pollMessageID,
+                voterJID: voterJID,
+                optionHashesJSON: json,
+                timestamp: Date())
         }
     }
 }
