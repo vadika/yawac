@@ -30,6 +30,7 @@ final class ConversationViewModel {
     // letting the UI hide the "Load earlier" button.
     private(set) var loadingOlder = false
     var olderUnavailable = false
+    private(set) var refreshingPolls = false
 
     init(chatJID: String, client: WAClient, context: ModelContext? = nil) {
         self.chatJID = chatJID
@@ -180,6 +181,47 @@ final class ConversationViewModel {
             } else {
                 self.initialAnchorID = self.messages.last?.id
             }
+        }
+    }
+
+    /// Re-requests the recent slice of this chat from the primary phone so
+    /// the response's WebMessageInfo.pollUpdates field carries the current
+    /// vote tallies. Used for polls created during this companion's
+    /// connected window — those polls had empty pollUpdates when first
+    /// observed (no votes yet), and live PollUpdate events for them are
+    /// only delivered if the voter happens to fan votes to this device.
+    /// On-demand HistorySync requested at the chat's newest message gives
+    /// the phone a chance to bundle all current votes into the response.
+    func refreshPollTallies() {
+        guard !refreshingPolls, let context else { return }
+        // Anchor at the newest message in the chat — server returns up to
+        // ~50 messages older than the anchor, which includes recent polls.
+        let jid = chatJID
+        var descriptor = FetchDescriptor<PersistedMessage>(
+            predicate: #Predicate { $0.chatJID == jid },
+            sortBy: [SortDescriptor(\.timestamp, order: .reverse)])
+        descriptor.fetchLimit = 1
+        guard let anchor = (try? context.fetch(descriptor))?.first else { return }
+        refreshingPolls = true
+        let id = anchor.id
+        let senderJID = anchor.senderJID
+        let fromMe = anchor.fromMe
+        let ts = Int64(anchor.timestamp.timeIntervalSince1970)
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.refreshingPolls = false }
+            try? self.client.requestOlderHistory(
+                chatJID: self.chatJID,
+                oldestMsgID: id,
+                oldestSenderJID: senderJID,
+                oldestFromMe: fromMe,
+                oldestTimestampSec: ts,
+                count: 50)
+            // PollVote events from the response stream into pollVotes via
+            // ConversationView's .pollVote subscriber — no further work
+            // here. Give the response a few seconds to arrive before
+            // clearing the spinner.
+            try? await Task.sleep(for: .seconds(5))
         }
     }
 
@@ -650,6 +692,18 @@ final class ConversationViewModel {
         return out
     }
 
+    /// Per-option voter JIDs (sorted) for a given poll, keyed by option
+    /// hash. The Swift side renders these via `mentionResolver` so the
+    /// list shows display names rather than raw JIDs.
+    func voters(for pollMessageID: String) -> [String: [String]] {
+        guard let byHash = pollVotes[pollMessageID] else { return [:] }
+        var out: [String: [String]] = [:]
+        for (hash, voters) in byHash {
+            out[hash] = voters.sorted()
+        }
+        return out
+    }
+
     /// Option hashes the current user has selected (used to highlight the
     /// radio/checkbox in the poll UI). Matches against the account's own
     /// JID — the phone's echo of our own vote comes back with that JID
@@ -714,6 +768,22 @@ final class ConversationViewModel {
                     self.applyPollVote(pollMessageID: messageID,
                                        voterJID: me,
                                        optionHashes: hashes)
+                    // Persist our own optimistic vote — SessionViewModel's
+                    // global PollVote sink only sees inbound events, and
+                    // whatsmeow doesn't echo our own sent messages back as
+                    // events. Without this the radio "forgets" itself on
+                    // restart.
+                    let json = (try? JSONEncoder().encode(hashes))
+                        .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+                    let chat = self.chatJID
+                    Task.detached(priority: .utility) {
+                        SQLiteDedupe.upsertPollVote(
+                            chatJID: chat,
+                            pollMessageID: messageID,
+                            voterJID: me,
+                            optionHashesJSON: json,
+                            timestamp: Date())
+                    }
                 }
             } catch {
                 self.messages.append(UIMessage(

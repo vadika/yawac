@@ -93,6 +93,7 @@ struct ConversationView: View {
                                             downloadError: vm.downloadErrors[msg.id],
                                             onRetryDownload: vm.retryHandler(for: msg),
                                             voteCounts: vm.voteCounts(for: msg.id),
+                                            votersByOption: vm.voters(for: msg.id),
                                             mySelections: vm.mySelections(for: msg.id),
                                             onCastVote: { hashes, options in
                                                 vm.castVote(messageID: msg.id,
@@ -187,6 +188,16 @@ struct ConversationView: View {
             let vm = ConversationViewModel(chatJID: chatJID, client: client, context: modelContext)
             vm.loadHistory()
             vm.markAllAsRead()
+            // Background-refresh poll tallies if any poll is in view. The
+            // primary phone's response carries the current pollUpdates
+            // bundle so tallies for polls created during this companion's
+            // connected window (which had no embedded votes when first
+            // observed) become visible without manual user action.
+            if vm.messages.contains(where: { msg in
+                if case .poll = msg.body { return true } else { return false }
+            }) {
+                vm.refreshPollTallies()
+            }
             self.vm = vm
             try? client.subscribePresence(chatJID)
             let stream = client.eventStream()

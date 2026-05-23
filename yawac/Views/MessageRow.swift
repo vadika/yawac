@@ -11,6 +11,7 @@ struct MessageRow: View {
     let downloadError: String?
     let onRetryDownload: (() -> Void)?
     let voteCounts: [String: Int]
+    let votersByOption: [String: [String]]
     let mySelections: Set<String>
     let onCastVote: (([String], [BridgePollOption]) -> Void)?
     let myReaction: String?
@@ -32,6 +33,7 @@ struct MessageRow: View {
          downloadError: String? = nil,
          onRetryDownload: (() -> Void)? = nil,
          voteCounts: [String: Int] = [:],
+         votersByOption: [String: [String]] = [:],
          mySelections: Set<String> = [],
          onCastVote: (([String], [BridgePollOption]) -> Void)? = nil,
          myReaction: String? = nil,
@@ -46,6 +48,7 @@ struct MessageRow: View {
         self.downloadError = downloadError
         self.onRetryDownload = onRetryDownload
         self.voteCounts = voteCounts
+        self.votersByOption = votersByOption
         self.mySelections = mySelections
         self.onCastVote = onCastVote
         self.myReaction = myReaction
@@ -259,25 +262,37 @@ struct MessageRow: View {
             ForEach(options, id: \.hash) { opt in
                 let count = voteCounts[opt.hash] ?? 0
                 let picked = mySelections.contains(opt.hash)
-                Button {
-                    onCastVote?([opt.hash], options)
-                } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: pollIconName(selectable: selectableCount, picked: picked))
-                            .foregroundStyle(picked ? Color.accentColor : Color.secondary)
-                        Text(opt.name)
-                            .fontWeight(picked ? .semibold : .regular)
-                        Spacer(minLength: 8)
-                        if count > 0 {
-                            Text("\(count)")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
+                let voterNames = (votersByOption[opt.hash] ?? [])
+                    .map { mentionResolver($0) }
+                VStack(alignment: .leading, spacing: 2) {
+                    Button {
+                        onCastVote?([opt.hash], options)
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: pollIconName(selectable: selectableCount, picked: picked))
+                                .foregroundStyle(picked ? Color.accentColor : Color.secondary)
+                            Text(opt.name)
+                                .fontWeight(picked ? .semibold : .regular)
+                            Spacer(minLength: 8)
+                            if count > 0 {
+                                Text("\(count)")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
+                        .contentShape(.rect)
                     }
-                    .contentShape(.rect)
+                    .buttonStyle(.plain)
+                    .disabled(onCastVote == nil)
+                    if !voterNames.isEmpty {
+                        Text(voterNames.joined(separator: ", "))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .padding(.leading, 24)
+                            .lineLimit(2)
+                            .truncationMode(.tail)
+                    }
                 }
-                .buttonStyle(.plain)
-                .disabled(onCastVote == nil)
                 .padding(.vertical, 2)
             }
             HStack(spacing: 6) {
