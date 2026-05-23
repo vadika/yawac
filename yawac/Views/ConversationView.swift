@@ -186,6 +186,7 @@ struct ConversationView: View {
             lastSeenCount = 0
             let vm = ConversationViewModel(chatJID: chatJID, client: client, context: modelContext)
             vm.loadHistory()
+            vm.markAllAsRead()
             self.vm = vm
             try? client.subscribePresence(chatJID)
             let stream = client.eventStream()
@@ -196,7 +197,7 @@ struct ConversationView: View {
                     vm.ingest(m)
                 case .chatPresence(let chat, _, let typing) where chat == chatJID:
                     vm.peerTyping = typing
-                case .receipt(let r) where r.chatJID == chatJID:
+                case .receipt(let r) where Self.receiptMatches(r.chatJID, chat: chatJID, client: client):
                     vm.applyReceipt(r)
                 case .reaction(let r) where r.chatJID == chatJID:
                     vm.applyReaction(r)
@@ -209,5 +210,17 @@ struct ConversationView: View {
                 }
             }
         }
+    }
+
+    /// Receipt match that avoids a synchronous gomobile FFI call on every
+    /// receipt event. Fast-paths the common case (already-canonical PN JID)
+    /// by comparing `bare()` first, only paying for `canonical()` (which
+    /// crosses into Go for LID→PN resolution) when the receipt is in
+    /// `@lid` form.
+    static func receiptMatches(_ receiptJID: String, chat: String, client: WAClient) -> Bool {
+        let bare = JIDNormalize.bare(receiptJID)
+        if bare == chat { return true }
+        guard bare.hasSuffix("@lid") else { return false }
+        return JIDNormalize.canonical(receiptJID, client: client) == chat
     }
 }

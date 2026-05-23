@@ -121,8 +121,20 @@ final class SessionViewModel {
             syncing = false
         case .disconnected:
             break
+        case .receipt(let r):
+            persistReceipt(r)
         default:
             break
+        }
+    }
+
+    /// Off-actor raw SQLite update so the open ConversationView still
+    /// gets the live event for in-memory state, while the persisted
+    /// column is updated in the background for cold-start hydration.
+    private nonisolated func persistReceipt(_ r: BridgeReceipt) {
+        Task.detached(priority: .utility) {
+            _ = SQLiteDedupe.applyReceiptStatus(
+                messageIDs: r.messageIDs, status: r.status)
         }
     }
 }

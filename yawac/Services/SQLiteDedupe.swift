@@ -120,6 +120,62 @@ enum SQLiteDedupe {
         return out
     }
 
+    /// Persists delivery status for a batch of message ids. Rank-based
+    /// downgrade prevention: read(3) > played(2) > delivered(1) > sent(0).
+    /// Raw SQLite because SwiftData writes from background paths have
+    /// repeatedly failed to commit in this app (see `collapseLIDRows`
+    /// rationale above). Returns rows updated.
+    static func applyReceiptStatus(messageIDs: [String], status: String) -> Int {
+        guard !messageIDs.isEmpty else { return 0 }
+        let rank: [String: Int] = ["sent": 0, "delivered": 1, "played": 2, "read": 3]
+        guard let incoming = rank[status] else { return 0 }
+        let supportDir: URL
+        do {
+            supportDir = try FileManager.default.url(
+                for: .applicationSupportDirectory, in: .userDomainMask,
+                appropriateFor: nil, create: false)
+        } catch { return 0 }
+        let storeURL = supportDir.appendingPathComponent("default.store")
+        guard FileManager.default.fileExists(atPath: storeURL.path) else { return 0 }
+        var db: OpaquePointer?
+        guard sqlite3_open(storeURL.path, &db) == SQLITE_OK, let db else { return 0 }
+        defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 2000)
+        sqlite3_exec(db, "PRAGMA journal_mode=WAL;", nil, nil, nil)
+        sqlite3_exec(db, "PRAGMA synchronous=NORMAL;", nil, nil, nil)
+        sqlite3_exec(db, "BEGIN IMMEDIATE;", nil, nil, nil)
+        var updated = 0
+        // Per-id UPDATE with rank guard. CASE-based filter avoids
+        // downgrading a previously-saved higher status (e.g. read → delivered).
+        let sql = """
+            UPDATE ZPERSISTEDMESSAGE
+            SET ZDELIVERYSTATUS = ?
+            WHERE ZID = ?
+              AND CASE COALESCE(ZDELIVERYSTATUS, 'sent')
+                  WHEN 'sent' THEN 0
+                  WHEN 'delivered' THEN 1
+                  WHEN 'played' THEN 2
+                  WHEN 'read' THEN 3
+                  ELSE 0
+                  END < ?;
+        """
+        for id in messageIDs {
+            var stmt: OpaquePointer?
+            if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) != SQLITE_OK { continue }
+            let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+            sqlite3_bind_text(stmt, 1, status, -1, transient)
+            sqlite3_bind_text(stmt, 2, id, -1, transient)
+            sqlite3_bind_int(stmt, 3, Int32(incoming))
+            if sqlite3_step(stmt) == SQLITE_DONE {
+                updated += Int(sqlite3_changes(db))
+            }
+            sqlite3_finalize(stmt)
+        }
+        sqlite3_exec(db, "COMMIT;", nil, nil, nil)
+        sqlite3_exec(db, "PRAGMA wal_checkpoint(PASSIVE);", nil, nil, nil)
+        return updated
+    }
+
     private static func execStep(db: OpaquePointer, sql: String, args: [String]) -> Bool {
         var stmt: OpaquePointer?
         let prep = sqlite3_prepare_v2(db, sql, -1, &stmt, nil)

@@ -188,6 +188,15 @@ final class WAClient {
             count: count)
     }
 
+    /// Sends a `read` receipt for `messageIDs`. `senderJID` is the bare
+    /// JID of the message author (chat peer for 1:1, participant for groups).
+    nonisolated func markRead(chatJID: String, senderJID: String, messageIDs: [String]) throws {
+        guard !messageIDs.isEmpty else { return }
+        let idsJSON = (try? JSONEncoder().encode(messageIDs))
+            .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+        try go.markRead(chatJID, senderJID: senderJID, msgIDsJSON: idsJSON)
+    }
+
     nonisolated func fetchProfilePicture(jid: String, outPath: String) throws -> String {
         var err: NSError?
         let result = go.fetchProfilePicture(jid, outPath: outPath, error: &err)

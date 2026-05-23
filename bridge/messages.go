@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"time"
 
 	waE2E "go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/types"
@@ -47,6 +48,38 @@ func (c *Client) SendReaction(chatJID, targetMsgID, targetSenderJID string, targ
 	}
 	out, _ := json.Marshal(JSendResult{MessageID: resp.ID, Timestamp: resp.Timestamp.Unix()})
 	return string(out), nil
+}
+
+// MarkRead sends a read receipt for the given message ids. `senderJID`
+// is the original message sender (the participant in groups; the chat
+// peer in 1:1). `msgIDsJSON` is a JSON array of message id strings.
+//
+// whatsmeow's Client.MarkRead defaults to ReceiptTypeRead when no extra
+// type is passed, which is what we want for blue-tick semantics.
+func (c *Client) MarkRead(chatJID, senderJID, msgIDsJSON string) error {
+	if c.wa == nil {
+		return errors.New("client closed")
+	}
+	chat, err := types.ParseJID(chatJID)
+	if err != nil {
+		return fmt.Errorf("parse chat: %w", err)
+	}
+	sender, err := types.ParseJID(senderJID)
+	if err != nil {
+		return fmt.Errorf("parse sender: %w", err)
+	}
+	var idStrings []string
+	if err := json.Unmarshal([]byte(msgIDsJSON), &idStrings); err != nil {
+		return fmt.Errorf("parse ids: %w", err)
+	}
+	if len(idStrings) == 0 {
+		return nil
+	}
+	ids := make([]types.MessageID, 0, len(idStrings))
+	for _, s := range idStrings {
+		ids = append(ids, types.MessageID(s))
+	}
+	return c.wa.MarkRead(context.Background(), ids, time.Now(), chat, sender)
 }
 
 // SendText sends a plain-text message. Returns JSON of JSendResult.

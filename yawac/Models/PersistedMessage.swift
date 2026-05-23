@@ -15,13 +15,17 @@ final class PersistedMessage {
     var mediaFileName: String?
     var mediaRefJSON: String?
     var pollJSON: String?
+    // Delivery state for fromMe messages: "sent" | "delivered" | "read" | "played".
+    // Defaulted so existing rows migrate lightweight.
+    var deliveryStatus: String = "sent"
 
     init(id: String, chatJID: String, senderJID: String, fromMe: Bool,
          timestamp: Date, kind: String, text: String? = nil,
          mediaPath: String? = nil, mediaCaption: String? = nil,
          mediaFileName: String? = nil,
          mediaRefJSON: String? = nil,
-         pollJSON: String? = nil) {
+         pollJSON: String? = nil,
+         deliveryStatus: String = "sent") {
         self.id = id
         self.chatJID = chatJID
         self.senderJID = senderJID
@@ -34,6 +38,7 @@ final class PersistedMessage {
         self.mediaFileName = mediaFileName
         self.mediaRefJSON = mediaRefJSON
         self.pollJSON = pollJSON
+        self.deliveryStatus = deliveryStatus
     }
 }
 

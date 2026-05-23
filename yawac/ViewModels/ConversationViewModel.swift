@@ -94,6 +94,17 @@ final class ConversationViewModel {
                     timestamp: p.timestamp,
                     body: body)
             }
+            // Hydrate persisted delivery status (fromMe only — receipts for
+            // inbound messages aren't shown).
+            for p in displayable where p.fromMe {
+                switch p.deliveryStatus {
+                case "delivered": receiptStatus[p.id] = .delivered
+                case "played":    receiptStatus[p.id] = .played
+                case "read":      receiptStatus[p.id] = .read
+                default:          receiptStatus[p.id] = .sent
+                }
+            }
+
             // Hydrate reactions for the loaded messages from PersistedReaction.
             let ids = Set(displayable.map { $0.id })
             let rxDescriptor = FetchDescriptor<PersistedReaction>(
@@ -489,6 +500,53 @@ final class ConversationViewModel {
         messages.append(UIMessage(b))
         persist(b)
         ensureDownload(for: b)
+        // Newly-arrived inbound while chat open → send read receipt
+        // straight away (matches WhatsApp behavior of marking when
+        // visible). Outbound echoes skip this branch.
+        if !b.fromMe {
+            sendReadReceipts(for: [b])
+        }
+    }
+
+    /// Sends read receipts for all currently-loaded inbound messages.
+    /// Called once on chat open. Groups by senderJID because whatsmeow's
+    /// `MarkRead` requires a single sender per call (in groups, multiple
+    /// participants may have sent the unread batch).
+    func markAllAsRead() {
+        let inbound = messages.filter { !$0.fromMe }
+        sendReadReceipts(for: inbound.map(BridgeIDPair.init))
+    }
+
+    private struct BridgeIDPair {
+        let id: String
+        let senderJID: String
+        init(_ m: UIMessage) {
+            self.id = m.id
+            self.senderJID = m.senderJID
+        }
+        init(_ b: BridgeMessage) {
+            self.id = b.id
+            self.senderJID = b.senderJID
+        }
+    }
+
+    private func sendReadReceipts(for pairs: [BridgeIDPair]) {
+        guard !pairs.isEmpty else { return }
+        let chat = chatJID
+        let client = self.client
+        // Group ids by sender so each MarkRead call has a coherent sender.
+        var bySender: [String: [String]] = [:]
+        for p in pairs {
+            bySender[p.senderJID, default: []].append(p.id)
+        }
+        Task.detached(priority: .utility) {
+            for (sender, ids) in bySender {
+                try? client.markRead(chatJID: chat, senderJID: sender, messageIDs: ids)
+            }
+        }
+    }
+    private func sendReadReceipts(for messages: [BridgeMessage]) {
+        sendReadReceipts(for: messages.map(BridgeIDPair.init))
     }
 
     func setTyping(_ typing: Bool) {
