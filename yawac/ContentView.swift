@@ -21,9 +21,18 @@ struct ContentView: View {
             if let id = selectedChat {
                 ConversationView(chatJID: id)
             } else {
-                Text("Select a chat").foregroundStyle(.secondary)
+                Text("Select a chat")
+                    .font(Theme.ui(14))
+                    .foregroundStyle(Theme.textFaint)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Theme.bg)
             }
         }
+        .navigationSplitViewStyle(.balanced)
+        // Drop NavigationSplitView's auto-injected sidebar-toggle icon
+        // (the lone "split-pane" button). The title bar itself stays so
+        // traffic lights still render.
+        .toolbar(removing: .sidebarToggle)
         .onChange(of: selectedChat) { _, new in
             guard let new else { return }
             lastSelectedChatJID = new

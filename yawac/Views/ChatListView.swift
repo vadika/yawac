@@ -58,17 +58,11 @@ struct ChatListView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // ─── Title row: wordmark (traffic lights are owned by the
-            // OS-supplied titlebar, sitting just above this view).
-            HStack {
-                Spacer()
-                Text("yawac")
-                    .font(Theme.ui(13, weight: .semibold))
-                    .foregroundStyle(Theme.text.opacity(0.85))
-                    .tracking(-0.2)
-            }
-            .frame(height: 44)
-            .padding(.horizontal, 16)
+            // ─── Title-bar gutter. 64pt matches the right pane's chat
+            // header so the two columns share a single seam; traffic
+            // lights overlay the leading area.
+            WindowDragHandle()
+                .frame(height: 64)
 
             // ─── Search (visual hint — real search is system-level).
             HStack(spacing: 8) {
@@ -155,6 +149,7 @@ struct ChatListView: View {
             }
         }
         .background(Theme.sidebarBg)
+        .ignoresSafeArea(.container, edges: .top)
     }
 
     @ViewBuilder

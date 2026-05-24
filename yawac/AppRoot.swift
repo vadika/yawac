@@ -4,32 +4,23 @@ struct AppRoot: View {
     @Environment(SessionViewModel.self) private var session
 
     var body: some View {
-        VStack(spacing: 0) {
-            if session.syncing {
-                HStack(spacing: 6) {
-                    ProgressView().controlSize(.small)
-                    Text("Syncing history…")
-                        .foregroundStyle(.secondary)
-                }
-                .padding(.horizontal)
-                .padding(.vertical, 4)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(.thinMaterial)
+        Group {
+            switch session.state {
+            case .loading:
+                ProgressView().controlSize(.large).tint(Theme.accent)
+            case .needsPair:
+                LoginView()
+            case .ready:
+                ContentView()
+            case .error(let msg):
+                Text("Error: \(msg)")
+                    .font(Theme.ui(13))
+                    .foregroundStyle(Color.red.opacity(0.85))
             }
-            Group {
-                switch session.state {
-                case .loading:
-                    ProgressView().controlSize(.large)
-                case .needsPair:
-                    LoginView()
-                case .ready:
-                    ContentView()
-                case .error(let msg):
-                    Text("Error: \(msg)").foregroundStyle(.red)
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Sync state is surfaced inside ConversationView via the
+        // floating SyncBanner overlay — no top strip pushing content.
         .task { await session.boot() }
     }
 }

@@ -53,6 +53,17 @@ struct ConversationView: View {
         return out
     }
 
+    /// Derives the banner state from the global session signals.
+    /// Sync is shown only while the global syncing flag is set; offline
+    /// reflects the connection state. Idle hides the banner entirely.
+    private var currentSyncState: SyncState {
+        switch session.state {
+        case .needsPair, .loading: return .connecting
+        case .error: return .offline
+        case .ready: return session.syncing ? .syncing : .idle
+        }
+    }
+
     /// Custom header bar replaces SwiftUI's titlebar so we can apply
     /// Graphite tokens directly (the OS title bar is hidden via
     /// .windowStyle(.hiddenTitleBar) on the WindowGroup).
@@ -101,6 +112,11 @@ struct ConversationView: View {
         .overlay(alignment: .bottom) {
             Rectangle().fill(Theme.border).frame(height: 1)
         }
+        // Window-drag layer behind the row so any non-interactive
+        // pixel on the header strip drags the window. Interactive
+        // children (avatar tap, info button) win because they sit
+        // above this in the ZStack-derived hit order.
+        .background(WindowDragHandle())
     }
 
     var body: some View {
@@ -250,6 +266,17 @@ struct ConversationView: View {
                 ProgressView().tint(Theme.accent)
             }
         }
+        .ignoresSafeArea(.container, edges: .top)
+        .overlay(alignment: .top) {
+            let s = currentSyncState
+            if s != .idle {
+                SyncBanner(state: s)
+                    .padding(.top, 78) // clears the 64pt header strip
+                    .allowsHitTesting(false)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+        .animation(.easeOut(duration: 0.2), value: currentSyncState)
         .inspector(isPresented: $showInfo) {
             ChatInfoView(chatJID: chatJID)
                 .inspectorColumnWidth(min: 280, ideal: 340, max: 480)

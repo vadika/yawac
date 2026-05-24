@@ -28,6 +28,7 @@ struct YawacApp: App {
                 .frame(minWidth: 900, minHeight: 600)
                 .preferredColorScheme(.dark)
                 .background(Theme.bg)
+                .graphiteWindow()
         }
         .windowStyle(.hiddenTitleBar)
         .commands {
