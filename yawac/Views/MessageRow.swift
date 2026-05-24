@@ -2,12 +2,67 @@ import AppKit
 import AVKit
 import SwiftUI
 
+/// One emoji + reactor list. Hover surfaces names via `.help`; click
+/// opens a popover with the same list (richer affordance + works on
+/// touch / a11y paths that ignore tooltips).
+private struct ReactionChip: View {
+    let emoji: String
+    let senders: [String]
+    let nameFor: (String) -> String
+    @State private var showPopover: Bool = false
+
+    private var names: [String] {
+        senders.map(nameFor).filter { !$0.isEmpty }
+    }
+
+    private var tooltip: String {
+        names.joined(separator: ", ")
+    }
+
+    var body: some View {
+        Button {
+            showPopover.toggle()
+        } label: {
+            HStack(spacing: 2) {
+                Text(emoji).font(.caption)
+                if senders.count > 1 {
+                    Text("\(senders.count)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(.gray.opacity(0.15), in: .capsule)
+            .contentShape(.capsule)
+        }
+        .buttonStyle(.plain)
+        .help(tooltip)
+        .popover(isPresented: $showPopover, arrowEdge: .top) {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Text(emoji).font(.title3)
+                    Text("Reacted").font(.caption).foregroundStyle(.secondary)
+                }
+                .padding(.bottom, 2)
+                ForEach(Array(names.enumerated()), id: \.offset) { _, name in
+                    Text(name).font(.callout)
+                }
+            }
+            .padding(10)
+            .frame(minWidth: 140, alignment: .leading)
+        }
+    }
+}
+
 struct MessageRow: View {
     let message: UIMessage
     let status: UIMessage.Status?
     let senderName: String?
     let localPath: String?
     let reactions: [String]
+    /// Senders grouped by emoji — used to surface names in tooltip/popover.
+    let reactors: [String: [String]]
     let downloadError: String?
     let onRetryDownload: (() -> Void)?
     let voteCounts: [String: Int]
@@ -30,6 +85,7 @@ struct MessageRow: View {
     init(message: UIMessage, status: UIMessage.Status? = nil,
          senderName: String? = nil, localPath: String? = nil,
          reactions: [String] = [],
+         reactors: [String: [String]] = [:],
          downloadError: String? = nil,
          onRetryDownload: (() -> Void)? = nil,
          voteCounts: [String: Int] = [:],
@@ -45,6 +101,7 @@ struct MessageRow: View {
         self.senderName = senderName
         self.localPath = localPath
         self.reactions = reactions
+        self.reactors = reactors
         self.downloadError = downloadError
         self.onRetryDownload = onRetryDownload
         self.voteCounts = voteCounts
@@ -228,16 +285,12 @@ struct MessageRow: View {
     private var reactionChips: some View {
         HStack(spacing: 4) {
             ForEach(Array(Set(reactions)), id: \.self) { emoji in
-                let count = reactions.filter { $0 == emoji }.count
-                HStack(spacing: 2) {
-                    Text(emoji).font(.caption)
-                    if count > 1 {
-                        Text("\(count)").font(.caption2).foregroundStyle(.secondary)
-                    }
-                }
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .background(.gray.opacity(0.15), in: .capsule)
+                ReactionChip(
+                    emoji: emoji,
+                    senders: reactors[emoji] ?? [],
+                    nameFor: { jid in
+                        jid == "me" ? "You" : mentionResolver(jid)
+                    })
             }
         }
     }

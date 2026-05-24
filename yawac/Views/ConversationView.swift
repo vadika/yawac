@@ -159,6 +159,7 @@ struct ConversationView: View {
                                             senderName: session.displayName(for: msg.senderJID),
                                             localPath: vm.localPaths[msg.id],
                                             reactions: vm.reactions(for: msg.id),
+                                            reactors: vm.reactors(for: msg.id),
                                             downloadError: vm.downloadErrors[msg.id],
                                             onRetryDownload: vm.retryHandler(for: msg),
                                             voteCounts: vm.voteCounts(for: msg.id),

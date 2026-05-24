@@ -682,6 +682,17 @@ final class ConversationViewModel {
         Array((reactionsBySender[messageID] ?? [:]).values)
     }
 
+    /// Senders grouped by emoji for a message — chips use this to surface
+    /// who reacted with what on hover/popover.
+    func reactors(for messageID: String) -> [String: [String]] {
+        guard let bySender = reactionsBySender[messageID] else { return [:] }
+        var out: [String: [String]] = [:]
+        for (senderJID, emoji) in bySender {
+            out[emoji, default: []].append(senderJID)
+        }
+        return out
+    }
+
     /// Per-option vote counts for a given poll, keyed by option hash.
     func voteCounts(for pollMessageID: String) -> [String: Int] {
         guard let byHash = pollVotes[pollMessageID] else { return [:] }
