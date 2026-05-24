@@ -2,6 +2,8 @@ import SwiftUI
 
 struct ChatListView: View {
     @Environment(ChatListViewModel.self) private var vm
+    @Environment(ChatSearchViewModel.self) private var search
+    @FocusState private var searchFocused: Bool
     @Binding var selection: Chat.ID?
     @AppStorage("yawac.chatListScope") private var scopeRaw: String = Scope.all.rawValue
 
@@ -102,33 +104,57 @@ struct ChatListView: View {
             WindowDragHandle()
                 .frame(height: 64)
 
-            // ─── Search (visual hint — real search is system-level).
+            // ─── Real search field. ⌘K focuses; empty query restores full list.
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(Theme.textFaint)
-                Text("Search")
+                TextField("Search", text: Bindable(search).query)
+                    .textFieldStyle(.plain)
                     .font(Theme.ui(12.5))
-                    .foregroundStyle(Theme.textFaint)
-                Spacer()
-                Text("⌘K")
-                    .font(Theme.mono(10.5))
-                    .foregroundStyle(Theme.textFaint)
-                    .padding(.horizontal, 5).padding(.vertical, 1)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 3)
-                            .stroke(Theme.border, lineWidth: 1)
-                    )
+                    .foregroundStyle(Theme.text)
+                    .focused($searchFocused)
+                    .onSubmit { searchFocused = false }
+                if search.validating {
+                    ProgressView().controlSize(.small)
+                } else if !search.query.isEmpty {
+                    Button {
+                        search.clear()
+                        searchFocused = false
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(Theme.textFaint)
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    Text("⌘K")
+                        .font(Theme.mono(10.5))
+                        .foregroundStyle(Theme.textFaint)
+                        .padding(.horizontal, 5).padding(.vertical, 1)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 3)
+                                .stroke(Theme.border, lineWidth: 1)
+                        )
+                }
             }
             .padding(.horizontal, 10).padding(.vertical, 7)
             .background(Theme.surface)
             .overlay(
                 RoundedRectangle(cornerRadius: 8)
-                    .stroke(Theme.border, lineWidth: 1)
+                    .stroke(searchFocused ? Theme.accent : Theme.border,
+                            lineWidth: 1)
             )
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .padding(.horizontal, 14)
             .padding(.bottom, 8)
+            .background(
+                // Hidden button receives ⌘K and forwards focus to the field.
+                Button("") { searchFocused = true }
+                    .keyboardShortcut("k", modifiers: .command)
+                    .opacity(0)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            )
 
             // ─── Tabs (custom pill-style, matching design).
             HStack(spacing: 4) {
