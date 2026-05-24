@@ -30,6 +30,7 @@ struct ConversationView: View {
     @State private var didInitialScroll = false
     @State private var lastSeenCount = 0
     @State private var showInfo = false
+    @State private var atBottom = true
 
     /// Walks messages in chronological order, prepending a `.dateHeader`
     /// whenever the day changes.
@@ -113,11 +114,36 @@ struct ConversationView: View {
                                             onOpenChat: { jid in
                                                 session.requestSelectChat(jid)
                                             }
-                                        ).id(msg.id)
+                                        )
+                                        .id(msg.id)
+                                        .modifier(BottomVisibilityTracker(
+                                            isLast: msg.id == vm.messages.last?.id,
+                                            atBottom: $atBottom))
                                     }
                                 }
                             }
                             .padding()
+                        }
+                        .overlay(alignment: .bottomTrailing) {
+                            if !atBottom, let last = vm.messages.last {
+                                Button {
+                                    withAnimation(.easeOut(duration: 0.2)) {
+                                        proxy.scrollTo(last.id, anchor: .bottom)
+                                    }
+                                } label: {
+                                    Image(systemName: "chevron.down")
+                                        .font(.system(size: 16, weight: .semibold))
+                                        .foregroundStyle(.primary)
+                                        .frame(width: 36, height: 36)
+                                        .background(.regularMaterial, in: Circle())
+                                        .overlay(Circle().stroke(.separator, lineWidth: 0.5))
+                                        .shadow(radius: 3, y: 1)
+                                }
+                                .buttonStyle(.plain)
+                                .padding(.trailing, 14)
+                                .padding(.bottom, 12)
+                                .transition(.opacity.combined(with: .scale(scale: 0.85)))
+                            }
                         }
                         .onChange(of: vm.messages.count) { _, newCount in
                             // First population: anchor to initialAnchorID
@@ -233,5 +259,24 @@ struct ConversationView: View {
         if bare == chat { return true }
         guard bare.hasSuffix("@lid") else { return false }
         return JIDNormalize.canonical(receiptJID, client: client) == chat
+    }
+}
+
+/// Tracks the on-screen visibility of the chat's last row to drive the
+/// floating "scroll to latest" button. The lazy stack instantiates and
+/// disposes rows as they enter/leave the viewport, so this fires on the
+/// exact moment the user scrolls away from (or back to) the bottom.
+private struct BottomVisibilityTracker: ViewModifier {
+    let isLast: Bool
+    @Binding var atBottom: Bool
+
+    func body(content: Content) -> some View {
+        if isLast {
+            content
+                .onAppear { atBottom = true }
+                .onDisappear { atBottom = false }
+        } else {
+            content
+        }
     }
 }
