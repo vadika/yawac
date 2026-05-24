@@ -15,10 +15,8 @@ targets:
       - path: yawac
         excludes:
           - "Resources/Fonts/**"
-          - "Resources/Assets.xcassets/**"
       - path: yawac/Resources/Fonts
         type: folder
-      - path: yawac/Resources/Assets.xcassets
     dependencies:
       - framework: build/Bridge.xcframework
         embed: true
