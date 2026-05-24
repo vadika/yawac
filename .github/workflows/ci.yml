@@ -29,7 +29,7 @@ jobs:
       - name: Go tests
         run: |
           cd bridge
-          go test -short ./...
+          go test -short -v ./...
 
       - name: Build XCFramework
         run: ./scripts/build-xcframework.sh

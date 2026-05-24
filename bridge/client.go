@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -17,7 +18,15 @@ import (
 // chatty INFO/WARN stream + our own fprintf traces) survive when the
 // app is launched via LaunchServices (`open`), which otherwise routes
 // stderr to /dev/null. Append-mode so multiple launches accumulate.
+//
+// Skipped when running under `go test` — the redirect swallows test
+// output and makes CI failures invisible. Detected via the test binary
+// suffix that the Go toolchain produces.
 func init() {
+	if strings.HasSuffix(os.Args[0], ".test") ||
+		strings.Contains(os.Args[0], "/_test/") {
+		return
+	}
 	const logPath = "/tmp/yawac.log"
 	f, err := os.OpenFile(logPath,
 		os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
