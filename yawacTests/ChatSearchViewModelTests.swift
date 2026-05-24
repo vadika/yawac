@@ -120,6 +120,7 @@ final class ChatSearchViewModelTests: XCTestCase {
     func testValidationFiresForUnknownPhone() async {
         let list = makeListVM(chats: [])
         let v = FakeValidator()
+        v.ownJID = "self@s.whatsapp.net"
         v.stub = .success(PhoneCheckResult(
             jid: "4915123456789@s.whatsapp.net",
             registered: true, businessName: nil))
@@ -171,6 +172,7 @@ final class ChatSearchViewModelTests: XCTestCase {
     func testValidationClearsSuggestionWhenNotRegistered() async {
         let list = makeListVM(chats: [])
         let v = FakeValidator()
+        v.ownJID = "self@s.whatsapp.net"
         v.stub = .success(PhoneCheckResult(jid: "", registered: false, businessName: nil))
         let search = ChatSearchViewModel(listVM: list, validator: v)
         search.debounceMs = 1
@@ -182,6 +184,7 @@ final class ChatSearchViewModelTests: XCTestCase {
     func testValidationDebouncesRapidQueryChanges() async {
         let list = makeListVM(chats: [])
         let v = FakeValidator()
+        v.ownJID = "self@s.whatsapp.net"
         v.stub = .success(PhoneCheckResult(
             jid: "4915123456788@s.whatsapp.net",
             registered: true, businessName: nil))
@@ -192,6 +195,59 @@ final class ChatSearchViewModelTests: XCTestCase {
         try? await Task.sleep(for: .milliseconds(80))
         XCTAssertEqual(v.calls.count, 1)
         XCTAssertEqual(v.calls.first, "4915123456788")
+    }
+
+    func testValidationSkippedWhenLoggedOut() async {
+        let list = makeListVM(chats: [])
+        let v = FakeValidator()
+        v.ownJID = ""  // not paired
+        let search = ChatSearchViewModel(listVM: list, validator: v)
+        search.debounceMs = 1
+        search.query = "+4915123456789"
+        try? await Task.sleep(for: .milliseconds(50))
+        XCTAssertTrue(v.calls.isEmpty, "should not call bridge when logged out")
+        XCTAssertNil(search.suggestion)
+        XCTAssertFalse(search.validating)
+    }
+
+    func testRateLimitedPreservesPriorSuggestion() async {
+        let list = makeListVM(chats: [])
+        let v = FakeValidator()
+        v.ownJID = "self@s.whatsapp.net"
+        // First query — successful suggestion.
+        v.stub = .success(PhoneCheckResult(
+            jid: "4915123456789@s.whatsapp.net",
+            registered: true, businessName: nil))
+        let search = ChatSearchViewModel(listVM: list, validator: v)
+        search.debounceMs = 1
+        search.query = "+4915123456789"
+        try? await Task.sleep(for: .milliseconds(50))
+        XCTAssertNotNil(search.suggestion)
+        // Second query — bridge rate-limits.
+        v.stub = .failure(NSError(domain: "Bridge", code: 0,
+            userInfo: [NSLocalizedDescriptionKey: "rate_limited"]))
+        search.query = "+4915999999999"
+        try? await Task.sleep(for: .milliseconds(50))
+        // Prior suggestion preserved.
+        XCTAssertEqual(search.suggestion?.jid, "4915123456789@s.whatsapp.net")
+        XCTAssertFalse(search.validating)
+    }
+
+    func testValidatingClearsOnCancellation() async {
+        let list = makeListVM(chats: [])
+        let v = FakeValidator()
+        v.ownJID = "self@s.whatsapp.net"
+        v.stub = .success(PhoneCheckResult(
+            jid: "4915123456789@s.whatsapp.net",
+            registered: true, businessName: nil))
+        let search = ChatSearchViewModel(listVM: list, validator: v)
+        search.debounceMs = 50
+        search.query = "+4915123456789"
+        // Immediately cancel via a new query before debounce fires.
+        try? await Task.sleep(for: .milliseconds(5))
+        search.query = ""
+        try? await Task.sleep(for: .milliseconds(100))
+        XCTAssertFalse(search.validating, "validating must clear after cancellation")
     }
 
     // MARK: - upsertStubChat tests

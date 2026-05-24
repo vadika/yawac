@@ -62,7 +62,13 @@ final class ChatSearchViewModel {
             suggestion = nil
             return
         }
+        // Logged out — skip bridge call. Local filter (already run) still works.
+        guard !validator.ownJID.isEmpty else {
+            suggestion = nil
+            return
+        }
         validating = true
+        let previousSuggestion = suggestion
         suggestion = nil
         let validator = self.validator
         let result: PhoneCheckResult?
@@ -72,10 +78,16 @@ final class ChatSearchViewModel {
             }.value
         } catch {
             NSLog("[yawac/search] checkOnWhatsApp failed: %@", String(describing: error))
+            if (error as NSError).localizedDescription.contains("rate_limited") {
+                // Keep the previous suggestion intact; do not clear.
+                suggestion = previousSuggestion
+                validating = false
+                return
+            }
             result = nil
         }
-        guard !Task.isCancelled else { return }
         validating = false
+        guard !Task.isCancelled else { return }
         guard let r = result, r.registered else {
             suggestion = nil
             return
