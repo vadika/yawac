@@ -44,3 +44,13 @@ targets:
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES
+
+schemes:
+  yawac:
+    build:
+      targets:
+        yawac: all
+        yawacTests: [testing]
+    test:
+      targets:
+        - yawacTests

@@ -49,7 +49,23 @@ final class ChatSearchViewModel {
     }
 
     private func runFilter(_ q: String) async {
-        // Implemented in Task 6.
-        filteredChats = listVM?.chats ?? []
+        let normalized = q.trimmingCharacters(in: .whitespacesAndNewlines)
+                           .lowercased()
+        let digits = Self.digitsOnly(q)
+        let source = listVM?.chats ?? []
+        let matches = source.filter { chat in
+            if chat.name.localizedCaseInsensitiveContains(normalized) {
+                return true
+            }
+            if !digits.isEmpty, Self.digitsOnly(chat.jid).contains(digits) {
+                return true
+            }
+            return false
+        }
+        self.filteredChats = matches
+    }
+
+    static func digitsOnly(_ s: String) -> String {
+        String(s.unicodeScalars.filter { CharacterSet.decimalDigits.contains($0) })
     }
 }

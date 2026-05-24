@@ -55,6 +55,44 @@ final class ChatSearchViewModelTests: XCTestCase {
         XCTAssertEqual(search.filteredChats.count, 1)
         XCTAssertNil(search.suggestion)
     }
+
+    func testFiltersByCaseInsensitiveNameSubstring() async {
+        let list = makeListVM(chats: [
+            makeChat(jid: "1@s.whatsapp.net", name: "Alice Smith"),
+            makeChat(jid: "2@s.whatsapp.net", name: "Bob Jones"),
+            makeChat(jid: "3@s.whatsapp.net", name: "Carol Smith"),
+        ])
+        let search = ChatSearchViewModel(listVM: list, validator: FakeValidator())
+        search.debounceMs = 1
+        search.query = "smith"
+        try? await Task.sleep(for: .milliseconds(10))
+        XCTAssertEqual(Set(search.filteredChats.map(\.jid)),
+                       Set(["1@s.whatsapp.net", "3@s.whatsapp.net"]))
+    }
+
+    func testFiltersByDigitSubstringAcrossJIDFormats() async {
+        let list = makeListVM(chats: [
+            makeChat(jid: "4915123456789@s.whatsapp.net", name: "Alice"),
+            makeChat(jid: "4915999999999@s.whatsapp.net", name: "Bob"),
+        ])
+        let search = ChatSearchViewModel(listVM: list, validator: FakeValidator())
+        search.debounceMs = 1
+        search.query = "+49 151 2345"
+        try? await Task.sleep(for: .milliseconds(10))
+        XCTAssertEqual(search.filteredChats.map(\.jid),
+                       ["4915123456789@s.whatsapp.net"])
+    }
+
+    func testFilterReturnsEmptyOnNoMatch() async {
+        let list = makeListVM(chats: [
+            makeChat(jid: "1@s.whatsapp.net", name: "Alice"),
+        ])
+        let search = ChatSearchViewModel(listVM: list, validator: FakeValidator())
+        search.debounceMs = 1
+        search.query = "zzzz"
+        try? await Task.sleep(for: .milliseconds(10))
+        XCTAssertTrue(search.filteredChats.isEmpty)
+    }
 }
 
 @MainActor
