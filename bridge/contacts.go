@@ -60,6 +60,8 @@ type JPhoneCheck struct {
 	JID          string `json:"jid"`
 	Registered   bool   `json:"registered"`
 	BusinessName string `json:"business_name,omitempty"`
+	PushName     string `json:"push_name,omitempty"`
+	FullName     string `json:"full_name,omitempty"`
 }
 
 // CheckOnWhatsApp asks the WhatsApp server whether `phone` (E.164 digits,
@@ -93,6 +95,15 @@ func (c *Client) CheckOnWhatsApp(phone string) (string, error) {
 	}
 	if r.VerifiedName != nil {
 		out.BusinessName = r.VerifiedName.Details.GetVerifiedName()
+	}
+	if r.IsIn && c.wa.Store != nil && c.wa.Store.Contacts != nil {
+		if ci, err := c.wa.Store.Contacts.GetContact(context.Background(), r.JID); err == nil && ci.Found {
+			out.PushName = ci.PushName
+			out.FullName = ci.FullName
+			if out.BusinessName == "" {
+				out.BusinessName = ci.BusinessName
+			}
+		}
 	}
 	b, _ := json.Marshal(out)
 	return string(b), nil
