@@ -38,6 +38,16 @@ final class SessionViewModel {
         presenceByJID[key] = Presence(online: online, lastSeen: lastSeen)
     }
 
+    /// Treat peer activity (incoming message, typing) as proof they are
+    /// currently online. Whatsmeow only emits `events.Presence` on
+    /// transitions and never delivers the *initial* online state to
+    /// companion devices, so without this nudge the header would stay
+    /// blank until the peer happens to go offline once.
+    func markOnline(jid: String) {
+        let key = JIDNormalize.canonical(jid, client: client)
+        presenceByJID[key] = Presence(online: true, lastSeen: 0)
+    }
+
     func presence(for jid: String) -> Presence? {
         let key = JIDNormalize.canonical(jid, client: client)
         return presenceByJID[key]

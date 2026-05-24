@@ -77,9 +77,23 @@ struct ContentView: View {
                 switch event {
                 case .message(let m):
                     session.ingestPushName(jid: m.senderJID, name: m.senderPushName)
+                    // Incoming peer message → peer is online right now.
+                    // Compensates for whatsmeow not delivering initial
+                    // presence state to companion devices.
+                    if !m.fromMe, !m.chatJID.hasSuffix("@g.us") {
+                        session.markOnline(jid: m.chatJID)
+                    }
                     vm.ingest(m)
                 case .reaction(let r):
                     vm.persistReaction(r)
+                    if r.senderJID != "me", !r.chatJID.hasSuffix("@g.us") {
+                        session.markOnline(jid: r.chatJID)
+                    }
+                case .chatPresence(let chat, _, let typing):
+                    // Typing in a direct chat is a strong online signal.
+                    if typing, !chat.hasSuffix("@g.us") {
+                        session.markOnline(jid: chat)
+                    }
                 case .presence(let jid, let online, let lastSeen):
                     session.ingestPresence(jid: jid, online: online, lastSeen: lastSeen)
                 case .historySync:
