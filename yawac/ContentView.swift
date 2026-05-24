@@ -5,15 +5,17 @@ struct ContentView: View {
     @Environment(SessionViewModel.self) private var session
     @Environment(\.modelContext) private var modelContext
     @State private var chatList: ChatListViewModel?
+    @State private var chatSearch: ChatSearchViewModel?
     @State private var selectedChat: Chat.ID?
     /// Last selected chat JID, persisted across launches.
     @AppStorage("yawac.lastSelectedChatJID") private var lastSelectedChatJID: String = ""
 
     var body: some View {
         NavigationSplitView {
-            if let chatList {
+            if let chatList, let chatSearch {
                 ChatListView(selection: $selectedChat)
                     .environment(chatList)
+                    .environment(chatSearch)
             } else {
                 ProgressView()
             }
@@ -56,6 +58,7 @@ struct ContentView: View {
             let vm = ChatListViewModel(client: client, context: modelContext)
             vm.session = session
             self.chatList = vm
+            self.chatSearch = ChatSearchViewModel(listVM: vm, validator: client)
             // Restore last-opened chat if it's in our chats list.
             if !lastSelectedChatJID.isEmpty,
                vm.chats.contains(where: { $0.jid == lastSelectedChatJID }) {
