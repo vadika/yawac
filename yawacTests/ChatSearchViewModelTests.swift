@@ -193,6 +193,30 @@ final class ChatSearchViewModelTests: XCTestCase {
         XCTAssertEqual(v.calls.count, 1)
         XCTAssertEqual(v.calls.first, "4915123456788")
     }
+
+    // MARK: - upsertStubChat tests
+
+    func testUpsertStubChatAddsNewRow() {
+        let vm = ChatListViewModelTestHarness.make()
+        let id = vm.upsertStubChat(jid: "499@s.whatsapp.net", displayName: "+499")
+        XCTAssertEqual(id, "499@s.whatsapp.net")
+        XCTAssertEqual(vm.chats.count, 1)
+        XCTAssertEqual(vm.chats.first?.jid, "499@s.whatsapp.net")
+        XCTAssertEqual(vm.chats.first?.name, "+499")
+    }
+
+    func testUpsertStubChatIsIdempotent() {
+        let vm = ChatListViewModelTestHarness.make()
+        let existing = Chat(
+            jid: "499@s.whatsapp.net", name: "Alice",
+            lastMessage: "hi", lastTimestamp: 100, unread: 0)
+        vm.chats = [existing]
+        let id = vm.upsertStubChat(jid: "499@s.whatsapp.net", displayName: "+499")
+        XCTAssertEqual(id, "499@s.whatsapp.net")
+        XCTAssertEqual(vm.chats.count, 1)
+        XCTAssertEqual(vm.chats.first?.name, "Alice", "should NOT overwrite real name")
+        XCTAssertEqual(vm.chats.first?.lastMessage, "hi")
+    }
 }
 
 @MainActor

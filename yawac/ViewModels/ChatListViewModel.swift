@@ -267,6 +267,27 @@ final class ChatListViewModel {
         upsertPersisted(chats[i])
     }
 
+    /// Insert a placeholder chat for a JID that isn't yet known locally
+    /// (typically because the user just searched for an unknown phone
+    /// number and tapped the "Start chat" suggestion). Idempotent: if a
+    /// row for `jid` already exists, returns its id without touching it.
+    @discardableResult
+    func upsertStubChat(jid: String, displayName: String) -> Chat.ID {
+        if let existing = chats.first(where: { $0.jid == jid }) {
+            return existing.id
+        }
+        let chat = Chat(
+            jid: jid,
+            name: displayName,
+            lastMessage: "",
+            lastTimestamp: Int64(Date().timeIntervalSince1970),
+            unread: 0)
+        chats.append(chat)
+        sortChats()
+        upsertPersisted(chat)
+        return chat.id
+    }
+
     /// Persists every incoming reaction so the conversation view can hydrate
     /// the chip strip when it later opens (or re-opens) the chat. Live
     /// reactions arrive once via the global event stream — without this,
