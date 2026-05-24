@@ -21,6 +21,9 @@ struct AppRoot: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         // Sync state is surfaced inside ConversationView via the
         // floating SyncBanner overlay — no top strip pushing content.
-        .task { await session.boot() }
+        .task {
+            NotificationRouter.shared.session = session
+            await session.boot()
+        }
     }
 }

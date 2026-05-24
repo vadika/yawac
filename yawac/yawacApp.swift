@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftData
 import AppKit
+import UserNotifications
 
 @main
 struct YawacApp: App {
@@ -18,6 +19,7 @@ struct YawacApp: App {
             fatalError("ModelContainer: \(error)")
         }
         Task { await NotificationService.requestAuthorization() }
+        UNUserNotificationCenter.current().delegate = NotificationRouter.shared
     }
 
     var body: some Scene {
@@ -65,6 +67,22 @@ struct YawacApp: App {
 /// Helper that brings the main yawac window forward or hides it,
 /// implementing classic tray-icon behaviour.
 enum WindowToggler {
+    /// Unconditionally brings the main window to the foreground.
+    /// Use this from notification taps where we always want to show the app.
+    static func bringToFront() {
+        let app = NSApp!
+        app.activate(ignoringOtherApps: true)
+        let windows = app.windows.filter { w in
+            !(w is NSPanel) && w.canBecomeKey
+        }
+        if let target = windows.first {
+            if target.isMiniaturized { target.deminiaturize(nil) }
+            target.makeKeyAndOrderFront(nil)
+        } else {
+            NSApp.sendAction(#selector(NSApplication.unhide(_:)), to: nil, from: nil)
+        }
+    }
+
     static func toggleMain() {
         let app = NSApp!
         // Find a non-popover, non-status visible window of our app.
