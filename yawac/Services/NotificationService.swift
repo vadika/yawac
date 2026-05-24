@@ -11,13 +11,17 @@ import AppKit
 /// process and doesn't need per-app authorization. Once UN is authorized
 /// the osascript fallback is suppressed to avoid "Script Editor" attribution.
 enum NotificationService {
-    private static var unAuthorized: Bool = false
+    /// True once `UNUserNotificationCenter` grants authorization.
+    /// Used to suppress the osascript fallback on signed builds so
+    /// notifications are attributed to yawac rather than "Script Editor".
+    private static var unGranted: Bool = false
 
     static func requestAuthorization() async {
         let center = UNUserNotificationCenter.current()
         let granted = (try? await center.requestAuthorization(
             options: [.alert, .sound, .badge])) ?? false
-        unAuthorized = granted
+        unGranted = granted
+        NSLog("[yawac/notify] UN authorization granted=%d", granted ? 1 : 0)
     }
 
     static func notify(
@@ -47,7 +51,7 @@ enum NotificationService {
 
         // Path B: osascript fallback — always works on macOS, but attributes
         // the notification to "Script Editor". Suppressed when UN is authorized.
-        if !unAuthorized {
+        if !unGranted {
             osascriptNotify(title: title, body: resolvedBody)
         }
     }
