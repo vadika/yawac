@@ -34,10 +34,12 @@ struct ChatListView: View {
     private enum Row: Hashable, Identifiable {
         case section(id: String, label: String, count: Int)
         case chat(Chat, indent: CGFloat)
+        case suggestion(PhoneSuggestion)
         var id: String {
             switch self {
             case .section(let id, _, _): return "sec:" + id
             case .chat(let c, let i):    return "row:\(c.jid)#\(Int(i))"
+            case .suggestion(let s):     return "sug:" + s.jid
             }
         }
     }
@@ -48,7 +50,12 @@ struct ChatListView: View {
     /// body re-evaluation, which made scope switches stall for several
     /// seconds on large accounts.
     private func displayRows() -> [Row] {
-        let chats = vm.chats
+        let chats = search.query.isEmpty ? vm.chats : search.filteredChats
+        var out: [Row] = []
+        if let s = search.suggestion {
+            out.append(.suggestion(s))
+        }
+
         var communities: [Chat] = []
         var standaloneGroups: [Chat] = []
         var directChats: [Chat] = []
@@ -66,7 +73,6 @@ struct ChatListView: View {
             }
         }
 
-        var out: [Row] = []
         let s = scope
 
         if (s == .all || s == .communities) && !communities.isEmpty {
@@ -200,6 +206,8 @@ struct ChatListView: View {
                             sectionLabel(label, count: count)
                         case .chat(let chat, let indent):
                             chatRowButton(chat, indent: indent)
+                        case .suggestion(let s):
+                            suggestionRowButton(s)
                         }
                     }
                 }
@@ -237,6 +245,37 @@ struct ChatListView: View {
             selection = chat.id
         } label: {
             chatRowBody(chat, indent: indent)
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private func suggestionRowButton(_ s: PhoneSuggestion) -> some View {
+        Button {
+            let id = vm.upsertStubChat(jid: s.jid, displayName: s.displayPhone)
+            selection = id
+            search.clear()
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "person.crop.circle.badge.plus")
+                    .font(.system(size: 22))
+                    .foregroundStyle(Theme.accentText)
+                    .frame(width: 32, height: 32)
+                    .background(Theme.accentSoft,
+                                in: RoundedRectangle(cornerRadius: 8))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(s.displayPhone)
+                        .font(Theme.ui(13, weight: .medium))
+                        .foregroundStyle(Theme.text)
+                    Text("Start new chat")
+                        .font(Theme.ui(11))
+                        .foregroundStyle(Theme.textFaint)
+                }
+                Spacer()
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
