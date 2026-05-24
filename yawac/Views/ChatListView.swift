@@ -29,31 +29,69 @@ struct ChatListView: View {
 
     private var scope: Scope { Scope(rawValue: scopeRaw) ?? .all }
 
-    private var communities: [Chat] {
-        vm.chats.filter { $0.isCommunityParent }
-    }
-
-    private func subGroups(for parentJID: String) -> [Chat] {
-        vm.chats.filter { $0.communityParentJID == parentJID }
-    }
-
-    private var standaloneGroups: [Chat] {
-        vm.chats.filter { c in
-            c.isGroup && !c.isCommunityParent && c.communityParentJID == nil
+    private enum Row: Hashable, Identifiable {
+        case section(id: String, label: String, count: Int)
+        case chat(Chat, indent: CGFloat)
+        var id: String {
+            switch self {
+            case .section(let id, _, _): return "sec:" + id
+            case .chat(let c, let i):    return "row:\(c.jid)#\(Int(i))"
+            }
         }
     }
 
-    private var directChats: [Chat] {
-        vm.chats.filter { !$0.isGroup }
-    }
+    /// Builds the flat display list in a single pass over `vm.chats`.
+    /// Replaces a previous version that called `filter` 3+ times plus
+    /// `subGroups(for:)` once per community parent — O(C×N) on every
+    /// body re-evaluation, which made scope switches stall for several
+    /// seconds on large accounts.
+    private func displayRows() -> [Row] {
+        let chats = vm.chats
+        var communities: [Chat] = []
+        var standaloneGroups: [Chat] = []
+        var directChats: [Chat] = []
+        var subsByParent: [String: [Chat]] = [:]
 
-    private func count(for s: Scope) -> Int {
-        switch s {
-        case .all:         return vm.chats.count
-        case .chats:       return directChats.count
-        case .groups:      return standaloneGroups.count
-        case .communities: return communities.count
+        for c in chats {
+            if c.isCommunityParent {
+                communities.append(c)
+            } else if let parent = c.communityParentJID, !parent.isEmpty {
+                subsByParent[parent, default: []].append(c)
+            } else if c.isGroup {
+                standaloneGroups.append(c)
+            } else {
+                directChats.append(c)
+            }
         }
+
+        var out: [Row] = []
+        let s = scope
+
+        if (s == .all || s == .communities) && !communities.isEmpty {
+            out.append(.section(id: "channels", label: "Channels",
+                                count: communities.count))
+            for parent in communities {
+                out.append(.chat(parent, indent: 0))
+                for sub in subsByParent[parent.jid] ?? [] {
+                    out.append(.chat(sub, indent: 16))
+                }
+            }
+        }
+        if (s == .all || s == .groups) && !standaloneGroups.isEmpty {
+            out.append(.section(id: "groups", label: "Groups",
+                                count: standaloneGroups.count))
+            for g in standaloneGroups {
+                out.append(.chat(g, indent: 0))
+            }
+        }
+        if (s == .all || s == .chats) && !directChats.isEmpty {
+            out.append(.section(id: "direct", label: "Direct",
+                                count: directChats.count))
+            for c in directChats {
+                out.append(.chat(c, indent: 0))
+            }
+        }
+        return out
     }
 
     var body: some View {
@@ -96,7 +134,14 @@ struct ChatListView: View {
             HStack(spacing: 4) {
                 ForEach(Scope.allCases) { s in
                     Button {
-                        scopeRaw = s.rawValue
+                        // Skip implicit animation — animating the diff
+                        // between scopes is what caused multi-second
+                        // hangs on large chat lists.
+                        var tx = Transaction()
+                        tx.disablesAnimations = true
+                        withTransaction(tx) {
+                            scopeRaw = s.rawValue
+                        }
                     } label: {
                         VStack(spacing: 3) {
                             Image(systemName: s.icon)
@@ -119,28 +164,16 @@ struct ChatListView: View {
             .padding(.horizontal, 14)
             .padding(.bottom, 8)
 
-            // ─── List with sectioned chats.
+            // ─── List with sectioned chats. Flat row enum so LazyVStack
+            // only diffs one ForEach instead of multiple nested ones.
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 1) {
-                    if scope == .all || scope == .communities, !communities.isEmpty {
-                        sectionLabel("Channels", count: communities.count)
-                        ForEach(communities, id: \.jid) { parent in
-                            chatRowButton(parent)
-                            ForEach(subGroups(for: parent.jid), id: \.jid) { sub in
-                                chatRowButton(sub, indent: 16)
-                            }
-                        }
-                    }
-                    if scope == .all || scope == .groups, !standaloneGroups.isEmpty {
-                        sectionLabel("Groups", count: standaloneGroups.count)
-                        ForEach(standaloneGroups, id: \.jid) { g in
-                            chatRowButton(g)
-                        }
-                    }
-                    if scope == .all || scope == .chats, !directChats.isEmpty {
-                        sectionLabel("Direct", count: directChats.count)
-                        ForEach(directChats, id: \.jid) { c in
-                            chatRowButton(c)
+                    ForEach(displayRows()) { row in
+                        switch row {
+                        case .section(_, let label, let count):
+                            sectionLabel(label, count: count)
+                        case .chat(let chat, let indent):
+                            chatRowButton(chat, indent: indent)
                         }
                     }
                 }

@@ -278,8 +278,10 @@ struct ConversationView: View {
         }
         .animation(.easeOut(duration: 0.2), value: currentSyncState)
         .inspector(isPresented: $showInfo) {
-            ChatInfoView(chatJID: chatJID)
-                .inspectorColumnWidth(min: 280, ideal: 340, max: 480)
+            ChatInfoView(chatJID: chatJID) {
+                showInfo = false
+            }
+            .inspectorColumnWidth(min: 280, ideal: 340, max: 480)
         }
         .onDrop(of: [.fileURL], isTargeted: nil) { providers in
             guard let vm else { return false }

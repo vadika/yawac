@@ -3,8 +3,13 @@ import AppKit
 
 struct ChatInfoView: View {
     let chatJID: String
+    /// Called when the user clicks the inspector's X. Toggled into the
+    /// parent's @State so the inspector binding closes — using
+    /// `@Environment(\.dismiss)` here would close the enclosing window
+    /// instead of the inspector (the inspector content shares the
+    /// window's dismiss environment).
+    var onClose: (() -> Void)? = nil
     @Environment(SessionViewModel.self) private var session
-    @Environment(\.dismiss) private var dismiss
     @State private var group: BridgeGroupModel?
     @State private var loadingGroup = false
     @State private var loadError: String?
@@ -54,7 +59,7 @@ struct ChatInfoView: View {
                 .foregroundStyle(Theme.textFaint)
             Spacer()
             Button {
-                dismiss()
+                onClose?()
             } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 11, weight: .semibold))
