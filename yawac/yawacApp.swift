@@ -26,8 +26,10 @@ struct YawacApp: App {
                 .environment(session)
                 .modelContainer(container)
                 .frame(minWidth: 900, minHeight: 600)
+                .preferredColorScheme(.dark)
+                .background(Theme.bg)
         }
-        .windowStyle(.titleBar)
+        .windowStyle(.hiddenTitleBar)
         .commands {
             CommandGroup(replacing: .newItem) {}
             CommandMenu("Account") {

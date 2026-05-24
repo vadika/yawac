@@ -10,15 +10,16 @@ private enum TimelineItem {
 private struct DateSeparator: View {
     let date: Date
     var body: some View {
-        HStack {
-            VStack { Divider() }
+        HStack(spacing: 12) {
+            Rectangle().fill(Theme.hairline).frame(height: 1)
             Text(date, format: .dateTime.weekday(.abbreviated).day().month(.abbreviated).year())
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 6)
-            VStack { Divider() }
+                .font(Theme.ui(11.5, weight: .medium))
+                .tracking(0.4)
+                .textCase(.uppercase)
+                .foregroundStyle(Theme.textFaint)
+            Rectangle().fill(Theme.hairline).frame(height: 1)
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 14)
     }
 }
 
@@ -52,10 +53,61 @@ struct ConversationView: View {
         return out
     }
 
+    /// Custom header bar replaces SwiftUI's titlebar so we can apply
+    /// Graphite tokens directly (the OS title bar is hidden via
+    /// .windowStyle(.hiddenTitleBar) on the WindowGroup).
+    @ViewBuilder
+    private var headerBar: some View {
+        let name = session.displayName(for: chatJID)
+        let isGroup = chatJID.hasSuffix("@g.us")
+        HStack(spacing: 14) {
+            AvatarView(jid: chatJID, name: name, size: 36)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(name)
+                    .font(Theme.ui(16, weight: .semibold))
+                    .tracking(-0.2)
+                    .foregroundStyle(Theme.titleColor)
+                    .lineLimit(1)
+                HStack(spacing: 8) {
+                    Text(isGroup ? "Group" : "Direct")
+                        .font(Theme.ui(12.5))
+                        .foregroundStyle(Theme.textMuted)
+                    Text("·").foregroundStyle(Theme.textFaint).opacity(0.4)
+                    HStack(spacing: 5) {
+                        Circle().fill(Theme.onlineDot).frame(width: 6, height: 6)
+                        Text(isGroup ? "active" : "online")
+                            .font(Theme.ui(12.5))
+                            .foregroundStyle(Theme.textMuted)
+                    }
+                }
+            }
+            Spacer()
+            Button {
+                showInfo.toggle()
+            } label: {
+                Image(systemName: showInfo ? "info.circle.fill" : "info.circle")
+                    .font(.system(size: 15, weight: .regular))
+                    .foregroundStyle(showInfo ? Theme.accent : Theme.textMuted)
+                    .padding(7)
+                    .background(showInfo ? Theme.accentSoft : Color.clear,
+                                in: RoundedRectangle(cornerRadius: 8))
+            }
+            .buttonStyle(.plain)
+            .help("Chat info")
+        }
+        .padding(.horizontal, 22).padding(.vertical, 12)
+        .frame(height: 64)
+        .background(Theme.bg)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(Theme.border).frame(height: 1)
+        }
+    }
+
     var body: some View {
         Group {
             if let vm {
                 VStack(spacing: 0) {
+                    headerBar
                     ScrollViewReader { proxy in
                         ScrollView {
                             LazyVStack(spacing: 6) {
@@ -122,8 +174,10 @@ struct ConversationView: View {
                                     }
                                 }
                             }
-                            .padding()
+                            .padding(.horizontal, 26)
+                            .padding(.vertical, 8)
                         }
+                        .background(Theme.bg)
                         .overlay(alignment: .bottomTrailing) {
                             if !atBottom, let last = vm.messages.last {
                                 Button {
@@ -168,27 +222,32 @@ struct ConversationView: View {
                         }
                     }
                     if vm.peerTyping {
-                        Text("typing…")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal)
+                        HStack(spacing: 8) {
+                            HStack(spacing: 3) {
+                                ForEach(0..<3) { _ in
+                                    Circle().fill(Theme.textMuted.opacity(0.6))
+                                        .frame(width: 5, height: 5)
+                                }
+                            }
+                            .padding(.horizontal, 9).padding(.vertical, 5)
+                            .background(Theme.otherBubble,
+                                        in: RoundedRectangle(cornerRadius: Theme.bubbleRadius))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: Theme.bubbleRadius)
+                                    .stroke(Theme.otherBorder, lineWidth: 1)
+                            )
+                            Text("typing…")
+                                .font(Theme.ui(12))
+                                .foregroundStyle(Theme.textFaint)
+                            Spacer()
+                        }
+                        .padding(.horizontal, 26).padding(.bottom, 4)
                     }
-                    Divider()
                     ComposerView(vm: vm)
                 }
+                .background(Theme.bg)
             } else {
-                ProgressView()
-            }
-        }
-        .navigationTitle(session.displayName(for: chatJID))
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    showInfo.toggle()
-                } label: {
-                    Image(systemName: "info.circle")
-                }
-                .help("Chat info")
+                ProgressView().tint(Theme.accent)
             }
         }
         .inspector(isPresented: $showInfo) {

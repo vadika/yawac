@@ -89,12 +89,16 @@ struct MessageRow: View {
                     bodyView
                     footerView
                 }
-                .padding(8)
+                .padding(.horizontal, 14).padding(.vertical, 10)
                 .background(
-                    message.fromMe
-                        ? Color.accentColor.opacity(0.2)
-                        : Color.gray.opacity(0.15),
-                    in: .rect(cornerRadius: 10))
+                    message.fromMe ? Theme.ownBubble : Theme.otherBubble,
+                    in: .rect(cornerRadius: Theme.bubbleRadius))
+                .overlay(
+                    RoundedRectangle(cornerRadius: Theme.bubbleRadius)
+                        .stroke(message.fromMe ? Theme.ownBorder : Theme.otherBorder,
+                                lineWidth: 1)
+                )
+                .foregroundStyle(message.fromMe ? Theme.ownText : Theme.otherText)
                 .contextMenu { reactionMenu }
                 .popover(item: $mentionPopover) { target in
                     mentionPopoverContent(target: target)
@@ -378,15 +382,17 @@ struct MessageRow: View {
 
     @ViewBuilder
     private var footerView: some View {
-        HStack(spacing: 4) {
-            Text(message.timestamp, style: .time)
+        HStack(spacing: 5) {
+            Text(message.timestamp, format: .dateTime.hour(.twoDigits(amPM: .omitted)).minute())
+                .font(Theme.mono(10.5))
+                .monospacedDigit()
+                .foregroundStyle(Theme.textFaint)
             if message.fromMe, let status {
                 Image(systemName: statusIcon(status))
+                    .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(statusColor(status))
             }
         }
-        .font(.caption2)
-        .foregroundStyle(.secondary)
     }
 
     @ViewBuilder
@@ -551,6 +557,6 @@ struct MessageRow: View {
     }
 
     private func statusColor(_ s: UIMessage.Status) -> Color {
-        s == .read || s == .played ? .blue : .secondary
+        s == .read || s == .played ? Theme.accent : Theme.textFaint
     }
 }

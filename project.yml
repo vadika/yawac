@@ -13,6 +13,10 @@ targets:
     platform: macOS
     sources:
       - path: yawac
+        excludes:
+          - "Resources/Fonts/**"
+      - path: yawac/Resources/Fonts
+        type: folder
     dependencies:
       - framework: build/Bridge.xcframework
         embed: true
@@ -27,6 +31,7 @@ targets:
         CFBundleDisplayName: yawac
         CFBundleShortVersionString: "0.1.0"
         CFBundleVersion: "1"
+        ATSApplicationFontsPath: Fonts
   yawacTests:
     type: bundle.unit-test
     platform: macOS
