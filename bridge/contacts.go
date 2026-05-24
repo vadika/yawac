@@ -5,7 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
+
+	"go.mau.fi/whatsmeow"
 )
 
 // JContact is the JSON-friendly view of a WhatsApp contact.
@@ -74,9 +75,7 @@ func (c *Client) CheckOnWhatsApp(phone string) (string, error) {
 	}
 	resp, err := c.wa.IsOnWhatsApp(context.Background(), []string{phone})
 	if err != nil {
-		// whatsmeow surfaces server rate-limit (429) via an error whose
-		// message contains "rate-overlimit"; normalize so Swift can branch.
-		if strings.Contains(err.Error(), "rate") {
+		if errors.Is(err, whatsmeow.ErrIQRateOverLimit) {
 			return "", errors.New("rate_limited")
 		}
 		return "", fmt.Errorf("is_on_whatsapp: %w", err)
