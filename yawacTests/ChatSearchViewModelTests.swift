@@ -9,7 +9,7 @@ final class ChatSearchViewModelTests: XCTestCase {
     final class FakeValidator: PhoneValidating {
         var ownJID: String = ""
         var stub: Result<PhoneCheckResult, Error> = .success(
-            PhoneCheckResult(jid: "", registered: false, businessName: nil))
+            PhoneCheckResult(jid: "", registered: false, businessName: nil, pushName: nil, fullName: nil))
         var calls: [String] = []
 
         func checkOnWhatsApp(_ phone: String) throws -> PhoneCheckResult {
@@ -123,7 +123,7 @@ final class ChatSearchViewModelTests: XCTestCase {
         v.ownJID = "self@s.whatsapp.net"
         v.stub = .success(PhoneCheckResult(
             jid: "4915123456789@s.whatsapp.net",
-            registered: true, businessName: nil))
+            registered: true, businessName: nil, pushName: nil, fullName: nil))
         let search = ChatSearchViewModel(listVM: list, validator: v)
         search.debounceMs = 1
         search.query = "+49 151 2345 6789"
@@ -161,7 +161,7 @@ final class ChatSearchViewModelTests: XCTestCase {
         v.ownJID = "4915123456789@s.whatsapp.net"
         v.stub = .success(PhoneCheckResult(
             jid: "4915123456789@s.whatsapp.net",
-            registered: true, businessName: nil))
+            registered: true, businessName: nil, pushName: nil, fullName: nil))
         let search = ChatSearchViewModel(listVM: list, validator: v)
         search.debounceMs = 1
         search.query = "+4915123456789"
@@ -173,7 +173,7 @@ final class ChatSearchViewModelTests: XCTestCase {
         let list = makeListVM(chats: [])
         let v = FakeValidator()
         v.ownJID = "self@s.whatsapp.net"
-        v.stub = .success(PhoneCheckResult(jid: "", registered: false, businessName: nil))
+        v.stub = .success(PhoneCheckResult(jid: "", registered: false, businessName: nil, pushName: nil, fullName: nil))
         let search = ChatSearchViewModel(listVM: list, validator: v)
         search.debounceMs = 1
         search.query = "+4915999999999"
@@ -187,7 +187,7 @@ final class ChatSearchViewModelTests: XCTestCase {
         v.ownJID = "self@s.whatsapp.net"
         v.stub = .success(PhoneCheckResult(
             jid: "4915123456788@s.whatsapp.net",
-            registered: true, businessName: nil))
+            registered: true, businessName: nil, pushName: nil, fullName: nil))
         let search = ChatSearchViewModel(listVM: list, validator: v)
         search.debounceMs = 20
         search.query = "+491512345678"
@@ -217,7 +217,7 @@ final class ChatSearchViewModelTests: XCTestCase {
         // First query — successful suggestion.
         v.stub = .success(PhoneCheckResult(
             jid: "4915123456789@s.whatsapp.net",
-            registered: true, businessName: nil))
+            registered: true, businessName: nil, pushName: nil, fullName: nil))
         let search = ChatSearchViewModel(listVM: list, validator: v)
         search.debounceMs = 1
         search.query = "+4915123456789"
@@ -239,7 +239,7 @@ final class ChatSearchViewModelTests: XCTestCase {
         v.ownJID = "self@s.whatsapp.net"
         v.stub = .success(PhoneCheckResult(
             jid: "4915123456789@s.whatsapp.net",
-            registered: true, businessName: nil))
+            registered: true, businessName: nil, pushName: nil, fullName: nil))
         let search = ChatSearchViewModel(listVM: list, validator: v)
         search.debounceMs = 50
         search.query = "+4915123456789"
@@ -248,6 +248,76 @@ final class ChatSearchViewModelTests: XCTestCase {
         search.query = ""
         try? await Task.sleep(for: .milliseconds(100))
         XCTAssertFalse(search.validating, "validating must clear after cancellation")
+    }
+
+    // MARK: - Best-name selection tests
+
+    func testSuggestionPrefersBusinessNameOverPhone() async {
+        let list = makeListVM(chats: [])
+        let v = FakeValidator()
+        v.ownJID = "self@s.whatsapp.net"
+        v.stub = .success(PhoneCheckResult(
+            jid: "4912345@s.whatsapp.net",
+            registered: true,
+            businessName: "Acme",
+            pushName: nil,
+            fullName: nil))
+        let search = ChatSearchViewModel(listVM: list, validator: v)
+        search.debounceMs = 1
+        search.query = "+4912345678"
+        try? await Task.sleep(for: .milliseconds(50))
+        XCTAssertEqual(search.suggestion?.displayPhone, "Acme")
+    }
+
+    func testSuggestionFallsBackToPushName() async {
+        let list = makeListVM(chats: [])
+        let v = FakeValidator()
+        v.ownJID = "self@s.whatsapp.net"
+        v.stub = .success(PhoneCheckResult(
+            jid: "4912345@s.whatsapp.net",
+            registered: true,
+            businessName: nil,
+            pushName: "Bob",
+            fullName: nil))
+        let search = ChatSearchViewModel(listVM: list, validator: v)
+        search.debounceMs = 1
+        search.query = "+4912345678"
+        try? await Task.sleep(for: .milliseconds(50))
+        XCTAssertEqual(search.suggestion?.displayPhone, "Bob")
+    }
+
+    func testSuggestionFallsBackToFullName() async {
+        let list = makeListVM(chats: [])
+        let v = FakeValidator()
+        v.ownJID = "self@s.whatsapp.net"
+        v.stub = .success(PhoneCheckResult(
+            jid: "4912345@s.whatsapp.net",
+            registered: true,
+            businessName: nil,
+            pushName: nil,
+            fullName: "Carol Jones"))
+        let search = ChatSearchViewModel(listVM: list, validator: v)
+        search.debounceMs = 1
+        search.query = "+4912345678"
+        try? await Task.sleep(for: .milliseconds(50))
+        XCTAssertEqual(search.suggestion?.displayPhone, "Carol Jones")
+    }
+
+    func testSuggestionFallsBackToPhoneWhenNoName() async {
+        let list = makeListVM(chats: [])
+        let v = FakeValidator()
+        v.ownJID = "self@s.whatsapp.net"
+        v.stub = .success(PhoneCheckResult(
+            jid: "4912345678@s.whatsapp.net",
+            registered: true,
+            businessName: nil,
+            pushName: nil,
+            fullName: nil))
+        let search = ChatSearchViewModel(listVM: list, validator: v)
+        search.debounceMs = 1
+        search.query = "+4912345678"
+        try? await Task.sleep(for: .milliseconds(50))
+        XCTAssertEqual(search.suggestion?.displayPhone, "+4912345678")
     }
 
     // MARK: - upsertStubChat tests

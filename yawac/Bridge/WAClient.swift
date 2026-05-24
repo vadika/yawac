@@ -5,10 +5,14 @@ struct PhoneCheckResult: Decodable, Equatable {
     let jid: String
     let registered: Bool
     let businessName: String?
+    let pushName: String?
+    let fullName: String?
 
     enum CodingKeys: String, CodingKey {
         case jid, registered
         case businessName = "business_name"
+        case pushName = "push_name"
+        case fullName = "full_name"
     }
 }
 

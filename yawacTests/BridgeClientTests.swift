@@ -20,12 +20,16 @@ final class BridgeClientTests: XCTestCase {
         XCTAssertEqual(r.jid, "4915123456789@s.whatsapp.net")
         XCTAssertTrue(r.registered)
         XCTAssertNil(r.businessName)
+        XCTAssertNil(r.pushName)
+        XCTAssertNil(r.fullName)
     }
 
     func testDecodePhoneCheckResultNotRegistered() throws {
         let json = #"{"jid":"","registered":false}"#
         let r = try JSONDecoder().decode(PhoneCheckResult.self, from: Data(json.utf8))
         XCTAssertFalse(r.registered)
+        XCTAssertNil(r.pushName)
+        XCTAssertNil(r.fullName)
     }
 
     func testDecodePhoneCheckResultBusiness() throws {
@@ -34,5 +38,16 @@ final class BridgeClientTests: XCTestCase {
         """#
         let r = try JSONDecoder().decode(PhoneCheckResult.self, from: Data(json.utf8))
         XCTAssertEqual(r.businessName, "Acme")
+        XCTAssertNil(r.pushName)
+        XCTAssertNil(r.fullName)
+    }
+
+    func testDecodePhoneCheckResultWithPushName() throws {
+        let json = #"""
+        {"jid":"49123@s.whatsapp.net","registered":true,"push_name":"Alice","full_name":"Alice Smith"}
+        """#
+        let r = try JSONDecoder().decode(PhoneCheckResult.self, from: Data(json.utf8))
+        XCTAssertEqual(r.pushName, "Alice")
+        XCTAssertEqual(r.fullName, "Alice Smith")
     }
 }

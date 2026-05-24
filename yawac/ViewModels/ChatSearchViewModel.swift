@@ -96,9 +96,15 @@ final class ChatSearchViewModel {
             suggestion = nil
             return
         }
+        let bestName: String = {
+            if let n = r.businessName, !n.isEmpty { return n }
+            if let n = r.fullName, !n.isEmpty { return n }
+            if let n = r.pushName, !n.isEmpty { return n }
+            return "+" + digits
+        }()
         suggestion = PhoneSuggestion(
             jid: r.jid,
-            displayPhone: "+" + digits)
+            displayPhone: bestName)
     }
 
     static func looksLikePhone(_ s: String) -> Bool {
