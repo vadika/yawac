@@ -283,6 +283,9 @@ struct ConversationView: View {
             }
             .inspectorColumnWidth(min: 280, ideal: 340, max: 480)
         }
+        // Drives the window title (visible in the Window menu + dock
+        // context menu + screen readers even with the title bar hidden).
+        .navigationTitle("yawac — \(session.displayName(for: chatJID))")
         .onDrop(of: [.fileURL], isTargeted: nil) { providers in
             guard let vm else { return false }
             for p in providers {

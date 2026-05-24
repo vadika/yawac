@@ -197,21 +197,24 @@ final class ChatListViewModel {
         // conversation view hasn't been opened yet.
         persistMessage(message)
 
-        let preview: String
+        let rawPreview: String
         if let text = message.text, !text.isEmpty {
-            preview = text
+            rawPreview = text
         } else {
             switch message.kind {
-            case "image":    preview = "📷 Photo"
-            case "video":    preview = "🎥 Video"
-            case "audio":    preview = "🎤 Audio"
-            case "document": preview = "📄 Document"
-            case "sticker":  preview = "Sticker"
-            case "location": preview = "📍 Location"
-            case "poll":     preview = "📊 \(message.poll?.question ?? "Poll")"
-            case "protocol", "system": preview = ""  // hide
-            default:         preview = "[\(message.kind)]"
+            case "image":    rawPreview = "📷 Photo"
+            case "video":    rawPreview = "🎥 Video"
+            case "audio":    rawPreview = "🎤 Audio"
+            case "document": rawPreview = "📄 Document"
+            case "sticker":  rawPreview = "Sticker"
+            case "location": rawPreview = "📍 Location"
+            case "poll":     rawPreview = "📊 \(message.poll?.question ?? "Poll")"
+            case "protocol", "system": rawPreview = ""  // hide
+            default:         rawPreview = "[\(message.kind)]"
             }
+        }
+        let preview = resolveMentionsText(rawPreview) { [weak session] jid in
+            session?.displayName(for: jid) ?? jid
         }
 
         let now = message.timestamp
@@ -247,7 +250,11 @@ final class ChatListViewModel {
 
         if !alreadySeen, !message.fromMe, !NSApp.isActive, !preview.isEmpty {
             let title = chats.first(where: { $0.jid == chatJID })?.name ?? chatJID
-            NotificationService.notify(title: title, body: preview, chatJID: chatJID)
+            NotificationService.notify(
+                title: title,
+                body: preview,
+                chatJID: chatJID,
+                resolveMentions: { [weak session] jid in session?.displayName(for: jid) ?? jid })
         }
     }
 
@@ -340,7 +347,8 @@ final class ChatListViewModel {
         NotificationService.notify(
             title: chatName,
             body: "\(r.emoji) reacted to your message",
-            chatJID: canonChat)
+            chatJID: canonChat,
+            resolveMentions: { [weak session] jid in session?.displayName(for: jid) ?? jid })
     }
 
     func mergeGroups(_ gs: [BridgeGroupModel]) {
