@@ -250,10 +250,24 @@ final class ChatListViewModel {
 
         if !alreadySeen, !message.fromMe, !NSApp.isActive, !preview.isEmpty {
             let title = chats.first(where: { $0.jid == chatJID })?.name ?? chatJID
+            // Group chats: surface sender name as subtitle so recipients can
+            // tell who said what without opening the chat. 1:1 chats: title
+            // already names the sender — skip subtitle.
+            let subtitle: String? = {
+                guard chatJID.hasSuffix("@g.us") else { return nil }
+                if let s = session?.displayName(for: message.senderJID), !s.isEmpty {
+                    return s
+                }
+                if let push = message.senderPushName, !push.isEmpty {
+                    return push
+                }
+                return nil
+            }()
             NotificationService.notify(
                 title: title,
                 body: preview,
                 chatJID: chatJID,
+                subtitle: subtitle,
                 resolveMentions: { [weak session] jid in session?.displayName(for: jid) ?? jid })
         }
     }
@@ -344,10 +358,16 @@ final class ChatListViewModel {
               !NSApp.isActive else { return }
         let canonChat = JIDNormalize.canonical(r.chatJID, client: client)
         let chatName = chats.first(where: { $0.jid == canonChat })?.name ?? canonChat
+        let reactSubtitle: String? = {
+            guard canonChat.hasSuffix("@g.us") else { return nil }
+            let s = session?.displayName(for: r.senderJID) ?? ""
+            return s.isEmpty ? nil : s
+        }()
         NotificationService.notify(
             title: chatName,
             body: "\(r.emoji) reacted to your message",
             chatJID: canonChat,
+            subtitle: reactSubtitle,
             resolveMentions: { [weak session] jid in session?.displayName(for: jid) ?? jid })
     }
 

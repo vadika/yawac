@@ -28,6 +28,7 @@ enum NotificationService {
         title: String,
         body: String,
         chatJID: String,
+        subtitle: String? = nil,
         resolveMentions: ((String) -> String)? = nil
     ) {
         let resolvedBody: String
@@ -40,6 +41,9 @@ enum NotificationService {
         // Path A: official user-notification (works only on signed builds)
         let content = UNMutableNotificationContent()
         content.title = title
+        if let subtitle, !subtitle.isEmpty {
+            content.subtitle = subtitle
+        }
         content.body = resolvedBody
         content.sound = .default
         content.userInfo = ["chatJID": chatJID]
@@ -52,15 +56,22 @@ enum NotificationService {
         // Path B: osascript fallback — always works on macOS, but attributes
         // the notification to "Script Editor". Suppressed when UN is authorized.
         if !unGranted {
-            osascriptNotify(title: title, body: resolvedBody)
+            osascriptNotify(title: title, subtitle: subtitle, body: resolvedBody)
         }
     }
 
-    private static func osascriptNotify(title: String, body: String) {
+    private static func osascriptNotify(title: String, subtitle: String?, body: String) {
         let safeTitle = escapeForAppleScript(title)
         let safeBody = escapeForAppleScript(body)
-        let script =
-            "display notification \"\(safeBody)\" with title \"\(safeTitle)\""
+        let script: String
+        if let subtitle, !subtitle.isEmpty {
+            let safeSubtitle = escapeForAppleScript(subtitle)
+            script =
+                "display notification \"\(safeBody)\" with title \"\(safeTitle)\" subtitle \"\(safeSubtitle)\""
+        } else {
+            script =
+                "display notification \"\(safeBody)\" with title \"\(safeTitle)\""
+        }
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
         task.arguments = ["-e", script]
