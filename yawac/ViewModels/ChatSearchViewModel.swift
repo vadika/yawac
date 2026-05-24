@@ -45,7 +45,61 @@ final class ChatSearchViewModel {
             try? await Task.sleep(for: .milliseconds(debounceMs))
             guard let self, !Task.isCancelled else { return }
             await self.runFilter(q)
+            await self.maybeValidate(q)
         }
+    }
+
+    private func maybeValidate(_ q: String) async {
+        guard Self.looksLikePhone(q) else {
+            suggestion = nil
+            return
+        }
+        let digits = Self.digitsOnly(q)
+        // Skip if an existing chat already matches by digits — user
+        // already has that conversation.
+        if let chats = listVM?.chats,
+           chats.contains(where: { Self.digitsOnly($0.jid).contains(digits) }) {
+            suggestion = nil
+            return
+        }
+        validating = true
+        suggestion = nil
+        let validator = self.validator
+        let result: PhoneCheckResult?
+        do {
+            result = try await Task.detached(priority: .userInitiated) {
+                try validator.checkOnWhatsApp(digits)
+            }.value
+        } catch {
+            NSLog("[yawac/search] checkOnWhatsApp failed: %@", String(describing: error))
+            result = nil
+        }
+        guard !Task.isCancelled else { return }
+        validating = false
+        guard let r = result, r.registered else {
+            suggestion = nil
+            return
+        }
+        if !validator.ownJID.isEmpty, r.jid == validator.ownJID {
+            suggestion = nil
+            return
+        }
+        suggestion = PhoneSuggestion(
+            jid: r.jid,
+            displayPhone: "+" + digits)
+    }
+
+    static func looksLikePhone(_ s: String) -> Bool {
+        let trimmed = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return false }
+        let digits = digitsOnly(trimmed)
+        let allowed = CharacterSet(charactersIn: "+-() ").union(.decimalDigits)
+                                                        .union(.whitespaces)
+        if trimmed.unicodeScalars.contains(where: { !allowed.contains($0) }) {
+            return false
+        }
+        if trimmed.hasPrefix("+") { return digits.count >= 1 }
+        return digits.count >= 7
     }
 
     private func runFilter(_ q: String) async {
