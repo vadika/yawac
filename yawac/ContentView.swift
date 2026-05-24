@@ -54,6 +54,7 @@ struct ContentView: View {
         .task {
             guard let client = session.client else { return }
             let vm = ChatListViewModel(client: client, context: modelContext)
+            vm.session = session
             self.chatList = vm
             // Restore last-opened chat if it's in our chats list.
             if !lastSelectedChatJID.isEmpty,

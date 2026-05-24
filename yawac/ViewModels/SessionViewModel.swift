@@ -16,6 +16,10 @@ final class SessionViewModel {
     var syncing: Bool = false
     var syncedConversations: Int = 0
     var contactNames: [String: String] = [:]
+    /// Sum of `unread` across all chats. Driven by ChatListViewModel so
+    /// MenuBarExtra can flip between the idle (template) and active
+    /// (red-dot) menubar glyphs without subscribing to the chat list.
+    var totalUnread: Int = 0
     /// When non-nil, the chat list / detail pane should focus this JID.
     /// Consumed and cleared by `ContentView` via `.onChange`.
     var pendingChatSelection: String?

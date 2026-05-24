@@ -5,14 +5,25 @@ import SwiftData
 
 @Observable @MainActor
 final class ChatListViewModel {
-    var chats: [Chat] = []
+    var chats: [Chat] = [] {
+        didSet { pushUnreadToSession() }
+    }
     private let client: WAClient
     private let context: ModelContext?
+    /// Weak link back to the global session so the menubar icon can
+    /// reflect the chats' aggregate unread count without subscribing
+    /// to vm.chats directly from app-level scope.
+    weak var session: SessionViewModel?
 
     init(client: WAClient, context: ModelContext? = nil) {
         self.client = client
         self.context = context
         loadChats()
+    }
+
+    private func pushUnreadToSession() {
+        let total = chats.reduce(0) { $0 + $1.unread }
+        session?.totalUnread = total
     }
 
     private func loadChats() {

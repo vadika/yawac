@@ -41,7 +41,13 @@ struct YawacApp: App {
             }
         }
 
-        MenuBarExtra("yawac", systemImage: "bubble.left.and.bubble.right.fill") {
+        MenuBarExtra("yawac",
+                     image: session.totalUnread > 0 ? "MenuBarActive" : "MenuBarIdle") {
+            if session.totalUnread > 0 {
+                Text("\(session.totalUnread) unread")
+                    .foregroundStyle(.secondary)
+                Divider()
+            }
             Button("Show / Hide Window") {
                 WindowToggler.toggleMain()
             }
