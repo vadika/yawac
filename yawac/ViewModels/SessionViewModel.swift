@@ -153,6 +153,11 @@ final class SessionViewModel {
             state = .ready
             syncing = true
             armSyncWatchdog()
+            // Publish our own presence as available so whatsmeow honors
+            // SubscribePresence(jid) calls — peers don't share presence
+            // with companions that look offline. Best-effort: errors
+            // here mean we'll just not see online dots.
+            try? client?.sendPresence(available: true)
         case .historySync(let n):
             syncedConversations += n
             armSyncWatchdog()
