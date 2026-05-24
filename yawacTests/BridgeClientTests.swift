@@ -11,4 +11,28 @@ final class BridgeClientTests: XCTestCase {
         XCTAssertEqual(m.text, "hi")
         XCTAssertEqual(m.timestamp, 42)
     }
+
+    func testDecodePhoneCheckResultRegistered() throws {
+        let json = #"""
+        {"jid":"4915123456789@s.whatsapp.net","registered":true}
+        """#
+        let r = try JSONDecoder().decode(PhoneCheckResult.self, from: Data(json.utf8))
+        XCTAssertEqual(r.jid, "4915123456789@s.whatsapp.net")
+        XCTAssertTrue(r.registered)
+        XCTAssertNil(r.businessName)
+    }
+
+    func testDecodePhoneCheckResultNotRegistered() throws {
+        let json = #"{"jid":"","registered":false}"#
+        let r = try JSONDecoder().decode(PhoneCheckResult.self, from: Data(json.utf8))
+        XCTAssertFalse(r.registered)
+    }
+
+    func testDecodePhoneCheckResultBusiness() throws {
+        let json = #"""
+        {"jid":"49123@s.whatsapp.net","registered":true,"business_name":"Acme"}
+        """#
+        let r = try JSONDecoder().decode(PhoneCheckResult.self, from: Data(json.utf8))
+        XCTAssertEqual(r.businessName, "Acme")
+    }
 }

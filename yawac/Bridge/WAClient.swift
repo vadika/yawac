@@ -1,8 +1,25 @@
 import Foundation
 import Bridge
 
+struct PhoneCheckResult: Decodable, Equatable {
+    let jid: String
+    let registered: Bool
+    let businessName: String?
+
+    enum CodingKeys: String, CodingKey {
+        case jid, registered
+        case businessName = "business_name"
+    }
+}
+
+protocol PhoneValidating: AnyObject {
+    var ownJID: String { get }
+    /// Synchronous — call from off-main via `Task.detached`.
+    func checkOnWhatsApp(_ phone: String) throws -> PhoneCheckResult
+}
+
 @MainActor
-final class WAClient {
+final class WAClient: PhoneValidating {
     enum Event {
         case qr(String)
         case pairSuccess
@@ -225,6 +242,13 @@ final class WAClient {
         let json = go.listContacts(&err)
         if let err { throw err }
         return try JSONDecoder().decode([BridgeContact].self, from: Data(json.utf8))
+    }
+
+    nonisolated func checkOnWhatsApp(_ phone: String) throws -> PhoneCheckResult {
+        var err: NSError?
+        let json = go.check(onWhatsApp: phone, error: &err)
+        if let err { throw err }
+        return try JSONDecoder().decode(PhoneCheckResult.self, from: Data(json.utf8))
     }
 
     func createGroup(name: String, participantJIDs: [String]) throws -> String {
