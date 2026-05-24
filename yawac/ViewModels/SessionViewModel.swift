@@ -24,6 +24,25 @@ final class SessionViewModel {
     /// Consumed and cleared by `ContentView` via `.onChange`.
     var pendingChatSelection: String?
 
+    /// Per-peer presence. `online == true` → currently connected.
+    /// `lastSeen` is seconds-since-epoch when peer went offline; 0 means
+    /// peer hasn't shared lastSeen privacy (the most common case).
+    struct Presence: Equatable {
+        var online: Bool
+        var lastSeen: Int64
+    }
+    var presenceByJID: [String: Presence] = [:]
+
+    func ingestPresence(jid: String, online: Bool, lastSeen: Int64) {
+        let key = JIDNormalize.canonical(jid, client: client)
+        presenceByJID[key] = Presence(online: online, lastSeen: lastSeen)
+    }
+
+    func presence(for jid: String) -> Presence? {
+        let key = JIDNormalize.canonical(jid, client: client)
+        return presenceByJID[key]
+    }
+
     func requestSelectChat(_ jid: String) {
         pendingChatSelection = JIDNormalize.canonical(jid, client: client)
     }

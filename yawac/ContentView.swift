@@ -80,6 +80,8 @@ struct ContentView: View {
                     vm.ingest(m)
                 case .reaction(let r):
                     vm.persistReaction(r)
+                case .presence(let jid, let online, let lastSeen):
+                    session.ingestPresence(jid: jid, online: online, lastSeen: lastSeen)
                 case .historySync:
                     let cs = (try? client.listContacts()) ?? []
                     vm.resolveNames(cs)
