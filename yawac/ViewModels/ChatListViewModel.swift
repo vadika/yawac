@@ -222,6 +222,15 @@ final class ChatListViewModel {
                 c.lastTimestamp = now
             }
             if !alreadySeen, !message.fromMe { c.unread += 1 }
+            let looksLikePhonePlaceholder: Bool = {
+                guard c.name.hasPrefix("+") else { return c.name == c.jid }
+                return c.name.dropFirst().allSatisfy(\.isNumber)
+            }()
+            if !message.fromMe,
+               let push = message.senderPushName, !push.isEmpty,
+               looksLikePhonePlaceholder {
+                c.name = push
+            }
             chats[idx] = c
             upsertPersisted(c, preview: c.lastMessage)
         } else {
