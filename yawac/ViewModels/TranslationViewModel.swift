@@ -61,13 +61,24 @@ final class TranslationViewModel {
     func translate(surfaceID: String,
                    text: String,
                    source: String) async {
-        guard case .ready = model.state else { return }
+        guard case .ready(let modelDir) = model.state else { return }
 
         if store.entry(for: surfaceID) != nil {
             store.toggle(surfaceID)
             return
         }
         guard store.startInFlight(surfaceID) else { return }
+        // Engine load is idempotent — if it's already .ready or .loading,
+        // this returns fast. Covers the cold-download case where the
+        // model arrived after app launch and the AppRoot preload never
+        // ran.
+        do {
+            try await engine.load(modelDir: modelDir)
+        } catch {
+            NSLog("[yawac/translate] engine load failed: %@", "\(error)")
+            store.fail(surfaceID)
+            return
+        }
         do {
             let translated = try await engine.translate(
                 text, from: source, to: targetLang)
