@@ -326,3 +326,69 @@ func mediaFromSticker(m *waE2E.StickerMessage) *JMedia {
 		},
 	}
 }
+
+// SendTextReply sends a text message that quotes another message.
+// quotedKind is one of text/image/video/audio/document/sticker.
+// quotedSnippet is what other clients will render if they cannot
+// resolve the stanza-id back to the original.
+func (c *Client) SendTextReply(
+	chatJID, body string,
+	quotedID, quotedSenderJID string,
+	quotedFromMe bool,
+	quotedKind, quotedSnippet string,
+) (string, error) {
+	if c.wa == nil {
+		return "", errors.New("client closed")
+	}
+	chat, err := types.ParseJID(chatJID)
+	if err != nil {
+		return "", fmt.Errorf("parse chat: %w", err)
+	}
+	if chat.User == "" || chat.Server == "" {
+		return "", fmt.Errorf("parse chat: %q is not a valid jid", chatJID)
+	}
+	senderForCtx := quotedSenderJID
+	if quotedFromMe {
+		if c.wa.Store != nil && c.wa.Store.ID != nil {
+			senderForCtx = c.wa.Store.ID.ToNonAD().String()
+		}
+	} else {
+		if _, err := types.ParseJID(quotedSenderJID); err != nil {
+			return "", fmt.Errorf("parse quoted sender: %w", err)
+		}
+	}
+	ctx := &waE2E.ContextInfo{
+		StanzaID:      proto.String(quotedID),
+		Participant:   proto.String(senderForCtx),
+		QuotedMessage: stubQuoted(quotedKind, quotedSnippet),
+	}
+	msg := &waE2E.Message{
+		ExtendedTextMessage: &waE2E.ExtendedTextMessage{
+			Text:        proto.String(body),
+			ContextInfo: ctx,
+		},
+	}
+	resp, err := c.wa.SendMessage(context.Background(), chat, msg)
+	if err != nil {
+		return "", fmt.Errorf("send: %w", err)
+	}
+	out, _ := json.Marshal(JSendResult{MessageID: resp.ID, Timestamp: resp.Timestamp.Unix()})
+	return string(out), nil
+}
+
+func stubQuoted(kind, snippet string) *waE2E.Message {
+	switch kind {
+	case "image":
+		return &waE2E.Message{ImageMessage: &waE2E.ImageMessage{Caption: proto.String(snippet)}}
+	case "video":
+		return &waE2E.Message{VideoMessage: &waE2E.VideoMessage{Caption: proto.String(snippet)}}
+	case "audio":
+		return &waE2E.Message{AudioMessage: &waE2E.AudioMessage{}}
+	case "document":
+		return &waE2E.Message{DocumentMessage: &waE2E.DocumentMessage{FileName: proto.String(snippet)}}
+	case "sticker":
+		return &waE2E.Message{StickerMessage: &waE2E.StickerMessage{}}
+	default: // "text" and unknown kinds
+		return &waE2E.Message{Conversation: proto.String(snippet)}
+	}
+}

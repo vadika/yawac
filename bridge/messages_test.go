@@ -27,3 +27,23 @@ func TestSendResultJSONShape(t *testing.T) {
 		t.Fatal("decode mismatch")
 	}
 }
+
+func TestSendTextReplyRejectsBadJID(t *testing.T) {
+	c := &Client{}
+	_, err := c.SendTextReply("not-a-jid", "hi",
+		"ABCD1234", "12345@s.whatsapp.net", false,
+		"text", "hello")
+	if err == nil {
+		t.Fatal("expected error for bad chat jid")
+	}
+}
+
+func TestSendTextReplyClosedClient(t *testing.T) {
+	c := &Client{} // wa is nil
+	_, err := c.SendTextReply("12345@s.whatsapp.net", "hi",
+		"ABCD1234", "12345@s.whatsapp.net", false,
+		"text", "hello")
+	if err == nil {
+		t.Fatal("expected error for closed client")
+	}
+}
