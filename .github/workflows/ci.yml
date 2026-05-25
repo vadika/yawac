@@ -31,6 +31,9 @@ jobs:
           cd bridge
           go test -short -v ./...
 
+      - name: Cask bumper self-test
+        run: ./scripts/bump-cask-test.sh
+
       - name: Build XCFramework
         run: ./scripts/build-xcframework.sh
 
