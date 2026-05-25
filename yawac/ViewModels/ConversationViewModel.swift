@@ -39,6 +39,10 @@ final class ConversationViewModel {
 
     var pendingScrollToID: String?
     var highlightedID: String?
+    /// Back-ref to the chat list so mutations (edit/revoke/delete-for-me)
+    /// can push an updated preview to the sidebar. Set by ConversationView
+    /// when the chat becomes active.
+    weak var chatList: ChatListViewModel?
 
     func jumpToQuoted(id: String) {
         if messages.contains(where: { $0.id == id }) {
@@ -897,6 +901,7 @@ final class ConversationViewModel {
             messages[idx].locallyDeleted = true
         }
         persistLocallyDeleted(messageID: msg.id, value: true)
+        chatList?.refreshPreview(chatJID: chatJID)
     }
 
     private var pendingEdits:   OrderedDict<String, (text: String, ts: Date)> = .init(cap: 256)
@@ -959,6 +964,7 @@ final class ConversationViewModel {
             messages[idx] = r
         }
         persistEdit(messageID: messageID, newText: newText, editedAt: at)
+        chatList?.refreshPreview(chatJID: chatJID)
     }
 
     private func applyLocalRevoke(messageID: String, by jid: String, at: Date) {
@@ -968,6 +974,7 @@ final class ConversationViewModel {
             // Bubble rendering uses revokedAt as the gate; body stays as-is.
         }
         persistRevoke(messageID: messageID, revokedBy: jid, revokedAt: at)
+        chatList?.refreshPreview(chatJID: chatJID)
     }
 
     private func persistEdit(messageID: String, newText: String, editedAt: Date) {

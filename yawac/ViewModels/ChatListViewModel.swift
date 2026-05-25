@@ -427,6 +427,47 @@ final class ChatListViewModel {
         sortChats()
     }
 
+    /// Re-derive `lastMessage` / `lastTimestamp` for `chatJID` from the
+    /// most-recent PersistedMessage row. Honors revoked / locally-deleted
+    /// state with a 🚫 prefix. Called by CVM after edit / revoke /
+    /// delete-for-me mutations so the sidebar stays in sync.
+    func refreshPreview(chatJID: String) {
+        guard let context else { return }
+        var descriptor = FetchDescriptor<PersistedMessage>(
+            predicate: #Predicate { $0.chatJID == chatJID },
+            sortBy: [SortDescriptor(\.timestamp, order: .reverse)])
+        descriptor.fetchLimit = 1
+        guard let row = try? context.fetch(descriptor).first else { return }
+        let preview = Self.previewText(for: row)
+        let resolved = resolveMentionsText(preview) { [weak session] jid in
+            session?.displayName(for: jid) ?? jid
+        }
+        guard let idx = chats.firstIndex(where: { $0.jid == chatJID }) else { return }
+        var c = chats[idx]
+        c.lastMessage = resolved
+        c.lastTimestamp = Int64(row.timestamp.timeIntervalSince1970)
+        chats[idx] = c
+        upsertPersisted(c, preview: c.lastMessage)
+        sortChats()
+    }
+
+    private static func previewText(for m: PersistedMessage) -> String {
+        if m.revokedAt != nil   { return "🚫 message deleted" }
+        if m.locallyDeleted     { return "🚫 you deleted this" }
+        if let t = m.text, !t.isEmpty { return t }
+        switch m.kind {
+        case "image":    return "📷 Photo"
+        case "video":    return "🎥 Video"
+        case "audio":    return "🎤 Audio"
+        case "document": return "📄 Document"
+        case "sticker":  return "Sticker"
+        case "location": return "📍 Location"
+        case "poll":     return "📊 Poll"
+        case "protocol", "system": return ""
+        default:         return "[\(m.kind)]"
+        }
+    }
+
     private func sortChats() {
         chats.sort { a, b in
             if a.lastTimestamp != b.lastTimestamp {

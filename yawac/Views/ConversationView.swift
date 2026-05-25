@@ -369,6 +369,7 @@ struct ConversationView: View {
             }
             self.vm = vm
             session.currentConversation = vm
+            vm.chatList = session.chatList
             vm.replayPendingForLoadedRows()
             try? client.subscribePresence(chatJID)
             let stream = client.eventStream()
