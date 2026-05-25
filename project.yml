@@ -7,6 +7,10 @@ settings:
   base:
     SWIFT_VERSION: "5.10"
     ENABLE_HARDENED_RUNTIME: YES
+packages:
+  MLXSwiftExamples:
+    url: https://github.com/ml-explore/mlx-swift-examples
+    from: "2.29.1"
 targets:
   yawac:
     type: application
@@ -20,6 +24,10 @@ targets:
     dependencies:
       - framework: build/Bridge.xcframework
         embed: true
+      - package: MLXSwiftExamples
+        product: MLXLLM
+      - package: MLXSwiftExamples
+        product: MLXLMCommon
     settings:
       base:
         OTHER_LDFLAGS: -lresolv
