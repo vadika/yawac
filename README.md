@@ -61,6 +61,16 @@ The Go bridge exposes a flat, gomobile-friendly API: basic types (string, int, [
 - Go 1.22 or newer
 - Homebrew (for `xcodegen` and Go if not already installed)
 
+## Install via Homebrew
+
+```sh
+brew tap vadika/yawac https://github.com/vadika/yawac
+brew install --cask vadika/yawac/yawac
+```
+
+Builds are ad-hoc signed; the cask strips the macOS quarantine flag
+automatically. Each push to `main` produces a new `0.1.0+<sha>` build.
+
 ## Build
 
     ./scripts/install-tools.sh       # one-time: gomobile + gobind
