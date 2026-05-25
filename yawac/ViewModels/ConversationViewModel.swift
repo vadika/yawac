@@ -557,7 +557,10 @@ final class ConversationViewModel {
     }
 
     func ingest(_ b: BridgeMessage) {
-        guard b.chatJID == chatJID else { return }
+        // Bridge emits raw (possibly `@lid` / device-suffixed) JIDs; our
+        // stored `chatJID` is canonical. Match in canonical space so
+        // events for this chat aren't dropped on the floor.
+        guard JIDNormalize.canonical(b.chatJID, client: client) == chatJID else { return }
         if b.kind == "protocol" || b.kind == "system" { return }
         // Dedupe by id (echo of fromMe send may arrive after local optimistic append)
         if messages.contains(where: { $0.id == b.id }) { return }
@@ -879,7 +882,7 @@ final class ConversationViewModel {
     }
 
     func applyReaction(_ r: BridgeReaction) {
-        guard r.chatJID == chatJID else { return }
+        guard JIDNormalize.canonical(r.chatJID, client: client) == chatJID else { return }
         var byMsg = reactionsBySender[r.targetMessageID] ?? [:]
         if r.emoji.isEmpty {
             byMsg.removeValue(forKey: r.senderJID)
