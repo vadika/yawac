@@ -1,0 +1,77 @@
+name: release
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "Casks/**"
+      - "docs/**"
+      - "**/*.md"
+  workflow_dispatch:
+concurrency:
+  group: release-main
+  cancel-in-progress: true
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: bridge/go.mod
+          cache-dependency-path: bridge/go.sum
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Install gomobile
+        run: |
+          go install golang.org/x/mobile/cmd/gomobile@latest
+          go install golang.org/x/mobile/cmd/gobind@latest
+          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
+          gomobile init
+      - name: Compute version
+        id: ver
+        run: |
+          BASE=$(awk -F'"' '/CFBundleShortVersionString/{print $2; exit}' project.yml)
+          SHA=$(git rev-parse --short=7 HEAD)
+          echo "version=${BASE}+${SHA}" >> "$GITHUB_OUTPUT"
+          echo "sha=${SHA}" >> "$GITHUB_OUTPUT"
+      - name: Build + sign + zip
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: ./scripts/release-edge.sh
+      - name: SHA256
+        id: sum
+        run: |
+          SUM=$(shasum -a 256 "build/dist/yawac-${{ steps.ver.outputs.version }}.zip" | awk '{print $1}')
+          echo "sha256=${SUM}" >> "$GITHUB_OUTPUT"
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          gh release create "$VERSION" \
+            "build/dist/yawac-${VERSION}.zip" \
+            --title "$VERSION" \
+            --notes "Edge build from $(git rev-parse HEAD)"
+      - name: Bump cask
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+          SHA256: ${{ steps.sum.outputs.sha256 }}
+        run: ./scripts/bump-cask.sh
+      - name: Commit cask
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Casks/yawac.rb
+          if git diff --cached --quiet; then
+            echo "no cask change"
+            exit 0
+          fi
+          git commit -m "chore(cask): bump to ${VERSION} [skip ci]"
+          git push origin main
