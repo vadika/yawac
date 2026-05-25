@@ -31,6 +31,23 @@ final class ConversationViewModel {
     private(set) var loadingOlder = false
     var olderUnavailable = false
     private(set) var refreshingPolls = false
+    var replyTarget: UIMessage?
+    var editTarget:  UIMessage?
+
+    func startReply(to msg: UIMessage) {
+        editTarget = nil
+        replyTarget = msg
+    }
+
+    func startEdit(_ msg: UIMessage) {
+        replyTarget = nil
+        editTarget = msg
+    }
+
+    func cancelCompose() {
+        replyTarget = nil
+        editTarget = nil
+    }
 
     init(chatJID: String, client: WAClient, context: ModelContext? = nil) {
         self.chatJID = chatJID
