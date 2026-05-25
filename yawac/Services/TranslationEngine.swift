@@ -79,18 +79,21 @@ actor TranslationEngine: TranslationEngineProtocol {
             throw TranslationError.notReady
         }
         let truncated = Self.truncate(text, max: Self.maxInputChars)
-        let prompt = Self.buildPrompt(text: truncated,
-                                      source: source,
-                                      target: target)
+        let instructions = Self.buildInstructions(source: source,
+                                                  target: target)
 
         // GenerateParameters: low temperature for determinism, modest
         // max-tokens to bound runtime on long inputs.
         let parameters = GenerateParameters(maxTokens: 800,
                                             temperature: 0.2)
         let session = ChatSession(container,
+                                  instructions: instructions,
                                   generateParameters: parameters)
-        let raw = try await session.respond(to: prompt)
-        return Self.cleanOutput(raw)
+        // User message is JUST the source text. Role/format constraints
+        // live in `instructions` (the system prompt), which Qwen 2.5
+        // respects far more reliably than prefacing the user turn.
+        let raw = try await session.respond(to: truncated)
+        return Self.cleanOutput(raw, target: target)
     }
 
     // MARK: - Helpers (internal for testability)
@@ -100,23 +103,40 @@ actor TranslationEngine: TranslationEngineProtocol {
         return String(text.prefix(max)) + "\u{2026}"
     }
 
-    static func buildPrompt(text: String,
-                            source: String,
-                            target: String) -> String {
+    static func buildInstructions(source: String, target: String) -> String {
         let srcName = Locale.current.localizedString(forLanguageCode: source)
             ?? source
         let tgtName = Locale.current.localizedString(forLanguageCode: target)
             ?? target
         return """
-        Translate the following \(srcName) text to \(tgtName).
-        Output ONLY the translation, no commentary, no quotes, no prefixes.
+        You are a translation engine. The user message contains \(srcName) \
+        text. Translate it into \(tgtName) and output ONLY the translation.
 
-        \(text)
+        Rules:
+        - Do NOT include any prefix such as "Translation:", \
+          "\(tgtName):", "Here is the translation:", or similar.
+        - Do NOT wrap the output in quotes, backticks, or asterisks.
+        - Do NOT add commentary, notes, or explanations.
+        - Do NOT repeat the source text.
+        - Preserve URLs, @mentions, emoji, and line breaks verbatim.
+        - If the input is already in \(tgtName), return it unchanged.
         """
     }
 
-    static func cleanOutput(_ s: String) -> String {
+    /// Strip common artefacts Qwen 2.5 occasionally adds despite the
+    /// system prompt: leading "Translation:" / "<TargetLang>:" labels,
+    /// surrounding markdown/quote wrappers, and a final stray label
+    /// when the model echoes the source first.
+    static func cleanOutput(_ s: String, target: String = "") -> String {
         var out = s.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // 1. Strip a markdown bold/italic wrapper around the whole reply.
+        if out.hasPrefix("**"), out.hasSuffix("**"), out.count >= 4 {
+            out = String(out.dropFirst(2).dropLast(2))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        // 2. Strip surrounding quote pairs.
         let quotePairs: [(Character, Character)] = [
             ("\"", "\""),
             ("'", "'"),
@@ -130,6 +150,43 @@ actor TranslationEngine: TranslationEngineProtocol {
                 break
             }
         }
+
+        // 3. Strip leading label prefixes the model sometimes prepends.
+        out = stripLeadingLabel(out, target: target)
+
         return out
+    }
+
+    private static let labelPrefixes: [String] = [
+        "translation:",
+        "translated text:",
+        "translated:",
+        "here is the translation:",
+        "here's the translation:",
+        "here is the translated text:",
+        "output:",
+        "result:",
+    ]
+
+    private static func stripLeadingLabel(_ s: String, target: String) -> String {
+        let lower = s.lowercased()
+        for prefix in labelPrefixes {
+            if lower.hasPrefix(prefix) {
+                return String(s.dropFirst(prefix.count))
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+        }
+        // Target-language label, e.g. "English:" or "Deutsch:".
+        if !target.isEmpty,
+           let tgtName = Locale.current.localizedString(forLanguageCode: target) {
+            for variant in [tgtName, target] {
+                let label = "\(variant.lowercased()):"
+                if lower.hasPrefix(label) {
+                    return String(s.dropFirst(label.count))
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+            }
+        }
+        return s
     }
 }
