@@ -191,6 +191,15 @@ func (c *Client) dispatchMessage(evt *events.Message) {
 	case evt.Message.GetExtendedTextMessage() != nil:
 		jm.Text = evt.Message.GetExtendedTextMessage().GetText()
 	}
+	if ctx := contextInfoFromMessage(evt.Message); ctx != nil && ctx.GetStanzaID() != "" {
+		jm.Quoted = &JQuoted{
+			MessageID: ctx.GetStanzaID(),
+			SenderJID: ctx.GetParticipant(),
+			FromMe:    isFromMe(c, ctx.GetParticipant()),
+			Kind:      classifyMessage(ctx.GetQuotedMessage()),
+			Snippet:   extractSnippet(ctx.GetQuotedMessage()),
+		}
+	}
 	if m := evt.Message.GetImageMessage(); m != nil {
 		jm.Media = mediaFromImage(m)
 	} else if m := evt.Message.GetVideoMessage(); m != nil {
@@ -254,6 +263,85 @@ func extractText(m *waE2E.Message) string {
 		return e.GetText()
 	}
 	return ""
+}
+
+func contextInfoFromMessage(m *waE2E.Message) *waE2E.ContextInfo {
+	if m == nil {
+		return nil
+	}
+	if e := m.GetExtendedTextMessage(); e != nil {
+		return e.GetContextInfo()
+	}
+	if im := m.GetImageMessage(); im != nil {
+		return im.GetContextInfo()
+	}
+	if vm := m.GetVideoMessage(); vm != nil {
+		return vm.GetContextInfo()
+	}
+	if am := m.GetAudioMessage(); am != nil {
+		return am.GetContextInfo()
+	}
+	if dm := m.GetDocumentMessage(); dm != nil {
+		return dm.GetContextInfo()
+	}
+	if sm := m.GetStickerMessage(); sm != nil {
+		return sm.GetContextInfo()
+	}
+	return nil
+}
+
+func extractSnippet(m *waE2E.Message) string {
+	if m == nil {
+		return ""
+	}
+	if t := m.GetConversation(); t != "" {
+		return truncateRunes(t, 120)
+	}
+	if e := m.GetExtendedTextMessage(); e != nil {
+		return truncateRunes(e.GetText(), 120)
+	}
+	if im := m.GetImageMessage(); im != nil {
+		if cap := im.GetCaption(); cap != "" {
+			return truncateRunes(cap, 120)
+		}
+		return "[image]"
+	}
+	if vm := m.GetVideoMessage(); vm != nil {
+		if cap := vm.GetCaption(); cap != "" {
+			return truncateRunes(cap, 120)
+		}
+		return "[video]"
+	}
+	if am := m.GetAudioMessage(); am != nil {
+		_ = am
+		return "[audio]"
+	}
+	if dm := m.GetDocumentMessage(); dm != nil {
+		if n := dm.GetFileName(); n != "" {
+			return truncateRunes(n, 120)
+		}
+		return "[document]"
+	}
+	if sm := m.GetStickerMessage(); sm != nil {
+		_ = sm
+		return "[sticker]"
+	}
+	return ""
+}
+
+func truncateRunes(s string, n int) string {
+	runes := []rune(s)
+	if len(runes) <= n {
+		return s
+	}
+	return string(runes[:n]) + "…"
+}
+
+func isFromMe(c *Client, jid string) bool {
+	if c == nil || c.wa == nil || c.wa.Store == nil || c.wa.Store.ID == nil {
+		return false
+	}
+	return c.wa.Store.ID.ToNonAD().String() == jid
 }
 
 func mediaFromImage(m *waE2E.ImageMessage) *JMedia {

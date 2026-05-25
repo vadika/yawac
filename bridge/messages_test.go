@@ -124,3 +124,49 @@ func TestDispatchEditEmitsMessageEdited(t *testing.T) {
 		t.Errorf("got = %+v", got)
 	}
 }
+
+func TestDispatchReplyPopulatesQuoted(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/quoted.db")
+	defer c.Close()
+	sink := newRecSink()
+	c.SetEventSink(sink)
+	chat, _ := types.ParseJID("12345@s.whatsapp.net")
+	sender, _ := types.ParseJID("67890@s.whatsapp.net")
+	evt := &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{Chat: chat, Sender: sender},
+			ID:            "REPLY-MSG",
+			Timestamp:     time.Unix(1700000100, 0),
+		},
+		Message: &waE2E.Message{
+			ExtendedTextMessage: &waE2E.ExtendedTextMessage{
+				Text: proto.String("yes please"),
+				ContextInfo: &waE2E.ContextInfo{
+					StanzaID:    proto.String("ORIG-ID"),
+					Participant: proto.String("99999@s.whatsapp.net"),
+					QuotedMessage: &waE2E.Message{
+						Conversation: proto.String("dinner at 7?"),
+					},
+				},
+			},
+		},
+	}
+	c.dispatchMessage(evt)
+	e := sink.wait(t, "Message", time.Second)
+	var got JMessage
+	if err := json.Unmarshal([]byte(e.payload), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Quoted == nil {
+		t.Fatal("Quoted nil")
+	}
+	if got.Quoted.MessageID != "ORIG-ID" {
+		t.Errorf("MessageID = %q", got.Quoted.MessageID)
+	}
+	if got.Quoted.Kind != "text" {
+		t.Errorf("Kind = %q", got.Quoted.Kind)
+	}
+	if got.Quoted.Snippet != "dinner at 7?" {
+		t.Errorf("Snippet = %q", got.Quoted.Snippet)
+	}
+}
