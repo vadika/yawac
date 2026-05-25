@@ -323,6 +323,9 @@ struct ConversationView: View {
             }
             return true
         }
+        .onDisappear {
+            session.currentConversation = nil
+        }
         .task(id: chatJID) {
             guard let client = session.client else { return }
             // Reset scroll bookkeeping for the new chat. atBottom starts
@@ -351,6 +354,8 @@ struct ConversationView: View {
                 vm.refreshPollTallies()
             }
             self.vm = vm
+            session.currentConversation = vm
+            vm.replayPendingForLoadedRows()
             try? client.subscribePresence(chatJID)
             let stream = client.eventStream()
             for await event in stream {

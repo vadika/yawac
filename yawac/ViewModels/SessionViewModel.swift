@@ -17,6 +17,7 @@ final class SessionViewModel {
     /// invoke side-effects like `markRead` without threading it through
     /// every constructor. Set once from ContentView's boot path.
     weak var chatList: ChatListViewModel?
+    weak var currentConversation: ConversationViewModel?
     var syncing: Bool = false
     var syncedConversations: Int = 0
     var contactNames: [String: String] = [:]

@@ -106,6 +106,14 @@ struct ContentView: View {
                     vm.resolveNames(cs)
                     vm.mergeContacts(cs)
                     session.ingestContacts(cs)
+                case .messageEdited(let chatJID, let messageID, let newText, let ts):
+                    let when = Date(timeIntervalSince1970: TimeInterval(ts))
+                    session.currentConversation?.applyIncomingEdit(
+                        chatJID: chatJID, messageID: messageID, newText: newText, at: when)
+                case .messageRevoked(let chatJID, let messageID, let revokedBy, let ts):
+                    let when = Date(timeIntervalSince1970: TimeInterval(ts))
+                    session.currentConversation?.applyIncomingRevoke(
+                        chatJID: chatJID, messageID: messageID, revokedBy: revokedBy, at: when)
                 default:
                     break
                 }

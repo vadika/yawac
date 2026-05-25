@@ -815,6 +815,45 @@ final class ConversationViewModel {
         persistLocallyDeleted(messageID: msg.id, value: true)
     }
 
+    private var pendingEdits:   OrderedDict<String, (text: String, ts: Date)> = .init(cap: 256)
+    private var pendingRevokes: OrderedDict<String, (by: String, ts: Date)>   = .init(cap: 256)
+
+    var pendingEditsCount: Int { pendingEdits.count }
+    var pendingRevokesCount: Int { pendingRevokes.count }
+
+    func applyIncomingEdit(chatJID: String, messageID: String, newText: String, at: Date) {
+        guard JIDNormalize.canonical(chatJID, client: client) == self.chatJID else { return }
+        if messages.contains(where: { $0.id == messageID }) {
+            applyLocalEdit(messageID: messageID, newText: newText, at: at)
+        } else {
+            pendingEdits[messageID] = (newText, at)
+        }
+    }
+
+    func applyIncomingRevoke(chatJID: String, messageID: String, revokedBy: String, at: Date) {
+        guard JIDNormalize.canonical(chatJID, client: client) == self.chatJID else { return }
+        if messages.contains(where: { $0.id == messageID }) {
+            applyLocalRevoke(messageID: messageID, by: revokedBy, at: at)
+        } else {
+            pendingRevokes[messageID] = (revokedBy, at)
+        }
+    }
+
+    func replayPendingForLoadedRows() {
+        let edits = pendingEdits
+        let revokes = pendingRevokes
+        for m in messages {
+            if let p = edits[m.id] {
+                applyLocalEdit(messageID: m.id, newText: p.text, at: p.ts)
+                pendingEdits.removeValue(forKey: m.id)
+            }
+            if let r = revokes[m.id] {
+                applyLocalRevoke(messageID: m.id, by: r.by, at: r.ts)
+                pendingRevokes.removeValue(forKey: m.id)
+            }
+        }
+    }
+
     private func applyLocalEdit(messageID: String, newText: String, at: Date) {
         if let idx = messages.firstIndex(where: { $0.id == messageID }) {
             let old = messages[idx]
