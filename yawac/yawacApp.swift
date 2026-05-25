@@ -6,6 +6,21 @@ import UserNotifications
 @main
 struct YawacApp: App {
     @State private var session = SessionViewModel()
+    @State private var translation: TranslationViewModel = {
+        let store = TranslationStore()
+        let mgr = TranslationModelManager()
+        mgr.refreshState()
+        let engine = TranslationEngine()
+        let vm = TranslationViewModel(store: store, model: mgr, engine: engine)
+        // Kick off engine load in the background if model is on disk
+        // already. First translate after launch is then instant.
+        if case .ready(let dir) = mgr.state {
+            Task.detached(priority: .utility) {
+                try? await engine.load(modelDir: dir)
+            }
+        }
+        return vm
+    }()
     let container: ModelContainer
 
     init() {
@@ -26,6 +41,7 @@ struct YawacApp: App {
         WindowGroup("yawac") {
             AppRoot()
                 .environment(session)
+                .environment(translation)
                 .modelContainer(container)
                 .frame(minWidth: 900, minHeight: 600)
                 .preferredColorScheme(.dark)
@@ -61,6 +77,11 @@ struct YawacApp: App {
             .keyboardShortcut("q", modifiers: .command)
         }
         .menuBarExtraStyle(.menu)
+
+        Settings {
+            SettingsView()
+                .environment(translation)
+        }
     }
 }
 
