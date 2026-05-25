@@ -7,6 +7,15 @@ struct UIMessage: Identifiable, Hashable {
     let fromMe: Bool
     let timestamp: Date
     let body: Body
+    var quotedMessageID: String? = nil
+    var quotedSenderJID: String? = nil
+    var quotedFromMe: Bool = false
+    var quotedTextSnippet: String? = nil
+    var quotedKind: String? = nil
+    var editedAt: Date? = nil
+    var revokedAt: Date? = nil
+    var revokedBy: String? = nil
+    var locallyDeleted: Bool = false
 
     enum Body: Hashable {
         case text(String)

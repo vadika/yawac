@@ -22,6 +22,19 @@ final class PersistedMessage {
     // message receive time. Persisted so cold-start can rebuild the
     // contactNames map without waiting for a live message to re-arrive.
     var senderPushName: String? = nil
+    // Quoted-message snapshot (captured at receive time so the strip
+    // still renders even if the original row is later deleted).
+    var quotedMessageID: String? = nil
+    var quotedSenderJID: String? = nil
+    var quotedFromMe: Bool = false
+    var quotedTextSnippet: String? = nil
+    var quotedKind: String? = nil
+
+    // Edit / revoke / local-delete lifecycle.
+    var editedAt: Date? = nil
+    var revokedAt: Date? = nil
+    var revokedBy: String? = nil
+    var locallyDeleted: Bool = false
 
     init(id: String, chatJID: String, senderJID: String, fromMe: Bool,
          timestamp: Date, kind: String, text: String? = nil,
@@ -30,7 +43,16 @@ final class PersistedMessage {
          mediaRefJSON: String? = nil,
          pollJSON: String? = nil,
          deliveryStatus: String = "sent",
-         senderPushName: String? = nil) {
+         senderPushName: String? = nil,
+         quotedMessageID: String? = nil,
+         quotedSenderJID: String? = nil,
+         quotedFromMe: Bool = false,
+         quotedTextSnippet: String? = nil,
+         quotedKind: String? = nil,
+         editedAt: Date? = nil,
+         revokedAt: Date? = nil,
+         revokedBy: String? = nil,
+         locallyDeleted: Bool = false) {
         self.id = id
         self.chatJID = chatJID
         self.senderJID = senderJID
@@ -45,6 +67,15 @@ final class PersistedMessage {
         self.pollJSON = pollJSON
         self.deliveryStatus = deliveryStatus
         self.senderPushName = senderPushName
+        self.quotedMessageID = quotedMessageID
+        self.quotedSenderJID = quotedSenderJID
+        self.quotedFromMe = quotedFromMe
+        self.quotedTextSnippet = quotedTextSnippet
+        self.quotedKind = quotedKind
+        self.editedAt = editedAt
+        self.revokedAt = revokedAt
+        self.revokedBy = revokedBy
+        self.locallyDeleted = locallyDeleted
     }
 }
 
