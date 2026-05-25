@@ -138,6 +138,38 @@ func (c *Client) dispatchMessage(evt *events.Message) {
 		}
 		return
 	}
+	// Edits and revokes arrive as ProtocolMessage wrappers; route them to
+	// dedicated Swift events rather than a generic "Message" bubble.
+	if pm := evt.Message.GetProtocolMessage(); pm != nil {
+		switch pm.GetType() {
+		case waE2E.ProtocolMessage_REVOKE:
+			key := pm.GetKey()
+			if key == nil {
+				return
+			}
+			b, _ := json.Marshal(JMessageRevoked{
+				ChatJID:   evt.Info.Chat.String(),
+				MessageID: key.GetID(),
+				RevokedBy: evt.Info.Sender.String(),
+				Timestamp: evt.Info.Timestamp.Unix(),
+			})
+			c.dispatch("MessageRevoked", string(b))
+			return
+		case waE2E.ProtocolMessage_MESSAGE_EDIT:
+			key := pm.GetKey()
+			if key == nil {
+				return
+			}
+			b, _ := json.Marshal(JMessageEdited{
+				ChatJID:   evt.Info.Chat.String(),
+				MessageID: key.GetID(),
+				NewText:   extractText(pm.GetEditedMessage()),
+				Timestamp: evt.Info.Timestamp.Unix(),
+			})
+			c.dispatch("MessageEdited", string(b))
+			return
+		}
+	}
 	// Poll updates (votes) are not displayed as chat entries — they
 	// become tally updates on the original poll bubble.
 	if evt.Message.GetPollUpdateMessage() != nil {
@@ -206,6 +238,22 @@ func classifyMessage(m *waE2E.Message) string {
 	default:
 		return "system"
 	}
+}
+
+// extractText returns the plain text body of a message, covering the two
+// common cases: Conversation (plain 1:1 text) and ExtendedTextMessage (links,
+// quotes). Used by the MESSAGE_EDIT handler to surface the edited body.
+func extractText(m *waE2E.Message) string {
+	if m == nil {
+		return ""
+	}
+	if t := m.GetConversation(); t != "" {
+		return t
+	}
+	if e := m.GetExtendedTextMessage(); e != nil {
+		return e.GetText()
+	}
+	return ""
 }
 
 func mediaFromImage(m *waE2E.ImageMessage) *JMedia {
