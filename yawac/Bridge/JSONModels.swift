@@ -11,7 +11,7 @@ struct BridgeMessage: Codable, Identifiable {
     let text: String?
     let media: BridgeMedia?
     let poll: BridgePoll?
-    let quotedID: String?
+    let quoted: Quoted?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -19,8 +19,22 @@ struct BridgeMessage: Codable, Identifiable {
         case senderJID = "sender_jid"
         case senderPushName = "sender_push_name"
         case fromMe = "from_me"
-        case timestamp, kind, text, media, poll
-        case quotedID = "quoted_id"
+        case timestamp, kind, text, media, poll, quoted
+    }
+
+    struct Quoted: Codable, Hashable, Equatable {
+        let messageID: String
+        let senderJID: String
+        let fromMe: Bool
+        let kind: String
+        let snippet: String
+
+        enum CodingKeys: String, CodingKey {
+            case messageID = "message_id"
+            case senderJID = "sender_jid"
+            case fromMe = "from_me"
+            case kind, snippet
+        }
     }
 }
 

@@ -60,5 +60,12 @@ extension UIMessage {
         default:
             self.body = .system(b.kind)
         }
+        if let q = b.quoted {
+            self.quotedMessageID = q.messageID
+            self.quotedSenderJID = q.senderJID
+            self.quotedFromMe = q.fromMe
+            self.quotedTextSnippet = q.snippet
+            self.quotedKind = q.kind
+        }
     }
 }

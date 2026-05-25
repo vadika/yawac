@@ -38,6 +38,8 @@ final class WAClient: PhoneValidating {
         case chatPresence(chat: String, sender: String, typing: Bool)
         case historySync(conversations: Int)
         case mediaRetry(messageID: String, ok: Bool, newDirectPath: String?, error: String?)
+        case messageEdited(chatJID: String, messageID: String, newText: String, timestamp: Int64)
+        case messageRevoked(chatJID: String, messageID: String, revokedBy: String, timestamp: Int64)
         case unknown(kind: String, payload: String)
     }
 
@@ -138,6 +140,37 @@ final class WAClient: PhoneValidating {
             targetFromMe: targetFromMe,
             emoji: emoji,
             error: &err)
+        if let err { throw err }
+        return try JSONDecoder().decode(BridgeSendResult.self, from: Data(json.utf8))
+    }
+
+    func sendTextReply(_ chatJID: String, _ body: String,
+                       quotedID: String, quotedSenderJID: String,
+                       quotedFromMe: Bool, quotedKind: String,
+                       quotedSnippet: String) throws -> BridgeSendResult {
+        var err: NSError?
+        let json = go.sendTextReply(
+            chatJID, body: body,
+            quotedID: quotedID, quotedSenderJID: quotedSenderJID,
+            quotedFromMe: quotedFromMe, quotedKind: quotedKind,
+            quotedSnippet: quotedSnippet, error: &err)
+        if let err { throw err }
+        return try JSONDecoder().decode(BridgeSendResult.self, from: Data(json.utf8))
+    }
+
+    func editText(_ chatJID: String, _ msgID: String, _ newBody: String) throws -> BridgeSendResult {
+        var err: NSError?
+        let json = go.editText(chatJID, msgID: msgID, newBody: newBody, error: &err)
+        if let err { throw err }
+        return try JSONDecoder().decode(BridgeSendResult.self, from: Data(json.utf8))
+    }
+
+    func revokeMessage(_ chatJID: String, _ msgID: String,
+                       _ targetSenderJID: String, _ targetFromMe: Bool) throws -> BridgeSendResult {
+        var err: NSError?
+        let json = go.revokeMessage(chatJID, msgID: msgID,
+                                    targetSenderJID: targetSenderJID,
+                                    targetFromMe: targetFromMe, error: &err)
         if let err { throw err }
         return try JSONDecoder().decode(BridgeSendResult.self, from: Data(json.utf8))
     }
@@ -371,6 +404,36 @@ final class WAClient: PhoneValidating {
             }
             if let r = try? dec.decode(R.self, from: data) {
                 return .mediaRetry(messageID: r.messageID, ok: r.ok, newDirectPath: r.directPath, error: r.error)
+            }
+        case "MessageEdited":
+            struct E: Codable {
+                let chatJID: String; let messageID: String
+                let newText: String; let timestamp: Int64
+                enum CodingKeys: String, CodingKey {
+                    case chatJID = "chat_jid"
+                    case messageID = "message_id"
+                    case newText = "new_text"
+                    case timestamp
+                }
+            }
+            if let e = try? dec.decode(E.self, from: data) {
+                return .messageEdited(chatJID: e.chatJID, messageID: e.messageID,
+                                      newText: e.newText, timestamp: e.timestamp)
+            }
+        case "MessageRevoked":
+            struct R: Codable {
+                let chatJID: String; let messageID: String
+                let revokedBy: String; let timestamp: Int64
+                enum CodingKeys: String, CodingKey {
+                    case chatJID = "chat_jid"
+                    case messageID = "message_id"
+                    case revokedBy = "revoked_by"
+                    case timestamp
+                }
+            }
+            if let r = try? dec.decode(R.self, from: data) {
+                return .messageRevoked(chatJID: r.chatJID, messageID: r.messageID,
+                                       revokedBy: r.revokedBy, timestamp: r.timestamp)
             }
         default:
             break
