@@ -78,6 +78,7 @@ struct MessageRow: View {
     let onDeleteForEveryone: ((UIMessage) -> Void)?
     let onDeleteForMe: ((UIMessage) -> Void)?
     let onJumpToQuoted: ((String) -> Void)?
+    let isHighlighted: Bool
 
     @Environment(TranslationViewModel.self) private var translation
 
@@ -107,7 +108,8 @@ struct MessageRow: View {
          onEdit: ((UIMessage) -> Void)? = nil,
          onDeleteForEveryone: ((UIMessage) -> Void)? = nil,
          onDeleteForMe: ((UIMessage) -> Void)? = nil,
-         onJumpToQuoted: ((String) -> Void)? = nil) {
+         onJumpToQuoted: ((String) -> Void)? = nil,
+         isHighlighted: Bool = false) {
         self.message = message
         self.status = status
         self.senderName = senderName
@@ -129,6 +131,7 @@ struct MessageRow: View {
         self.onDeleteForEveryone = onDeleteForEveryone
         self.onDeleteForMe = onDeleteForMe
         self.onJumpToQuoted = onJumpToQuoted
+        self.isHighlighted = isHighlighted
     }
 
     private static let quickReactions = ["👍", "❤️", "😂", "😮", "😢", "🙏"]
@@ -173,6 +176,13 @@ struct MessageRow: View {
                                 lineWidth: 1)
                 )
                 .foregroundStyle(message.fromMe ? Theme.ownText : Theme.otherText)
+                .background(
+                    isHighlighted
+                        ? Color.accentColor.opacity(0.18)
+                        : Color.clear,
+                    in: .rect(cornerRadius: Theme.bubbleRadius)
+                )
+                .animation(.easeOut(duration: 0.3), value: isHighlighted)
                 .contextMenu {
                     if message.revokedAt == nil, !message.locallyDeleted, !isSystemMessage {
                         Button("Reply") { onReply?(message) }

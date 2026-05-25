@@ -211,7 +211,9 @@ struct ConversationView: View {
                                             onReply: { m in vm.startReply(to: m) },
                                             onEdit: { m in vm.startEdit(m) },
                                             onDeleteForEveryone: { m in Task { await vm.deleteForEveryone(m) } },
-                                            onDeleteForMe: { m in vm.deleteForMe(m) }
+                                            onDeleteForMe: { m in vm.deleteForMe(m) },
+                                            onJumpToQuoted: { id in vm.jumpToQuoted(id: id) },
+                                            isHighlighted: vm.highlightedID == msg.id
                                         )
                                         .id(msg.id)
                                         .modifier(BottomVisibilityTracker(
@@ -265,6 +267,14 @@ struct ConversationView: View {
                                 proxy.scrollTo(last.id, anchor: .bottom)
                                 lastSeenCount = newCount
                             }
+                        }
+                        .onChange(of: vm.pendingScrollToID) { _, id in
+                            guard let id else { return }
+                            withAnimation(.easeInOut(duration: 0.25)) {
+                                proxy.scrollTo(id, anchor: .center)
+                            }
+                            vm.didFinishScroll(to: id)
+                            vm.pendingScrollToID = nil
                         }
                     }
                     if vm.peerTyping {

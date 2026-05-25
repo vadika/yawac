@@ -37,6 +37,75 @@ final class ConversationViewModel {
     /// clears after display.
     var transientError: String?
 
+    var pendingScrollToID: String?
+    var highlightedID: String?
+
+    func jumpToQuoted(id: String) {
+        if messages.contains(where: { $0.id == id }) {
+            pendingScrollToID = id
+            return
+        }
+        // Row is outside the currently-loaded window — try to fetch from
+        // SwiftData and inject. (loadHistory pages from newest; the quoted
+        // target is by id, not by position.)
+        guard let context else {
+            transientError = "Original not available"
+            return
+        }
+        let descriptor = FetchDescriptor<PersistedMessage>(
+            predicate: #Predicate { $0.id == id })
+        guard let p = try? context.fetch(descriptor).first else {
+            transientError = "Original not available"
+            return
+        }
+        let body: UIMessage.Body
+        switch p.kind {
+        case "text":
+            body = .text(p.text ?? "")
+        case "image", "video", "audio", "document", "sticker":
+            body = .media(kind: p.kind, caption: p.mediaCaption,
+                          fileName: p.mediaFileName, localPath: p.mediaPath)
+        case "poll":
+            if let json = p.pollJSON,
+               let data = json.data(using: .utf8),
+               let poll = try? JSONDecoder().decode(BridgePoll.self, from: data) {
+                body = .poll(question: poll.question,
+                             options: poll.options,
+                             selectableCount: poll.selectableCount)
+            } else {
+                body = .system(p.kind)
+            }
+        default:
+            body = .system(p.kind)
+        }
+        var m = UIMessage(
+            id: p.id, chatJID: p.chatJID, senderJID: p.senderJID,
+            fromMe: p.fromMe, timestamp: p.timestamp, body: body)
+        m.editedAt = p.editedAt
+        m.revokedAt = p.revokedAt
+        m.revokedBy = p.revokedBy
+        m.locallyDeleted = p.locallyDeleted
+        m.quotedMessageID = p.quotedMessageID
+        m.quotedSenderJID = p.quotedSenderJID
+        m.quotedFromMe = p.quotedFromMe
+        m.quotedTextSnippet = p.quotedTextSnippet
+        m.quotedKind = p.quotedKind
+
+        // Insert sorted by timestamp.
+        let idx = messages.firstIndex(where: { $0.timestamp > m.timestamp }) ?? messages.count
+        messages.insert(m, at: idx)
+        pendingScrollToID = id
+    }
+
+    func didFinishScroll(to id: String) {
+        highlightedID = id
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 1_200_000_000)
+            guard let self else { return }
+            if self.highlightedID == id { self.highlightedID = nil }
+        }
+    }
+
     private static func quotedKind(of m: UIMessage) -> String {
         switch m.body {
         case .text:                       return "text"
@@ -158,13 +227,23 @@ final class ConversationViewModel {
                 default:
                     body = .system(p.kind)
                 }
-                return UIMessage(
+                var m = UIMessage(
                     id: p.id,
                     chatJID: p.chatJID,
                     senderJID: p.senderJID,
                     fromMe: p.fromMe,
                     timestamp: p.timestamp,
                     body: body)
+                m.editedAt = p.editedAt
+                m.revokedAt = p.revokedAt
+                m.revokedBy = p.revokedBy
+                m.locallyDeleted = p.locallyDeleted
+                m.quotedMessageID = p.quotedMessageID
+                m.quotedSenderJID = p.quotedSenderJID
+                m.quotedFromMe = p.quotedFromMe
+                m.quotedTextSnippet = p.quotedTextSnippet
+                m.quotedKind = p.quotedKind
+                return m
             }
             // Hydrate persisted delivery status (fromMe only — receipts for
             // inbound messages aren't shown).
