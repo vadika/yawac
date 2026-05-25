@@ -351,6 +351,15 @@ struct MessageRow: View {
         return false
     }
 
+    /// A stable per-message prefix that flips when the message is edited,
+    /// so the in-memory translation cache is invalidated on edit.
+    private var translationSurfacePrefix: String {
+        if let ts = message.editedAt {
+            return "\(message.id)#\(Int64(ts.timeIntervalSince1970))"
+        }
+        return message.id
+    }
+
     @ViewBuilder
     private var reactionChips: some View {
         HStack(spacing: 4) {
@@ -386,7 +395,7 @@ struct MessageRow: View {
     private var existingBodyContent: some View {
         switch message.body {
         case .text(let s):
-            translatableText(surfaceID: "\(message.id):text", raw: s)
+            translatableText(surfaceID: "\(translationSurfacePrefix):text", raw: s)
         case .media(let kind, let caption, let fileName, let path):
             mediaView(kind: kind, caption: caption, fileName: fileName, path: path)
         case .poll(let q, let options, let selectable):
@@ -451,7 +460,7 @@ struct MessageRow: View {
                           selectableCount: Int) -> some View {
         let totalVotes = voteCounts.values.reduce(0, +)
         VStack(alignment: .leading, spacing: 6) {
-            translatableText(surfaceID: "\(message.id):poll-q",
+            translatableText(surfaceID: "\(translationSurfacePrefix):poll-q",
                              raw: question,
                              baseStyle: .pollQuestion)
             ForEach(Array(options.enumerated()), id: \.element.hash) { idx, opt in
@@ -466,7 +475,7 @@ struct MessageRow: View {
                         HStack(spacing: 8) {
                             Image(systemName: pollIconName(selectable: selectableCount, picked: picked))
                                 .foregroundStyle(picked ? Color.accentColor : Color.secondary)
-                            translatableText(surfaceID: "\(message.id):poll-opt-\(idx)",
+                            translatableText(surfaceID: "\(translationSurfacePrefix):poll-opt-\(idx)",
                                              raw: opt.name,
                                              baseStyle: .pollOption)
                                 .fontWeight(picked ? .semibold : .regular)
@@ -679,7 +688,7 @@ struct MessageRow: View {
                     .foregroundStyle(.secondary)
             }
             if let caption, !caption.isEmpty {
-                translatableText(surfaceID: "\(message.id):caption",
+                translatableText(surfaceID: "\(translationSurfacePrefix):caption",
                                  raw: caption,
                                  baseStyle: .caption)
             }
