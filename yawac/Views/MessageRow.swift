@@ -74,6 +74,8 @@ struct MessageRow: View {
     let mentionResolver: (String) -> String
     let onOpenChat: ((String) -> Void)?
 
+    @Environment(TranslationViewModel.self) private var translation
+
     @State private var mentionPopover: MentionTarget?
 
     struct MentionTarget: Identifiable {
@@ -156,7 +158,19 @@ struct MessageRow: View {
                                 lineWidth: 1)
                 )
                 .foregroundStyle(message.fromMe ? Theme.ownText : Theme.otherText)
-                .contextMenu { reactionMenu }
+                .contextMenu {
+                    reactionMenu
+                    if case .text(let bodyText) = message.body {
+                        let info = translation.shouldOfferTranslate(text: bodyText)
+                        if let lang = info.lang, info.offer {
+                            let name = Locale.current.localizedString(
+                                forLanguageCode: lang) ?? lang
+                            Button("Never translate \(name)") {
+                                translation.denyLanguage(lang)
+                            }
+                        }
+                    }
+                }
                 .popover(item: $mentionPopover) { target in
                     mentionPopoverContent(target: target)
                 }
@@ -299,7 +313,7 @@ struct MessageRow: View {
     private var bodyView: some View {
         switch message.body {
         case .text(let s):
-            Text(richText(from: s)).textSelection(.enabled)
+            translatableText(surfaceID: "\(message.id):text", raw: s)
         case .media(let kind, let caption, let fileName, let path):
             mediaView(kind: kind, caption: caption, fileName: fileName, path: path)
         case .poll(let q, let options, let selectable):
@@ -315,8 +329,10 @@ struct MessageRow: View {
                           selectableCount: Int) -> some View {
         let totalVotes = voteCounts.values.reduce(0, +)
         VStack(alignment: .leading, spacing: 6) {
-            Text(question).font(.callout).bold()
-            ForEach(options, id: \.hash) { opt in
+            translatableText(surfaceID: "\(message.id):poll-q",
+                             raw: question,
+                             baseStyle: .pollQuestion)
+            ForEach(Array(options.enumerated()), id: \.element.hash) { idx, opt in
                 let count = voteCounts[opt.hash] ?? 0
                 let picked = mySelections.contains(opt.hash)
                 let voterNames = (votersByOption[opt.hash] ?? [])
@@ -328,7 +344,9 @@ struct MessageRow: View {
                         HStack(spacing: 8) {
                             Image(systemName: pollIconName(selectable: selectableCount, picked: picked))
                                 .foregroundStyle(picked ? Color.accentColor : Color.secondary)
-                            Text(opt.name)
+                            translatableText(surfaceID: "\(message.id):poll-opt-\(idx)",
+                                             raw: opt.name,
+                                             baseStyle: .pollOption)
                                 .fontWeight(picked ? .semibold : .regular)
                             Spacer(minLength: 8)
                             if count > 0 {
@@ -397,6 +415,71 @@ struct MessageRow: View {
             attr[attrRange].underlineStyle = .single
         }
         return attr
+    }
+
+    /// Renders a piece of translatable text with an optional Translate /
+    /// See original footer link. `surfaceID` must be unique per surface
+    /// per message so multiple translatable pieces (text, caption, poll
+    /// question, options) can be independently toggled.
+    @ViewBuilder
+    private func translatableText(surfaceID: String,
+                                  raw: String,
+                                  baseStyle: TranslatableStyle = .body) -> some View {
+        let offer = translation.shouldOfferTranslate(text: raw)
+        let entry = translation.store.entry(for: surfaceID)
+        let inFlight = translation.store.inFlight.contains(surfaceID)
+        let displayed: String = {
+            if let entry, entry.showingTranslated {
+                return entry.translated
+            }
+            return raw
+        }()
+        VStack(alignment: .leading, spacing: 2) {
+            switch baseStyle {
+            case .body:
+                Text(richText(from: displayed)).textSelection(.enabled)
+            case .caption:
+                Text(displayed)
+                    .font(Theme.ui(12))
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            case .pollQuestion:
+                Text(displayed)
+                    .font(Theme.ui(13, weight: .semibold))
+            case .pollOption:
+                Text(displayed)
+                    .font(Theme.ui(12.5))
+            }
+            if offer.offer || entry != nil {
+                Button {
+                    Task {
+                        await translation.translate(
+                            surfaceID: surfaceID,
+                            text: raw,
+                            source: offer.lang
+                                ?? entry?.sourceLang
+                                ?? "auto")
+                    }
+                } label: {
+                    Text(footerLabel(entry: entry, inFlight: inFlight))
+                        .font(Theme.ui(11))
+                        .foregroundStyle(Theme.accent)
+                }
+                .buttonStyle(.plain)
+                .disabled(inFlight)
+            }
+        }
+    }
+
+    private func footerLabel(entry: TranslationStore.Entry?,
+                             inFlight: Bool) -> String {
+        if inFlight { return "Translating…" }
+        guard let entry else { return "Translate" }
+        return entry.showingTranslated ? "See original" : "Show translation"
+    }
+
+    enum TranslatableStyle {
+        case body, caption, pollQuestion, pollOption
     }
 
     /// Rewrites `@<digits>` to `@<display name>` and returns both the new
@@ -468,7 +551,9 @@ struct MessageRow: View {
                     .foregroundStyle(.secondary)
             }
             if let caption, !caption.isEmpty {
-                Text(richText(from: caption)).textSelection(.enabled)
+                translatableText(surfaceID: "\(message.id):caption",
+                                 raw: caption,
+                                 baseStyle: .caption)
             }
         }
     }
