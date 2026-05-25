@@ -65,13 +65,13 @@ struct ConversationView: View {
     }
 
     /// Returns the optional dot color + label for the status segment of
-    /// the header. nil → no `·` separator or status rendered (presence
-    /// unknown, group with no participant count).
+    /// the header. nil → nothing rendered.
     ///
     /// - Typing wins over online state.
     /// - Online → green dot + "online".
     /// - Offline with non-zero lastSeen → grey dot + "last seen <relative>".
-    /// - Offline with zero lastSeen → no dot + "offline" (peer hides lastSeen).
+    /// - Offline with hidden lastSeen → nothing (matches WhatsApp's UX of
+    ///   not labelling peers as "offline" when they hide last-seen privacy).
     /// - Groups: skip — presence isn't published per-group.
     private func headerStatus(isGroup: Bool) -> (Color?, String)? {
         if isGroup { return nil }
@@ -88,7 +88,7 @@ struct ConversationView: View {
             fmt.unitsStyle = .short
             return (Theme.textFaint, "last seen \(fmt.localizedString(for: date, relativeTo: Date()))")
         }
-        return (nil, "offline")
+        return nil
     }
 
     /// Custom header bar replaces SwiftUI's titlebar so we can apply
@@ -106,20 +106,14 @@ struct ConversationView: View {
                     .tracking(-0.2)
                     .foregroundStyle(Theme.titleColor)
                     .lineLimit(1)
-                HStack(spacing: 8) {
-                    Text(isGroup ? "Group" : "Direct")
-                        .font(Theme.ui(12.5))
-                        .foregroundStyle(Theme.textMuted)
-                    if let (dotColor, label) = headerStatus(isGroup: isGroup) {
-                        Text("·").foregroundStyle(Theme.textFaint).opacity(0.4)
-                        HStack(spacing: 5) {
-                            if let dotColor {
-                                Circle().fill(dotColor).frame(width: 6, height: 6)
-                            }
-                            Text(label)
-                                .font(Theme.ui(12.5))
-                                .foregroundStyle(Theme.textMuted)
+                if let (dotColor, label) = headerStatus(isGroup: isGroup) {
+                    HStack(spacing: 5) {
+                        if let dotColor {
+                            Circle().fill(dotColor).frame(width: 6, height: 6)
                         }
+                        Text(label)
+                            .font(Theme.ui(12.5))
+                            .foregroundStyle(Theme.textMuted)
                     }
                 }
             }
