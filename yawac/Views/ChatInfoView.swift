@@ -19,30 +19,42 @@ struct ChatInfoView: View {
     private var name: String { session.displayName(for: chatJID) }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                eyebrow
-                hero
-                jidRow
-                if isGroup {
-                    if loadingGroup {
-                        ProgressView().controlSize(.small).tint(Theme.accent)
-                            .frame(maxWidth: .infinity)
-                    }
-                    if let err = loadError {
-                        Text(err).font(Theme.ui(12))
-                            .foregroundStyle(Color.red.opacity(0.85))
-                    }
-                    if let g = group { groupBody(g) }
-                } else {
-                    userBody
+        VStack(spacing: 0) {
+            // ─── Title-bar gutter. 64pt matches the chat header so the
+            // inspector seam aligns with the conversation pane's seam.
+            eyebrow
+                .padding(.horizontal, 18)
+                .frame(height: 64)
+                .background(Theme.sidebarBg)
+                .overlay(alignment: .bottom) {
+                    Rectangle().fill(Theme.border).frame(height: 1)
                 }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    hero
+                    jidRow
+                    if isGroup {
+                        if loadingGroup {
+                            ProgressView().controlSize(.small).tint(Theme.accent)
+                                .frame(maxWidth: .infinity)
+                        }
+                        if let err = loadError {
+                            Text(err).font(Theme.ui(12))
+                                .foregroundStyle(Color.red.opacity(0.85))
+                        }
+                        if let g = group { groupBody(g) }
+                    } else {
+                        userBody
+                    }
+                }
+                .padding(.horizontal, 18)
+                .padding(.top, 18)
+                .padding(.bottom, 22)
             }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 22)
         }
         .background(Theme.sidebarBg)
         .frame(minWidth: 300)
+        .ignoresSafeArea(.container, edges: .top)
         .task(id: chatJID) {
             guard isGroup else { return }
             await loadGroup()
