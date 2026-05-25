@@ -16,12 +16,19 @@ final class TranslationModelManager {
     private(set) var state: State = .absent
 
     private let root: URL
-    private static let repoSlug = "mlx-community/gemma-3-4b-it-4bit"
+    /// Qwen 2.5 3B Instruct quantized to 4-bit. Text-only, multilingual
+    /// (DE/FI/EN strong), single safetensors shard (~1.8 GB), proven
+    /// loader path in mlx-swift 2.29.x. Previously tried gemma-3-4b-it
+    /// but mlx-community's checkpoint ships the multimodal vocab
+    /// (262208) which MLX's Gemma3TextModel rejects.
+    private static let repoSlug = "mlx-community/Qwen2.5-3B-Instruct-4bit"
+    private static let dirName = "Qwen2.5-3B-Instruct-4bit"
     /// Files we treat as the minimum-viable manifest. Any of these
     /// missing keeps the state at `.absent`.
     private static let requiredFiles = [
         "config.json",
         "tokenizer.json",
+        "tokenizer_config.json",
     ]
     /// At least one weight shard with this prefix must exist.
     private static let weightPrefix = "model"
@@ -42,7 +49,7 @@ final class TranslationModelManager {
     }
 
     var localDir: URL {
-        root.appendingPathComponent("models/gemma-3-4b-it-4bit",
+        root.appendingPathComponent("models/\(Self.dirName)",
                                     isDirectory: true)
     }
 
@@ -86,7 +93,7 @@ final class TranslationModelManager {
             return
         }
         let tempDir = root.appendingPathComponent(
-            "models/gemma-3-4b-it-4bit.tmp", isDirectory: true)
+            "models/\(Self.dirName).tmp", isDirectory: true)
         try? fm.removeItem(at: tempDir)
         do {
             try fm.createDirectory(at: tempDir,

@@ -26,13 +26,15 @@ final class TranslationModelManagerTests: XCTestCase {
     func testStateIsReadyWhenManifestAndShardsPresent() throws {
         let root = tempDir()
         let modelDir = root.appendingPathComponent(
-            "models/gemma-3-4b-it-4bit", isDirectory: true)
+            "models/Qwen2.5-3B-Instruct-4bit", isDirectory: true)
         try FileManager.default.createDirectory(
             at: modelDir, withIntermediateDirectories: true)
         try Data("{}".utf8).write(
             to: modelDir.appendingPathComponent("config.json"))
         try Data("{}".utf8).write(
             to: modelDir.appendingPathComponent("tokenizer.json"))
+        try Data("{}".utf8).write(
+            to: modelDir.appendingPathComponent("tokenizer_config.json"))
         try Data([0]).write(
             to: modelDir.appendingPathComponent("model.safetensors"))
 
@@ -48,13 +50,15 @@ final class TranslationModelManagerTests: XCTestCase {
     func testDeleteRemovesDirAndFlipsState() async throws {
         let root = tempDir()
         let modelDir = root.appendingPathComponent(
-            "models/gemma-3-4b-it-4bit", isDirectory: true)
+            "models/Qwen2.5-3B-Instruct-4bit", isDirectory: true)
         try FileManager.default.createDirectory(
             at: modelDir, withIntermediateDirectories: true)
         try Data("{}".utf8).write(
             to: modelDir.appendingPathComponent("config.json"))
         try Data("{}".utf8).write(
             to: modelDir.appendingPathComponent("tokenizer.json"))
+        try Data("{}".utf8).write(
+            to: modelDir.appendingPathComponent("tokenizer_config.json"))
         try Data([0]).write(
             to: modelDir.appendingPathComponent("model.safetensors"))
 

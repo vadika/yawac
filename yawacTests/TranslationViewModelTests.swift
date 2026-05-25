@@ -48,6 +48,8 @@ final class TranslationViewModelTests: XCTestCase {
                 to: dir.appendingPathComponent("config.json"))
             try? Data("{}".utf8).write(
                 to: dir.appendingPathComponent("tokenizer.json"))
+            try? Data("{}".utf8).write(
+                to: dir.appendingPathComponent("tokenizer_config.json"))
             try? Data([0]).write(
                 to: dir.appendingPathComponent("model.safetensors"))
             mgr.refreshState()
