@@ -3,17 +3,39 @@ package bridge
 // All JSON payloads exchanged with Swift are defined here for review.
 
 type JMessage struct {
-	ID             string  `json:"id"`
-	ChatJID        string  `json:"chat_jid"`
-	SenderJID      string  `json:"sender_jid"`
-	SenderPushName string  `json:"sender_push_name,omitempty"`
-	FromMe         bool    `json:"from_me"`
-	Timestamp      int64   `json:"timestamp"`
-	Kind           string  `json:"kind"` // text, image, video, audio, document, sticker, location, poll, system
-	Text           string  `json:"text,omitempty"`
-	Media          *JMedia `json:"media,omitempty"`
-	Poll           *JPoll  `json:"poll,omitempty"`
-	QuotedID       string  `json:"quoted_id,omitempty"`
+	ID             string   `json:"id"`
+	ChatJID        string   `json:"chat_jid"`
+	SenderJID      string   `json:"sender_jid"`
+	SenderPushName string   `json:"sender_push_name,omitempty"`
+	FromMe         bool     `json:"from_me"`
+	Timestamp      int64    `json:"timestamp"`
+	Kind           string   `json:"kind"` // text, image, video, audio, document, sticker, location, poll, system
+	Text           string   `json:"text,omitempty"`
+	Media          *JMedia  `json:"media,omitempty"`
+	Poll           *JPoll   `json:"poll,omitempty"`
+	Quoted         *JQuoted `json:"quoted,omitempty"`
+}
+
+type JQuoted struct {
+	MessageID string `json:"message_id"`
+	SenderJID string `json:"sender_jid"`
+	FromMe    bool   `json:"from_me"`
+	Kind      string `json:"kind"`
+	Snippet   string `json:"snippet"`
+}
+
+type JMessageEdited struct {
+	ChatJID   string `json:"chat_jid"`
+	MessageID string `json:"message_id"`
+	NewText   string `json:"new_text"`
+	Timestamp int64  `json:"timestamp"`
+}
+
+type JMessageRevoked struct {
+	ChatJID   string `json:"chat_jid"`
+	MessageID string `json:"message_id"`
+	RevokedBy string `json:"revoked_by"`
+	Timestamp int64  `json:"timestamp"`
 }
 
 type JPoll struct {
