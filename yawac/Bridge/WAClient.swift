@@ -40,6 +40,7 @@ final class WAClient: PhoneValidating {
         case mediaRetry(messageID: String, ok: Bool, newDirectPath: String?, error: String?)
         case messageEdited(chatJID: String, messageID: String, newText: String, timestamp: Int64)
         case messageRevoked(chatJID: String, messageID: String, revokedBy: String, timestamp: Int64)
+        case messageLocallyDeleted(chatJID: String, messageID: String, timestamp: Int64)
         case unknown(kind: String, payload: String)
     }
 
@@ -434,6 +435,20 @@ final class WAClient: PhoneValidating {
             if let r = try? dec.decode(R.self, from: data) {
                 return .messageRevoked(chatJID: r.chatJID, messageID: r.messageID,
                                        revokedBy: r.revokedBy, timestamp: r.timestamp)
+            }
+        case "MessageLocallyDeleted":
+            struct L: Codable {
+                let chatJID: String; let messageID: String
+                let timestamp: Int64
+                enum CodingKeys: String, CodingKey {
+                    case chatJID = "chat_jid"
+                    case messageID = "message_id"
+                    case timestamp
+                }
+            }
+            if let l = try? dec.decode(L.self, from: data) {
+                return .messageLocallyDeleted(chatJID: l.chatJID, messageID: l.messageID,
+                                              timestamp: l.timestamp)
             }
         default:
             break

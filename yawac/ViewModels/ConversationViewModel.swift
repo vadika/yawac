@@ -928,6 +928,18 @@ final class ConversationViewModel {
         }
     }
 
+    /// Apply a peer-device delete-for-me sync. Hides the row locally
+    /// without sending anything back; matches the in-app
+    /// `deleteForMe(_:)` semantics.
+    func applyIncomingLocalDelete(chatJID: String, messageID: String) {
+        guard JIDNormalize.canonical(chatJID, client: client) == self.chatJID else { return }
+        if let idx = messages.firstIndex(where: { $0.id == messageID }) {
+            messages[idx].locallyDeleted = true
+        }
+        persistLocallyDeleted(messageID: messageID, value: true)
+        chatList?.refreshPreview(chatJID: self.chatJID)
+    }
+
     func replayPendingForLoadedRows() {
         let edits = pendingEdits
         let revokes = pendingRevokes

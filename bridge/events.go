@@ -58,7 +58,21 @@ func (c *Client) handleWAEvent(evt any) {
 		c.dispatchHistory(v)
 	case *events.MediaRetry:
 		c.handleMediaRetry(v)
+	case *events.DeleteForMe:
+		c.dispatchDeleteForMe(v)
 	}
+}
+
+// dispatchDeleteForMe surfaces app-state "delete-for-me" events
+// (a message hidden on another companion device, not revoked
+// globally) to the Swift side as MessageLocallyDeleted.
+func (c *Client) dispatchDeleteForMe(evt *events.DeleteForMe) {
+	b, _ := json.Marshal(JMessageLocallyDeleted{
+		ChatJID:   evt.ChatJID.String(),
+		MessageID: evt.MessageID,
+		Timestamp: evt.Timestamp.Unix(),
+	})
+	c.dispatch("MessageLocallyDeleted", string(b))
 }
 
 func (c *Client) dispatchReceipt(evt *events.Receipt) {

@@ -108,6 +108,58 @@ func (c *Client) SendText(chatJID, body string) (string, error) {
 
 // dispatchMessage converts whatsmeow Message events to JMessage JSON.
 func (c *Client) dispatchMessage(evt *events.Message) {
+	// Edits across companion devices arrive as a SecretEncryptedMessage
+	// wrapper rather than the auto-unwrapped path. Decrypt explicitly
+	// when SecretEncType is MESSAGE_EDIT.
+	if sec := evt.Message.GetSecretEncryptedMessage(); sec != nil &&
+		sec.GetSecretEncType() == waE2E.SecretEncryptedMessage_MESSAGE_EDIT {
+		decrypted, err := c.wa.DecryptSecretEncryptedMessage(context.Background(), evt)
+		if err == nil && decrypted != nil {
+			targetID := sec.GetTargetMessageKey().GetID()
+			newText := extractText(decrypted)
+			// Some clients wrap the new payload inside a ProtocolMessage
+			// with EditedMessage; cover that too.
+			if newText == "" {
+				if pm := decrypted.GetProtocolMessage(); pm != nil {
+					newText = extractText(pm.GetEditedMessage())
+					if targetID == "" {
+						targetID = pm.GetKey().GetID()
+					}
+				}
+			}
+			b, _ := json.Marshal(JMessageEdited{
+				ChatJID:   evt.Info.Chat.String(),
+				MessageID: targetID,
+				NewText:   newText,
+				Timestamp: evt.Info.Timestamp.Unix(),
+			})
+			c.dispatch("MessageEdited", string(b))
+		} else {
+			fmt.Fprintf(os.Stderr,
+				"[yawac/enc-edit] decrypt fail chat=%s sender=%s err=%v\n",
+				evt.Info.Chat.String(), evt.Info.Sender.String(), err)
+		}
+		return
+	}
+	// Edits are auto-unwrapped by whatsmeow into evt.Message, which
+	// still carries a ProtocolMessage{Type=MESSAGE_EDIT, Key, EditedMessage}.
+	// The original message id is in the ProtocolMessage Key, the new
+	// payload is in ProtocolMessage.EditedMessage. evt.Info.ID is the
+	// edit envelope id (not the original) — don't use it.
+	if evt.IsEdit {
+		pm := evt.Message.GetProtocolMessage()
+		if pm == nil || pm.GetKey() == nil {
+			return
+		}
+		b, _ := json.Marshal(JMessageEdited{
+			ChatJID:   evt.Info.Chat.String(),
+			MessageID: pm.GetKey().GetID(),
+			NewText:   extractText(pm.GetEditedMessage()),
+			Timestamp: evt.Info.Timestamp.Unix(),
+		})
+		c.dispatch("MessageEdited", string(b))
+		return
+	}
 	if r := evt.Message.GetReactionMessage(); r != nil {
 		c.dispatchReaction(
 			evt.Info.Chat.String(),

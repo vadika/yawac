@@ -427,6 +427,49 @@ final class ChatListViewModel {
         sortChats()
     }
 
+    /// Persist a peer-device delete-for-me sync directly to the
+    /// PersistedMessage row, independent of whether the chat is
+    /// currently open. Called by the event loop on every inbound
+    /// `.messageLocallyDeleted` so the row stays hidden after restart.
+    func applyIncomingLocalDelete(chatJID: String, messageID: String) {
+        guard let context else { return }
+        let descriptor = FetchDescriptor<PersistedMessage>(
+            predicate: #Predicate { $0.id == messageID })
+        if let row = try? context.fetch(descriptor).first {
+            row.locallyDeleted = true
+            try? context.save()
+        }
+        refreshPreview(chatJID: chatJID)
+    }
+
+    /// Persist a peer-device revoke directly to PersistedMessage row,
+    /// regardless of whether the chat is currently open.
+    func applyIncomingRevoke(chatJID: String, messageID: String, revokedBy: String, at: Date) {
+        guard let context else { return }
+        let descriptor = FetchDescriptor<PersistedMessage>(
+            predicate: #Predicate { $0.id == messageID })
+        if let row = try? context.fetch(descriptor).first {
+            row.revokedAt = at
+            row.revokedBy = revokedBy
+            try? context.save()
+        }
+        refreshPreview(chatJID: chatJID)
+    }
+
+    /// Persist a peer-device edit directly to PersistedMessage row,
+    /// regardless of whether the chat is currently open.
+    func applyIncomingEdit(chatJID: String, messageID: String, newText: String, at: Date) {
+        guard let context else { return }
+        let descriptor = FetchDescriptor<PersistedMessage>(
+            predicate: #Predicate { $0.id == messageID })
+        if let row = try? context.fetch(descriptor).first {
+            row.text = newText
+            row.editedAt = at
+            try? context.save()
+        }
+        refreshPreview(chatJID: chatJID)
+    }
+
     /// Re-derive `lastMessage` / `lastTimestamp` for `chatJID` from the
     /// most-recent PersistedMessage row. Honors revoked / locally-deleted
     /// state with a 🚫 prefix. Called by CVM after edit / revoke /

@@ -38,6 +38,12 @@ type JMessageRevoked struct {
 	Timestamp int64  `json:"timestamp"`
 }
 
+type JMessageLocallyDeleted struct {
+	ChatJID   string `json:"chat_jid"`
+	MessageID string `json:"message_id"`
+	Timestamp int64  `json:"timestamp"`
+}
+
 type JPoll struct {
 	Question        string        `json:"question"`
 	Options         []JPollOption `json:"options"`

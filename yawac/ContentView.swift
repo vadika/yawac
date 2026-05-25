@@ -108,12 +108,23 @@ struct ContentView: View {
                     session.ingestContacts(cs)
                 case .messageEdited(let chatJID, let messageID, let newText, let ts):
                     let when = Date(timeIntervalSince1970: TimeInterval(ts))
+                    let canonical = JIDNormalize.canonical(chatJID, client: client)
+                    vm.applyIncomingEdit(chatJID: canonical, messageID: messageID,
+                                         newText: newText, at: when)
                     session.currentConversation?.applyIncomingEdit(
                         chatJID: chatJID, messageID: messageID, newText: newText, at: when)
                 case .messageRevoked(let chatJID, let messageID, let revokedBy, let ts):
                     let when = Date(timeIntervalSince1970: TimeInterval(ts))
+                    let canonical = JIDNormalize.canonical(chatJID, client: client)
+                    vm.applyIncomingRevoke(chatJID: canonical, messageID: messageID,
+                                           revokedBy: revokedBy, at: when)
                     session.currentConversation?.applyIncomingRevoke(
                         chatJID: chatJID, messageID: messageID, revokedBy: revokedBy, at: when)
+                case .messageLocallyDeleted(let chatJID, let messageID, _):
+                    let canonical = JIDNormalize.canonical(chatJID, client: client)
+                    vm.applyIncomingLocalDelete(chatJID: canonical, messageID: messageID)
+                    session.currentConversation?.applyIncomingLocalDelete(
+                        chatJID: chatJID, messageID: messageID)
                 default:
                     break
                 }
