@@ -230,6 +230,15 @@ func (c *Client) dispatchWebMessage(chatJID string, wm *waWeb.WebMessageInfo) {
 	case msg.GetExtendedTextMessage() != nil:
 		jm.Text = msg.GetExtendedTextMessage().GetText()
 	}
+	if ctx := contextInfoFromMessage(msg); ctx != nil && ctx.GetStanzaID() != "" {
+		jm.Quoted = &JQuoted{
+			MessageID: ctx.GetStanzaID(),
+			SenderJID: ctx.GetParticipant(),
+			FromMe:    isFromMe(c, ctx.GetParticipant()),
+			Kind:      classifyMessage(ctx.GetQuotedMessage()),
+			Snippet:   extractSnippet(ctx.GetQuotedMessage()),
+		}
+	}
 	if im := msg.GetImageMessage(); im != nil {
 		jm.Media = mediaFromImage(im)
 	} else if vm := msg.GetVideoMessage(); vm != nil {
