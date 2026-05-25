@@ -33,6 +33,36 @@ final class ConversationViewModel {
     private(set) var refreshingPolls = false
     var replyTarget: UIMessage?
     var editTarget:  UIMessage?
+    /// Surfaces fire-and-forget error to the view (toast/banner). View
+    /// clears after display.
+    var transientError: String?
+
+    private static func quotedKind(of m: UIMessage) -> String {
+        switch m.body {
+        case .text:                       return "text"
+        case .media(let kind, _, _, _):   return kind
+        case .poll:                       return "poll"
+        case .system:                     return "system"
+        }
+    }
+
+    private static func quotedSnippet(of m: UIMessage) -> String {
+        func trunc(_ s: String) -> String {
+            s.count > 120 ? String(s.prefix(120)) + "…" : s
+        }
+        switch m.body {
+        case .text(let t):
+            return trunc(t)
+        case .media(let kind, let caption, let fileName, _):
+            if let c = caption, !c.isEmpty { return trunc(c) }
+            if kind == "document", let n = fileName, !n.isEmpty { return trunc(n) }
+            return "[\(kind)]"
+        case .poll(let q, _, _):
+            return trunc(q)
+        case .system:
+            return ""
+        }
+    }
 
     func startReply(to msg: UIMessage) {
         editTarget = nil
@@ -574,26 +604,46 @@ final class ConversationViewModel {
         let body = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !body.isEmpty else { return }
         draft = ""
+
+        // Snapshot the reply target locally so we can clear state early.
+        let replyTo = replyTarget
+        replyTarget = nil
+
         do {
-            let res = try client.sendText(chatJID, body)
-            let m = UIMessage(
+            let res: BridgeSendResult
+            if let q = replyTo {
+                res = try client.sendTextReply(
+                    chatJID, body,
+                    quotedID: q.id,
+                    quotedSenderJID: q.senderJID,
+                    quotedFromMe: q.fromMe,
+                    quotedKind: Self.quotedKind(of: q),
+                    quotedSnippet: Self.quotedSnippet(of: q))
+            } else {
+                res = try client.sendText(chatJID, body)
+            }
+            var m = UIMessage(
                 id: res.messageID,
                 chatJID: chatJID,
                 senderJID: "me",
                 fromMe: true,
                 timestamp: Date(timeIntervalSince1970: TimeInterval(res.timestamp)),
                 body: .text(body))
+            if let q = replyTo {
+                m.quotedMessageID = q.id
+                m.quotedSenderJID = q.senderJID
+                m.quotedFromMe = q.fromMe
+                m.quotedKind = Self.quotedKind(of: q)
+                m.quotedTextSnippet = Self.quotedSnippet(of: q)
+            }
             messages.append(m)
             receiptStatus[m.id] = .sent
             persistOutgoing(m, kind: "text", text: body)
         } catch {
-            messages.append(UIMessage(
-                id: UUID().uuidString,
-                chatJID: chatJID,
-                senderJID: "system",
-                fromMe: false,
-                timestamp: .now,
-                body: .system("send failed: \(error.localizedDescription)")))
+            // Restore the reply target so the user can retry.
+            replyTarget = replyTo
+            draft = body
+            transientError = "Couldn't send: \(error.localizedDescription)"
         }
     }
 
@@ -719,9 +769,114 @@ final class ConversationViewModel {
         guard let context else { return }
         let row = PersistedMessage(
             id: m.id, chatJID: m.chatJID, senderJID: m.senderJID,
-            fromMe: m.fromMe, timestamp: m.timestamp, kind: kind, text: text)
+            fromMe: m.fromMe, timestamp: m.timestamp, kind: kind, text: text,
+            quotedMessageID: m.quotedMessageID,
+            quotedSenderJID: m.quotedSenderJID,
+            quotedFromMe: m.quotedFromMe,
+            quotedTextSnippet: m.quotedTextSnippet,
+            quotedKind: m.quotedKind)
         context.insert(row)
         try? context.save()
+    }
+
+    func saveEdit(_ newBody: String) async {
+        guard let m = editTarget else { return }
+        let trimmed = newBody.trimmingCharacters(in: .whitespacesAndNewlines)
+        let current: String = {
+            if case .text(let t) = m.body { return t }
+            return ""
+        }()
+        guard !trimmed.isEmpty, trimmed != current else {
+            cancelCompose()
+            return
+        }
+        do {
+            _ = try client.editText(chatJID, m.id, trimmed)
+            applyLocalEdit(messageID: m.id, newText: trimmed, at: Date())
+            editTarget = nil
+        } catch {
+            transientError = "Edit not accepted: \(error.localizedDescription)"
+        }
+    }
+
+    func deleteForEveryone(_ msg: UIMessage) async {
+        do {
+            _ = try client.revokeMessage(chatJID, msg.id, msg.senderJID, msg.fromMe)
+            applyLocalRevoke(messageID: msg.id, by: msg.senderJID, at: Date())
+        } catch {
+            transientError = "Couldn't delete for everyone: \(error.localizedDescription)"
+        }
+    }
+
+    func deleteForMe(_ msg: UIMessage) {
+        if let idx = messages.firstIndex(where: { $0.id == msg.id }) {
+            messages[idx].locallyDeleted = true
+        }
+        persistLocallyDeleted(messageID: msg.id, value: true)
+    }
+
+    private func applyLocalEdit(messageID: String, newText: String, at: Date) {
+        if let idx = messages.firstIndex(where: { $0.id == messageID }) {
+            let old = messages[idx]
+            // UIMessage.body is a let; reconstruct with the new body.
+            var r = UIMessage(
+                id: old.id, chatJID: old.chatJID,
+                senderJID: old.senderJID, fromMe: old.fromMe,
+                timestamp: old.timestamp, body: .text(newText))
+            // Preserve mutable metadata.
+            r.quotedMessageID = old.quotedMessageID
+            r.quotedSenderJID = old.quotedSenderJID
+            r.quotedFromMe = old.quotedFromMe
+            r.quotedTextSnippet = old.quotedTextSnippet
+            r.quotedKind = old.quotedKind
+            r.revokedAt = old.revokedAt
+            r.revokedBy = old.revokedBy
+            r.locallyDeleted = old.locallyDeleted
+            r.editedAt = at
+            messages[idx] = r
+        }
+        persistEdit(messageID: messageID, newText: newText, editedAt: at)
+    }
+
+    private func applyLocalRevoke(messageID: String, by jid: String, at: Date) {
+        if let idx = messages.firstIndex(where: { $0.id == messageID }) {
+            messages[idx].revokedAt = at
+            messages[idx].revokedBy = jid
+            // Bubble rendering uses revokedAt as the gate; body stays as-is.
+        }
+        persistRevoke(messageID: messageID, revokedBy: jid, revokedAt: at)
+    }
+
+    private func persistEdit(messageID: String, newText: String, editedAt: Date) {
+        guard let context else { return }
+        let descriptor = FetchDescriptor<PersistedMessage>(
+            predicate: #Predicate { $0.id == messageID })
+        if let row = try? context.fetch(descriptor).first {
+            row.text = newText
+            row.editedAt = editedAt
+            try? context.save()
+        }
+    }
+
+    private func persistRevoke(messageID: String, revokedBy: String, revokedAt: Date) {
+        guard let context else { return }
+        let descriptor = FetchDescriptor<PersistedMessage>(
+            predicate: #Predicate { $0.id == messageID })
+        if let row = try? context.fetch(descriptor).first {
+            row.revokedAt = revokedAt
+            row.revokedBy = revokedBy
+            try? context.save()
+        }
+    }
+
+    private func persistLocallyDeleted(messageID: String, value: Bool) {
+        guard let context else { return }
+        let descriptor = FetchDescriptor<PersistedMessage>(
+            predicate: #Predicate { $0.id == messageID })
+        if let row = try? context.fetch(descriptor).first {
+            row.locallyDeleted = value
+            try? context.save()
+        }
     }
 
     /// Emoji aggregated for a message (one per unique sender, latest emoji wins).
