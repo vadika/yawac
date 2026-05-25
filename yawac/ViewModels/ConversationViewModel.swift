@@ -760,7 +760,12 @@ final class ConversationViewModel {
             mediaFileName: m.media?.fileName,
             mediaRefJSON: m.media?.ref?.json,
             pollJSON: m.poll?.json,
-            senderPushName: m.senderPushName)
+            senderPushName: m.senderPushName,
+            quotedMessageID: m.quoted?.messageID,
+            quotedSenderJID: m.quoted?.senderJID,
+            quotedFromMe: m.quoted?.fromMe ?? false,
+            quotedTextSnippet: m.quoted?.snippet,
+            quotedKind: m.quoted?.kind)
         context.insert(row)
         try? context.save()
     }

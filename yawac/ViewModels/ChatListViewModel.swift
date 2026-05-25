@@ -286,7 +286,12 @@ final class ChatListViewModel {
             mediaCaption: m.media?.caption,
             mediaFileName: m.media?.fileName,
             mediaRefJSON: m.media?.ref?.json,
-            pollJSON: m.poll?.json)
+            pollJSON: m.poll?.json,
+            quotedMessageID: m.quoted?.messageID,
+            quotedSenderJID: m.quoted?.senderJID,
+            quotedFromMe: m.quoted?.fromMe ?? false,
+            quotedTextSnippet: m.quoted?.snippet,
+            quotedKind: m.quoted?.kind)
         context.insert(row)
         try? context.save()
     }
