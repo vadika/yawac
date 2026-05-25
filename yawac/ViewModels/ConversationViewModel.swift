@@ -52,6 +52,30 @@ final class ConversationViewModel {
     func loadHistory() {
         guard let context else { return }
         let jid = chatJID
+        // One-shot migration: earlier builds persisted some rows with raw
+        // (device-suffixed / @lid) chatJID via CVM.persist. Scrub anything
+        // whose canonical form matches this chat back to canonical so the
+        // primary fetch finds it. Scoped to plausibly-related rows by
+        // matching on the user portion before "@".
+        if let at = jid.firstIndex(of: "@") {
+            let userPart = String(jid[..<at])
+            let scrubDescriptor = FetchDescriptor<PersistedMessage>(
+                predicate: #Predicate { $0.chatJID != jid && $0.chatJID.contains(userPart) })
+            if let scrubRows = try? context.fetch(scrubDescriptor) {
+                var changed = 0
+                for r in scrubRows {
+                    if JIDNormalize.canonical(r.chatJID, client: client) == jid {
+                        r.chatJID = jid
+                        changed += 1
+                    }
+                }
+                if changed > 0 {
+                    try? context.save()
+                    NSLog("[yawac/cvm] migrated %d rows to canonical chatJID for %@",
+                          changed, jid)
+                }
+            }
+        }
         var descriptor = FetchDescriptor<PersistedMessage>(
             predicate: #Predicate { $0.chatJID == jid },
             sortBy: [SortDescriptor(\.timestamp, order: .reverse)])
@@ -562,14 +586,10 @@ final class ConversationViewModel {
         // events for this chat aren't dropped on the floor.
         guard JIDNormalize.canonical(b.chatJID, client: client) == chatJID else { return }
         if b.kind == "protocol" || b.kind == "system" { return }
-        // Dedupe by id (echo of fromMe send may arrive after local optimistic append)
         if messages.contains(where: { $0.id == b.id }) { return }
         messages.append(UIMessage(b))
         persist(b)
         ensureDownload(for: b)
-        // Newly-arrived inbound while chat open → send read receipt
-        // straight away (matches WhatsApp behavior of marking when
-        // visible). Outbound echoes skip this branch.
         if !b.fromMe {
             sendReadReceipts(for: [b])
         }
@@ -653,9 +673,16 @@ final class ConversationViewModel {
 
     private func persist(_ m: BridgeMessage) {
         guard let context else { return }
+        // Always store the canonical chatJID so it matches loadHistory's
+        // predicate (and ChatListViewModel.persistMessage, which is the
+        // other write path). Without this, when CVM's event loop wins
+        // the race against the sidebar's loop, the row lands with a raw
+        // (device-suffixed / @lid) chatJID and is invisible to future
+        // chat-open queries — the symptom is "sidebar shows new preview
+        // but conversation view stays stale".
         let row = PersistedMessage(
             id: m.id,
-            chatJID: m.chatJID,
+            chatJID: JIDNormalize.canonical(m.chatJID, client: client),
             senderJID: m.senderJID,
             fromMe: m.fromMe,
             timestamp: Date(timeIntervalSince1970: TimeInterval(m.timestamp)),
