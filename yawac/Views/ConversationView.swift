@@ -325,11 +325,20 @@ struct ConversationView: View {
         }
         .task(id: chatJID) {
             guard let client = session.client else { return }
-            // Reset scroll bookkeeping for the new chat.
+            // Reset scroll bookkeeping for the new chat. atBottom starts
+            // false — the BottomVisibilityTracker on the last row flips it
+            // true via .onAppear once that row enters the viewport. If
+            // we anchor to first-unread (above bottom), the last row
+            // never appears, atBottom stays false, and the chevron is
+            // free to show as expected.
             didInitialScroll = false
+            atBottom = false
             lastSeenCount = 0
             let vm = ConversationViewModel(chatJID: chatJID, client: client, context: modelContext)
             vm.loadHistory()
+            // markRead AFTER loadHistory so the unread snapshot used for
+            // the scroll anchor isn't pre-cleared.
+            session.chatList?.markRead(chatJID)
             vm.markAllAsRead()
             // Background-refresh poll tallies if any poll is in view. The
             // primary phone's response carries the current pollUpdates

@@ -13,6 +13,10 @@ final class SessionViewModel {
     var state: State = .loading
     var qrCode: String?
     var client: WAClient?
+    /// Back-ref to the chat list VM so views (e.g. ConversationView) can
+    /// invoke side-effects like `markRead` without threading it through
+    /// every constructor. Set once from ContentView's boot path.
+    weak var chatList: ChatListViewModel?
     var syncing: Bool = false
     var syncedConversations: Int = 0
     var contactNames: [String: String] = [:]

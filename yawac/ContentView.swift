@@ -38,7 +38,11 @@ struct ContentView: View {
         .onChange(of: selectedChat) { _, new in
             guard let new else { return }
             lastSelectedChatJID = new
-            chatList?.markRead(new)
+            // markRead intentionally NOT called here. ConversationView's
+            // .task calls it AFTER loadHistory snapshots unread so the
+            // initial scroll anchor (first-unread vs. bottom) is computed
+            // against fresh data on every open, regardless of SwiftUI's
+            // .onChange / .task evaluation order on cold start.
             // If user selected a community parent that has a default sub-group,
             // redirect selection to that sub-group so they land in Announcements.
             if let parent = chatList?.chats.first(where: { $0.jid == new && $0.isCommunityParent }),
@@ -57,6 +61,7 @@ struct ContentView: View {
             guard let client = session.client else { return }
             let vm = ChatListViewModel(client: client, context: modelContext)
             vm.session = session
+            session.chatList = vm
             self.chatList = vm
             self.chatSearch = ChatSearchViewModel(listVM: vm, validator: client)
             // Restore last-opened chat if it's in our chats list.
