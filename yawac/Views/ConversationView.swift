@@ -207,7 +207,11 @@ struct ConversationView: View {
                                             mentionResolver: { jid in session.displayName(for: jid) },
                                             onOpenChat: { jid in
                                                 session.requestSelectChat(jid)
-                                            }
+                                            },
+                                            onReply: { m in vm.startReply(to: m) },
+                                            onEdit: { m in vm.startEdit(m) },
+                                            onDeleteForEveryone: { m in Task { await vm.deleteForEveryone(m) } },
+                                            onDeleteForMe: { m in vm.deleteForMe(m) }
                                         )
                                         .id(msg.id)
                                         .modifier(BottomVisibilityTracker(

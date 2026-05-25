@@ -73,6 +73,11 @@ struct MessageRow: View {
     let onReact: ((String) -> Void)?  // pass "" to clear our reaction
     let mentionResolver: (String) -> String
     let onOpenChat: ((String) -> Void)?
+    let onReply: ((UIMessage) -> Void)?
+    let onEdit: ((UIMessage) -> Void)?
+    let onDeleteForEveryone: ((UIMessage) -> Void)?
+    let onDeleteForMe: ((UIMessage) -> Void)?
+    let onJumpToQuoted: ((String) -> Void)?
 
     @Environment(TranslationViewModel.self) private var translation
 
@@ -97,7 +102,12 @@ struct MessageRow: View {
          myReaction: String? = nil,
          onReact: ((String) -> Void)? = nil,
          mentionResolver: @escaping (String) -> String = { $0 },
-         onOpenChat: ((String) -> Void)? = nil) {
+         onOpenChat: ((String) -> Void)? = nil,
+         onReply: ((UIMessage) -> Void)? = nil,
+         onEdit: ((UIMessage) -> Void)? = nil,
+         onDeleteForEveryone: ((UIMessage) -> Void)? = nil,
+         onDeleteForMe: ((UIMessage) -> Void)? = nil,
+         onJumpToQuoted: ((String) -> Void)? = nil) {
         self.message = message
         self.status = status
         self.senderName = senderName
@@ -114,6 +124,11 @@ struct MessageRow: View {
         self.onReact = onReact
         self.mentionResolver = mentionResolver
         self.onOpenChat = onOpenChat
+        self.onReply = onReply
+        self.onEdit = onEdit
+        self.onDeleteForEveryone = onDeleteForEveryone
+        self.onDeleteForMe = onDeleteForMe
+        self.onJumpToQuoted = onJumpToQuoted
     }
 
     private static let quickReactions = ["👍", "❤️", "😂", "😮", "😢", "🙏"]
@@ -159,22 +174,48 @@ struct MessageRow: View {
                 )
                 .foregroundStyle(message.fromMe ? Theme.ownText : Theme.otherText)
                 .contextMenu {
-                    reactionMenu
-                    if case .text(let bodyText) = message.body {
-                        let info = translation.shouldOfferTranslate(text: bodyText)
-                        if let lang = info.lang, info.offer {
-                            let name = Locale.current.localizedString(
-                                forLanguageCode: lang) ?? lang
-                            Button("Never translate \(name)") {
-                                translation.denyLanguage(lang)
+                    if message.revokedAt == nil, !message.locallyDeleted, !isSystemMessage {
+                        Button("Reply") { onReply?(message) }
+                        Divider()
+                    }
+                    if message.revokedAt == nil, !message.locallyDeleted {
+                        reactionMenu
+                        if case .text(let bodyText) = message.body {
+                            let info = translation.shouldOfferTranslate(text: bodyText)
+                            if let lang = info.lang, info.offer {
+                                let name = Locale.current.localizedString(
+                                    forLanguageCode: lang) ?? lang
+                                Button("Never translate \(name)") {
+                                    translation.denyLanguage(lang)
+                                }
                             }
+                        }
+                        if case .text(let bodyText) = message.body, !bodyText.isEmpty {
+                            Button("Copy text") {
+                                NSPasteboard.general.clearContents()
+                                NSPasteboard.general.setString(bodyText, forType: .string)
+                            }
+                        }
+                        Divider()
+                    }
+                    if MessageLifecycle.canEdit(message) {
+                        Button("Edit") { onEdit?(message) }
+                    }
+                    if MessageLifecycle.canRevoke(message) {
+                        Button("Delete for everyone", role: .destructive) {
+                            onDeleteForEveryone?(message)
+                        }
+                    }
+                    if !message.locallyDeleted, message.revokedAt == nil {
+                        Button("Delete for me", role: .destructive) {
+                            onDeleteForMe?(message)
                         }
                     }
                 }
                 .popover(item: $mentionPopover) { target in
                     mentionPopoverContent(target: target)
                 }
-                if !reactions.isEmpty {
+                if !reactions.isEmpty, message.revokedAt == nil, !message.locallyDeleted {
                     reactionChips
                 }
             }
@@ -295,6 +336,11 @@ struct MessageRow: View {
         return false
     }
 
+    private var isSystemMessage: Bool {
+        if case .system = message.body { return true }
+        return false
+    }
+
     @ViewBuilder
     private var reactionChips: some View {
         HStack(spacing: 4) {
@@ -311,6 +357,23 @@ struct MessageRow: View {
 
     @ViewBuilder
     private var bodyView: some View {
+        if message.revokedAt != nil {
+            tombstoneText(message.fromMe ? "You deleted this message"
+                                         : "This message was deleted")
+        } else if message.locallyDeleted {
+            tombstoneText("You deleted this for yourself")
+        } else {
+            VStack(alignment: message.fromMe ? .trailing : .leading, spacing: 4) {
+                if message.quotedMessageID != nil {
+                    quotedStrip
+                }
+                existingBodyContent
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var existingBodyContent: some View {
         switch message.body {
         case .text(let s):
             translatableText(surfaceID: "\(message.id):text", raw: s)
@@ -321,6 +384,55 @@ struct MessageRow: View {
         case .system(let s):
             Text(s).font(.caption).foregroundStyle(.secondary)
         }
+    }
+
+    @ViewBuilder
+    private func tombstoneText(_ s: String) -> some View {
+        Text(s)
+            .italic()
+            .font(Theme.ui(12.5))
+            .foregroundStyle(Theme.textMuted)
+    }
+
+    @ViewBuilder
+    private var quotedStrip: some View {
+        Button {
+            if let id = message.quotedMessageID {
+                onJumpToQuoted?(id)
+            }
+        } label: {
+            HStack(alignment: .top, spacing: 6) {
+                Rectangle()
+                    .fill(Theme.accent)
+                    .frame(width: 3)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(quotedSenderDisplay)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Theme.text)
+                    Text(message.quotedTextSnippet ?? "")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.textMuted)
+                        .lineLimit(2)
+                }
+            }
+            .padding(.vertical, 4)
+            .padding(.horizontal, 6)
+            .background(Theme.surfaceAlt, in: .rect(cornerRadius: 4))
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .disabled(onJumpToQuoted == nil)
+    }
+
+    private var quotedSenderDisplay: String {
+        if message.quotedFromMe { return "You" }
+        let jid = message.quotedSenderJID ?? ""
+        let resolved = mentionResolver(jid)
+        if !resolved.isEmpty, resolved != jid { return resolved }
+        if let at = jid.firstIndex(of: "@") {
+            return String(jid[..<at])
+        }
+        return jid
     }
 
     @ViewBuilder
@@ -523,6 +635,12 @@ struct MessageRow: View {
                 .font(Theme.mono(10.5))
                 .monospacedDigit()
                 .foregroundStyle(Theme.textFaint)
+            if message.editedAt != nil {
+                Text("· edited")
+                    .font(Theme.mono(10.5))
+                    .foregroundStyle(Theme.textFaint)
+                    .help("Edited \(message.editedAt!.formatted(.relative(presentation: .named)))")
+            }
             if message.fromMe, let status {
                 Image(systemName: statusIcon(status))
                     .font(.system(size: 11, weight: .medium))
