@@ -2,6 +2,42 @@
 
 Local build, project layout, troubleshooting, and release flow for `yawac`.
 
+## Architecture
+
+```
+┌──────────────────────────────────────────────┐
+│  yawac.app (SwiftUI)                         │
+│  ┌────────────────────────────────────────┐  │
+│  │  Views (SwiftUI)                       │  │
+│  │  Login · ChatList · Conversation       │  │
+│  │  ViewModels (@Observable @MainActor)   │  │
+│  │  Session · ChatList · Conversation     │  │
+│  │  Groups · Notification · MediaCache    │  │
+│  └─────────────────┬──────────────────────┘  │
+│                    │ AsyncStream<Event>      │
+│  ┌─────────────────▼──────────────────────┐  │
+│  │  WAClient (@MainActor wrapper)         │  │
+│  │  • multicast event fanout              │  │
+│  │  • Codable JSON ⇄ BridgeMessage etc.   │  │
+│  └─────────────────┬──────────────────────┘  │
+└────────────────────┼─────────────────────────┘
+                     │ Objective-C bridge
+┌────────────────────▼─────────────────────────┐
+│  Bridge.xcframework (gomobile-built)         │
+│  Go package: bridge/                         │
+│  ┌────────────────────────────────────────┐  │
+│  │  Client wraps *whatsmeow.Client        │  │
+│  │  EventSink interface → Swift callbacks │  │
+│  │  JSON payloads for complex types       │  │
+│  └─────────────────┬──────────────────────┘  │
+│  ┌─────────────────▼──────────────────────┐  │
+│  │  whatsmeow + sqlstore + modernc sqlite │  │
+│  └────────────────────────────────────────┘  │
+└──────────────────────────────────────────────┘
+```
+
+The Go bridge exposes a flat, gomobile-friendly API: basic types (string, int, []byte) and JSON strings for complex payloads. Swift wraps the generated Objective-C classes in a `@MainActor` `WAClient` actor that publishes a multicast `AsyncStream<Event>`.
+
 ## Requirements
 
 - macOS 14 (Sonoma) or newer
