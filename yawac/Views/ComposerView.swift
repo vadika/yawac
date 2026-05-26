@@ -67,6 +67,15 @@ struct ComposerView: View {
                     }
                     return .ignored
                 }
+                .onKeyPress(.upArrow) {
+                    // Empty-draft ↑ recalls the last editable own
+                    // message — Slack / iMessage / Telegram convention.
+                    guard vm.editTarget == nil, vm.replyTarget == nil,
+                          vm.draft.isEmpty
+                    else { return .ignored }
+                    vm.editLastOwnMessage()
+                    return vm.editTarget == nil ? .ignored : .handled
+                }
 
             Button {
                 // Emoji picker placeholder — system emoji panel via menu.

@@ -183,6 +183,21 @@ struct MessageRow: View {
                     in: .rect(cornerRadius: Theme.bubbleRadius)
                 )
                 .animation(.easeOut(duration: 0.3), value: isHighlighted)
+                .simultaneousGesture(
+                    TapGesture(count: 2).onEnded {
+                        guard message.revokedAt == nil,
+                              !message.locallyDeleted,
+                              !isSystemMessage
+                        else { return }
+                        if message.fromMe {
+                            if MessageLifecycle.canEdit(message) {
+                                onEdit?(message)
+                            }
+                        } else {
+                            onReply?(message)
+                        }
+                    }
+                )
                 .overlay(
                     Group {
                         if !message.locallyDeleted, !isSystemMessage {

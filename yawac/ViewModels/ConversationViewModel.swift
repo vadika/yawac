@@ -147,6 +147,17 @@ final class ConversationViewModel {
         editTarget = msg
     }
 
+    /// Pulls up the most recent own text message that's still within the
+    /// edit window and starts editing it. Used by the arrow-up keyboard
+    /// shortcut in the composer when the draft is empty. No-op when
+    /// nothing eligible is found.
+    func editLastOwnMessage() {
+        guard let msg = messages.reversed().first(where: { m in
+            MessageLifecycle.canEdit(m)
+        }) else { return }
+        startEdit(msg)
+    }
+
     func cancelCompose() {
         replyTarget = nil
         editTarget = nil
