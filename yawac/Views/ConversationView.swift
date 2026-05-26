@@ -33,6 +33,20 @@ struct ConversationView: View {
     @State private var showInfo = false
     @State private var atBottom = true
 
+    @ViewBuilder
+    private var inspectorPane: some View {
+        ChatInfoView(
+            chatJID: chatJID,
+            onClose: { showInfo = false },
+            onJumpToMessage: jumpToMessage,
+            messageRevision: vm?.messages.count ?? 0
+        )
+    }
+
+    private func jumpToMessage(_ id: String) {
+        vm?.jumpToQuoted(id: id)
+    }
+
     /// Walks messages in chronological order, prepending a `.dateHeader`
     /// whenever the day changes.
     private func timeline() -> [TimelineItem] {
@@ -318,10 +332,8 @@ struct ConversationView: View {
         }
         .animation(.easeOut(duration: 0.2), value: currentSyncState)
         .inspector(isPresented: $showInfo) {
-            ChatInfoView(chatJID: chatJID) {
-                showInfo = false
-            }
-            .inspectorColumnWidth(min: 280, ideal: 340, max: 480)
+            inspectorPane
+                .inspectorColumnWidth(min: 280, ideal: 340, max: 480)
         }
         // Drives the window title (visible in the Window menu + dock
         // context menu + screen readers even with the title bar hidden).

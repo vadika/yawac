@@ -9,13 +9,23 @@ struct ChatInfoView: View {
     /// instead of the inspector (the inspector content shares the
     /// window's dismiss environment).
     var onClose: (() -> Void)? = nil
+    /// Forwarded into Shared Media / Files cells — called with the
+    /// tapped message id so the conversation pane can scroll + flash
+    /// the original bubble. Plumbed by `ConversationView`.
+    var onJumpToMessage: ((String) -> Void)? = nil
+    /// Bumps whenever the conversation message list changes (new
+    /// inbound, history sync). Drives a re-fetch of the SHARED MEDIA
+    /// / FILES sections so they pick up newly-persisted rows.
+    var messageRevision: Int = 0
     @Environment(SessionViewModel.self) private var session
+    @Environment(\.modelContext) private var modelContext
     @State private var group: BridgeGroupModel?
     @State private var loadingGroup = false
     @State private var loadError: String?
     @State private var linkedGroups: [BridgeGroupModel] = []
     @State private var userAbout: String?
     @State private var loadingUserInfo = false
+    @State private var mediaVM: ChatMediaViewModel?
 
     private var isGroup: Bool { chatJID.hasSuffix("@g.us") }
     private var name: String { session.displayName(for: chatJID) }
@@ -63,6 +73,12 @@ struct ChatInfoView: View {
             } else {
                 await loadUserInfo()
             }
+            let vm = ChatMediaViewModel(chatJID: chatJID, context: modelContext)
+            vm.reload(limit: nil)
+            mediaVM = vm
+        }
+        .onChange(of: messageRevision) { _, _ in
+            mediaVM?.reload(limit: nil)
         }
     }
 
@@ -171,6 +187,8 @@ struct ChatInfoView: View {
             .init(label: "Search", icon: "magnifyingglass"),
             .init(label: "Block", icon: "hand.raised", destructive: true),
         ])
+        sharedMediaSection
+        filesSection
     }
 
     @MainActor
@@ -209,6 +227,9 @@ struct ChatInfoView: View {
                   destructive: true),
         ])
 
+        sharedMediaSection
+        filesSection
+
         sectionLabel("PARTICIPANTS", trailing: "\(g.participants.count)")
         VStack(spacing: 0) {
             ForEach(sortedParticipants(g.participants), id: \.jid) { p in
@@ -225,6 +246,58 @@ struct ChatInfoView: View {
                     Rectangle().fill(Theme.hairline).frame(height: 1)
                 }
             }
+        }
+    }
+
+    // ─── Shared media + files ────────────────────────────────────────
+    @ViewBuilder
+    private var sharedMediaSection: some View {
+        if let vm = mediaVM, vm.mediaTotal > 0 {
+            VStack(alignment: .leading, spacing: 8) {
+                sectionLabel("SHARED MEDIA", trailing: "\(vm.mediaTotal)")
+                LazyVGrid(
+                    columns: Array(
+                        repeating: GridItem(.flexible(maximum: 108),
+                                            spacing: 6,
+                                            alignment: .leading),
+                        count: 3),
+                    alignment: .leading,
+                    spacing: 6
+                ) {
+                    ForEach(vm.media) { item in
+                        SharedMediaCell(item: item, onTap: jumpOrOpen)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var filesSection: some View {
+        if let vm = mediaVM, vm.filesTotal > 0 {
+            VStack(alignment: .leading, spacing: 4) {
+                sectionLabel("FILES", trailing: "\(vm.filesTotal)")
+                VStack(spacing: 0) {
+                    ForEach(vm.files) { item in
+                        SharedFileRow(item: item, onTap: jumpOrOpen)
+                        if item.id != vm.files.last?.id {
+                            Rectangle().fill(Theme.hairline).frame(height: 1)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Cell tap policy: if the parent supplied an `onJumpToMessage`
+    /// callback (i.e. we're inside the conversation inspector),
+    /// scroll the conversation to the original bubble; otherwise
+    /// fall back to opening the file in the system default app.
+    private func jumpOrOpen(messageID: String, fallbackPath: String?) {
+        if let onJumpToMessage {
+            onJumpToMessage(messageID)
+        } else if let p = fallbackPath, FileManager.default.fileExists(atPath: p) {
+            NSWorkspace.shared.open(URL(fileURLWithPath: p))
         }
     }
 
