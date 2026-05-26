@@ -1,12 +1,14 @@
+import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
 struct ComposerView: View {
     @Bindable var vm: ConversationViewModel
+    @Environment(SessionViewModel.self) private var session
     @FocusState private var focused: Bool
 
     var body: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: 8) {
             replyChip
             editChip
             inputRow
@@ -19,6 +21,9 @@ struct ComposerView: View {
             if let m = vm.editTarget {
                 if case .text(let t) = m.body { vm.draft = t }
             }
+        }
+        .onChange(of: vm.replyTarget?.id) { _, new in
+            if new != nil { focused = true }
         }
     }
 
@@ -115,31 +120,14 @@ struct ComposerView: View {
     @ViewBuilder
     private var replyChip: some View {
         if let q = vm.replyTarget {
-            HStack(alignment: .top, spacing: 8) {
-                Rectangle()
-                    .fill(Theme.accent)
-                    .frame(width: 3)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(replySenderLabel(for: q))
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(Theme.text)
-                    Text(replyPreview(for: q))
-                        .font(Theme.ui(11))
-                        .foregroundStyle(Theme.textMuted)
-                        .lineLimit(2)
-                }
-                Spacer()
-                Button {
-                    vm.cancelCompose()
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(Theme.textMuted)
-                }
-                .buttonStyle(.plain)
-                .help("Cancel reply")
-            }
-            .padding(8)
-            .background(Theme.surfaceAlt, in: RoundedRectangle(cornerRadius: 6))
+            ReplyPreview(
+                author: replyAuthorName(for: q),
+                text: replySnippet(for: q),
+                mediaKind: replyMediaKind(for: q),
+                mediaThumbnailPath: replyThumbnailPath(for: q),
+                onCancel: { vm.cancelCompose() }
+            )
+            .transition(.move(edge: .bottom).combined(with: .opacity))
         }
     }
 
@@ -168,27 +156,44 @@ struct ComposerView: View {
         }
     }
 
-    private func replySenderLabel(for m: UIMessage) -> String {
-        if m.fromMe { return "Replying to yourself" }
-        if let i = m.senderJID.firstIndex(of: "@") {
-            return "Replying to " + String(m.senderJID[..<i])
-        }
-        return "Replying to " + m.senderJID
+    private func replyAuthorName(for m: UIMessage) -> String {
+        if m.fromMe { return "yourself" }
+        let name = session.displayName(for: m.senderJID)
+        return name.isEmpty ? m.senderJID : name
     }
 
-    private func replyPreview(for m: UIMessage) -> String {
+    private func replySnippet(for m: UIMessage) -> String {
         switch m.body {
         case .text(let t):
             return t
-        case .media(let kind, let caption, let fileName, _):
+        case .media(_, let caption, let fileName, _):
             if let c = caption, !c.isEmpty { return c }
-            if kind == "document", let n = fileName, !n.isEmpty { return n }
-            return "[\(kind)]"
+            if let n = fileName, !n.isEmpty { return n }
+            return ""
         case .poll(let q, _, _):
             return q
         case .system(let s):
             return s
         }
+    }
+
+    private func replyMediaKind(for m: UIMessage) -> String? {
+        if case .media(let kind, _, _, _) = m.body { return kind }
+        return nil
+    }
+
+    private func replyThumbnailPath(for m: UIMessage) -> String? {
+        guard case .media(let kind, _, _, let embedded) = m.body,
+              kind == "image" || kind == "sticker" || kind == "video"
+        else { return nil }
+        // MessageRow resolves media via vm.localPaths (populated from
+        // MediaCache + persisted store) — embedded localPath on the
+        // UIMessage is often nil for inbound media until it lands. Look
+        // up by message id first, then fall back to the embedded path.
+        if let resolved = vm.localPaths[m.id], !resolved.isEmpty {
+            return resolved
+        }
+        return embedded
     }
 
     private func attachFile() {
