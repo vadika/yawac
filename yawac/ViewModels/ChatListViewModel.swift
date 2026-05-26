@@ -231,15 +231,28 @@ final class ChatListViewModel {
             }()
             if !message.fromMe,
                let push = message.senderPushName, !push.isEmpty,
-               looksLikePhonePlaceholder {
+               looksLikePhonePlaceholder,
+               !chatJID.hasSuffix("@broadcast") {
                 c.name = push
+            }
+            if chatJID.hasSuffix("@broadcast"),
+               let resolved = session?.displayName(for: chatJID),
+               c.name != resolved {
+                c.name = resolved
             }
             chats[idx] = c
             upsertPersisted(c, preview: c.lastMessage)
         } else {
+            let initialName: String
+            if chatJID.hasSuffix("@broadcast"),
+               let resolved = session?.displayName(for: chatJID), !resolved.isEmpty {
+                initialName = resolved
+            } else {
+                initialName = chatJID
+            }
             let c = Chat(
                 jid: chatJID,
-                name: chatJID,
+                name: initialName,
                 lastMessage: preview,
                 lastTimestamp: now,
                 unread: (!alreadySeen && !message.fromMe) ? 1 : 0)
