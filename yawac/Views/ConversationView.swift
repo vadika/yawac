@@ -39,8 +39,13 @@ struct ConversationView: View {
             chatJID: chatJID,
             onClose: { showInfo = false },
             onJumpToMessage: jumpToMessage,
-            messageRevision: vm?.messages.count ?? 0
+            messageRevision: (vm?.messages.count ?? 0) + (vm?.localPaths.count ?? 0),
+            mediaPathResolver: resolveMediaPath
         )
+    }
+
+    private func resolveMediaPath(_ id: String) -> String? {
+        vm?.localPaths[id]
     }
 
     private func jumpToMessage(_ id: String) {

@@ -30,6 +30,12 @@ final class ChatMediaViewModel {
 
     let chatJID: String
     private let context: ModelContext?
+    /// Optional external override that maps messageID → on-disk path.
+    /// Plumbed from `ConversationViewModel.localPaths` so the info
+    /// pane can resolve media paths that landed via the in-flight
+    /// MediaCache download (and thus aren't backfilled into
+    /// PersistedMessage.mediaPath yet).
+    var externalPathResolver: ((String) -> String?)?
 
     init(chatJID: String, context: ModelContext?) {
         self.chatJID = chatJID
@@ -38,6 +44,11 @@ final class ChatMediaViewModel {
 
     private func resolvePath(_ stored: String?, id: String,
                              diskPaths: [String: String]) -> String? {
+        if let external = externalPathResolver?(id),
+           !external.isEmpty,
+           FileManager.default.fileExists(atPath: external) {
+            return external
+        }
         if let stored, FileManager.default.fileExists(atPath: stored) {
             return stored
         }

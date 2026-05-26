@@ -67,7 +67,7 @@ struct SharedMediaCell: View {
         }
         .buttonStyle(.plain)
         .help(item.timestamp.formatted(date: .abbreviated, time: .shortened))
-        .task(id: item.id) {
+        .task(id: "\(item.id)|\(item.path ?? "")") {
             await load()
         }
     }
@@ -151,7 +151,7 @@ struct SharedFileRow: View {
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
-        .disabled(item.path == nil)
+        .disabled(item.path == nil && onTap == nil)
     }
 
     private var formattedSize: String? {

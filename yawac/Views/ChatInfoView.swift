@@ -17,6 +17,11 @@ struct ChatInfoView: View {
     /// inbound, history sync). Drives a re-fetch of the SHARED MEDIA
     /// / FILES sections so they pick up newly-persisted rows.
     var messageRevision: Int = 0
+    /// Optional messageID → local file path lookup, sourced from
+    /// `ConversationViewModel.localPaths`. Lets shared-media cells
+    /// pick up just-downloaded files even when the persisted row
+    /// still has a nil mediaPath.
+    var mediaPathResolver: ((String) -> String?)? = nil
     @Environment(SessionViewModel.self) private var session
     @Environment(\.modelContext) private var modelContext
     @State private var group: BridgeGroupModel?
@@ -74,10 +79,12 @@ struct ChatInfoView: View {
                 await loadUserInfo()
             }
             let vm = ChatMediaViewModel(chatJID: chatJID, context: modelContext)
+            vm.externalPathResolver = mediaPathResolver
             vm.reload(limit: nil)
             mediaVM = vm
         }
         .onChange(of: messageRevision) { _, _ in
+            mediaVM?.externalPathResolver = mediaPathResolver
             mediaVM?.reload(limit: nil)
         }
     }
