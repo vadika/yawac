@@ -282,6 +282,13 @@ final class WAClient: PhoneValidating {
         return try JSONDecoder().decode([BridgeContact].self, from: Data(json.utf8))
     }
 
+    func getUserInfo(jid: String) throws -> BridgeUserInfo {
+        var err: NSError?
+        let json = go.getUserInfo(jid, error: &err)
+        if let err { throw err }
+        return try JSONDecoder().decode(BridgeUserInfo.self, from: Data(json.utf8))
+    }
+
     nonisolated func checkOnWhatsApp(_ phone: String) throws -> PhoneCheckResult {
         var err: NSError?
         let json = go.check(onWhatsApp: phone, error: &err)

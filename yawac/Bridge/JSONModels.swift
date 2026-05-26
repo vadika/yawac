@@ -234,3 +234,8 @@ struct BridgeContact: Codable, Identifiable {
         case businessName = "business_name"
     }
 }
+
+struct BridgeUserInfo: Codable {
+    let jid: String
+    let status: String?
+}

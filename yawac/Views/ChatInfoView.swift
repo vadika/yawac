@@ -14,6 +14,8 @@ struct ChatInfoView: View {
     @State private var loadingGroup = false
     @State private var loadError: String?
     @State private var linkedGroups: [BridgeGroupModel] = []
+    @State private var userAbout: String?
+    @State private var loadingUserInfo = false
 
     private var isGroup: Bool { chatJID.hasSuffix("@g.us") }
     private var name: String { session.displayName(for: chatJID) }
@@ -56,8 +58,11 @@ struct ChatInfoView: View {
         .frame(minWidth: 300)
         .ignoresSafeArea(.container, edges: .top)
         .task(id: chatJID) {
-            guard isGroup else { return }
-            await loadGroup()
+            if isGroup {
+                await loadGroup()
+            } else {
+                await loadUserInfo()
+            }
         }
     }
 
@@ -100,11 +105,14 @@ struct ChatInfoView: View {
                         .tracking(1)
                         .foregroundStyle(Theme.textMuted)
                 } else if !isGroup {
-                    HStack(spacing: 6) {
-                        Circle().fill(Theme.onlineDot).frame(width: 7, height: 7)
-                        Text("Online")
+                    if let about = userAbout, !about.isEmpty {
+                        Text(about)
                             .font(Theme.ui(12))
                             .foregroundStyle(Theme.textMuted)
+                            .multilineTextAlignment(.center)
+                            .textSelection(.enabled)
+                    } else if loadingUserInfo {
+                        ProgressView().controlSize(.small).tint(Theme.accent)
                     }
                 }
             }
@@ -163,6 +171,16 @@ struct ChatInfoView: View {
             .init(label: "Search", icon: "magnifyingglass"),
             .init(label: "Block", icon: "hand.raised", destructive: true),
         ])
+    }
+
+    @MainActor
+    private func loadUserInfo() async {
+        guard let client = session.client else { return }
+        userAbout = nil
+        loadingUserInfo = true
+        defer { loadingUserInfo = false }
+        let info = try? client.getUserInfo(jid: chatJID)
+        userAbout = info?.status
     }
 
     // ─── Group body ──────────────────────────────────────────────────
