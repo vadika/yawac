@@ -83,6 +83,8 @@ struct MessageRow: View {
     @Environment(TranslationViewModel.self) private var translation
 
     @State private var mentionPopover: MentionTarget?
+    @State private var showContextMenu: Bool = false
+    @State private var contextMenuAnchor: UnitPoint = .center
 
     struct MentionTarget: Identifiable {
         let id = UUID()
@@ -134,8 +136,6 @@ struct MessageRow: View {
         self.isHighlighted = isHighlighted
     }
 
-    private static let quickReactions = ["👍", "❤️", "😂", "😮", "😢", "🙏"]
-
     /// Returns true when the bubble should render the sender header
     /// (avatar + name). Applies to multi-poster chats: groups, broadcast
     /// lists, and the Status feed (`status@broadcast`).
@@ -183,44 +183,38 @@ struct MessageRow: View {
                     in: .rect(cornerRadius: Theme.bubbleRadius)
                 )
                 .animation(.easeOut(duration: 0.3), value: isHighlighted)
-                .contextMenu {
-                    if message.revokedAt == nil, !message.locallyDeleted, !isSystemMessage {
-                        Button("Reply") { onReply?(message) }
-                        Divider()
-                    }
-                    if message.revokedAt == nil, !message.locallyDeleted {
-                        reactionMenu
-                        if case .text(let bodyText) = message.body {
-                            let info = translation.shouldOfferTranslate(text: bodyText)
-                            if let lang = info.lang, info.offer {
-                                let name = Locale.current.localizedString(
-                                    forLanguageCode: lang) ?? lang
-                                Button("Never translate \(name)") {
-                                    translation.denyLanguage(lang)
-                                }
+                .overlay(
+                    Group {
+                        if !message.locallyDeleted, !isSystemMessage {
+                            RightClickCatcher { point in
+                                contextMenuAnchor = point
+                                showContextMenu = true
                             }
                         }
-                        if case .text(let bodyText) = message.body, !bodyText.isEmpty {
-                            Button("Copy text") {
+                    }
+                )
+                .popover(isPresented: $showContextMenu,
+                         attachmentAnchor: .point(contextMenuAnchor),
+                         arrowEdge: .bottom) {
+                    MessageContextMenu(
+                        message: message,
+                        canEdit: MessageLifecycle.canEdit(message),
+                        canRevoke: MessageLifecycle.canRevoke(message),
+                        onPickReaction: { emoji in onReact?(emoji) },
+                        onReply: { onReply?(message) },
+                        onForward: {},
+                        onCopyText: {
+                            if case .text(let body) = message.body, !body.isEmpty {
                                 NSPasteboard.general.clearContents()
-                                NSPasteboard.general.setString(bodyText, forType: .string)
+                                NSPasteboard.general.setString(body, forType: .string)
                             }
-                        }
-                        Divider()
-                    }
-                    if MessageLifecycle.canEdit(message) {
-                        Button("Edit") { onEdit?(message) }
-                    }
-                    if MessageLifecycle.canRevoke(message) {
-                        Button("Delete for everyone", role: .destructive) {
-                            onDeleteForEveryone?(message)
-                        }
-                    }
-                    if !message.locallyDeleted, message.revokedAt == nil {
-                        Button("Delete for me", role: .destructive) {
-                            onDeleteForMe?(message)
-                        }
-                    }
+                        },
+                        onStar: {},
+                        onDeleteForMe: { onDeleteForMe?(message) },
+                        onDeleteForEveryone: { onDeleteForEveryone?(message) },
+                        onEdit: { onEdit?(message) },
+                        dismiss: { showContextMenu = false }
+                    )
                 }
                 .popover(item: $mentionPopover) { target in
                     mentionPopoverContent(target: target)
@@ -324,26 +318,6 @@ struct MessageRow: View {
         }
         .padding(12)
         .frame(minWidth: 220)
-    }
-
-    @ViewBuilder
-    private var reactionMenu: some View {
-        if let onReact, !isSystemBody {
-            Section("React") {
-                ForEach(Self.quickReactions, id: \.self) { e in
-                    Button(myReaction == e ? "\(e) (clear)" : e) {
-                        // Tapping the active emoji clears; tapping a new one
-                        // replaces (WhatsApp allows one reaction per user).
-                        onReact(myReaction == e ? "" : e)
-                    }
-                }
-            }
-        }
-    }
-
-    private var isSystemBody: Bool {
-        if case .system = message.body { return true }
-        return false
     }
 
     private var isSystemMessage: Bool {
