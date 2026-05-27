@@ -6,6 +6,7 @@ import UserNotifications
 @main
 struct YawacApp: App {
     @State private var session = SessionViewModel()
+    @State private var menuBar = MenuBarController()
     @State private var translation: TranslationViewModel = {
         let store = TranslationStore()
         let mgr = TranslationModelManager()
@@ -47,6 +48,7 @@ struct YawacApp: App {
                 .preferredColorScheme(.dark)
                 .background(Theme.bg)
                 .graphiteWindow()
+                .onAppear { menuBar.install(session: session) }
         }
         .windowStyle(.hiddenTitleBar)
         .commands {
@@ -58,25 +60,6 @@ struct YawacApp: App {
                 .keyboardShortcut("Q", modifiers: [.command, .shift])
             }
         }
-
-        MenuBarExtra("yawac",
-                     image: session.totalUnread > 0 ? "MenuBarActive" : "MenuBarIdle") {
-            if session.totalUnread > 0 {
-                Text("\(session.totalUnread) unread")
-                    .foregroundStyle(.secondary)
-                Divider()
-            }
-            Button("Show / Hide Window") {
-                WindowToggler.toggleMain()
-            }
-            .keyboardShortcut("h", modifiers: [.command, .shift])
-            Divider()
-            Button("Quit yawac") {
-                NSApp.terminate(nil)
-            }
-            .keyboardShortcut("q", modifiers: .command)
-        }
-        .menuBarExtraStyle(.menu)
 
         Settings {
             SettingsView()
