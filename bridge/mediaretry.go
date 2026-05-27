@@ -36,6 +36,21 @@ func (c *Client) RequestMediaRetry(chatJID, senderJID, msgID string, fromMe bool
 	}
 
 	isGroup := chat.Server == types.GroupServer
+	// Group participants are persisted with their @lid form, but the
+	// phone indexed the original message by the sender's @s.whatsapp.net
+	// (PN) identity. The retry receipt's `participant` attr feeds into
+	// the GCM AAD on the response notification — if we send LID and the
+	// phone expects PN (or the inverse) the tag fails to verify and we
+	// see "message authentication failed". Canonicalise to PN whenever
+	// the store has a mapping.
+	if isGroup && sender.Server == types.HiddenUserServer && c.wa.Store != nil && c.wa.Store.LIDs != nil {
+		if pn, perr := c.wa.Store.LIDs.GetPNForLID(context.Background(), sender); perr == nil && !pn.IsEmpty() {
+			fmt.Fprintf(os.Stderr,
+				"[yawac/media-retry] LID→PN sender=%s pn=%s msgID=%s\n",
+				sender, pn, msgID)
+			sender = pn
+		}
+	}
 	info := &types.MessageInfo{
 		MessageSource: types.MessageSource{
 			Chat:     chat,

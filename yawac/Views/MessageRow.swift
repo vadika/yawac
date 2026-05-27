@@ -772,14 +772,21 @@ struct MessageRow: View {
     @ViewBuilder
     private func downloadingPlaceholder(_ icon: String) -> some View {
         if let err = downloadError {
+            let expired = err == "media expired"
             HStack(spacing: 6) {
-                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                Image(systemName: expired ? "clock.badge.xmark" : "exclamationmark.triangle.fill")
+                    .foregroundStyle(expired ? Theme.textFaint : .orange)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Download failed").font(.caption)
-                    Text(err).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
+                    Text(expired ? "Media no longer available" : "Download failed")
+                        .font(.caption)
+                        .foregroundStyle(expired ? Theme.textMuted : Theme.text)
+                    if !expired {
+                        Text(err).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
+                    }
                 }
                 if let retry = onRetryDownload {
-                    Button("Retry", action: retry).buttonStyle(.borderless).font(.caption)
+                    Button(expired ? "Refetch" : "Retry", action: retry)
+                        .buttonStyle(.borderless).font(.caption)
                 }
             }
         } else {

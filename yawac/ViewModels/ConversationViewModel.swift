@@ -24,6 +24,10 @@ final class ConversationViewModel {
     // phone with redundant SendMediaRetryReceipt calls if download retries
     // keep failing.
     private var retriesRequested: Set<String> = []
+    /// Set once per chat session after an auto-backfill burst for
+    /// expired media. Stops the loadHistory pass from re-firing the
+    /// burst on every refresh.
+    private var didAutoRefetchExpired = false
     // On-demand older-history state. `loadingOlder` is private(set) so the
     // view can read it for the spinner; `olderUnavailable` is set when a
     // RequestOlderHistory call produced no new rows within the wait window,
@@ -307,6 +311,7 @@ final class ConversationViewModel {
 
             // Seed localPaths from any persisted media files, then kick off
             // downloads for media (images/stickers) that we don't have on disk yet.
+            var expiredOnLoad: [PersistedMessage] = []
             for p in rows {
                 if let path = p.mediaPath, FileManager.default.fileExists(atPath: path) {
                     localPaths[p.id] = path
@@ -324,6 +329,13 @@ final class ConversationViewModel {
                     localPaths[p.id] = cached
                     continue
                 }
+                if p.mediaExpired {
+                    // Server has aged this media out — bytes are gone.
+                    // Skip re-attempts on every chat reload.
+                    downloadErrors[p.id] = "media expired"
+                    expiredOnLoad.append(p)
+                    continue
+                }
 
                 guard let refJSON = p.mediaRefJSON else {
                     // Persisted before mediaRefJSON column existed — no way to
@@ -332,6 +344,16 @@ final class ConversationViewModel {
                     continue
                 }
                 ensureDownloadFromHistory(id: p.id, kind: p.kind, refJSON: refJSON)
+            }
+
+            // Auto-refetch: once per chat per session, ask the primary
+            // device to re-upload the window that covers our oldest
+            // expired media. One backfill batch may bring fresh refs for
+            // many messages at once.
+            if !didAutoRefetchExpired, let oldest = expiredOnLoad.min(by: { $0.timestamp < $1.timestamp }) {
+                didAutoRefetchExpired = true
+                let ids = expiredOnLoad.map { $0.id }
+                autoRefetchExpiredBatch(anchor: oldest, allIDs: ids)
             }
 
             // Pick initial scroll anchor: if there are unread inbound
@@ -487,9 +509,113 @@ final class ConversationViewModel {
         downloadTasks[messageID]?.cancel()
         downloadTasks[messageID] = nil
         // User-tap retry clears the once-per-session MediaRetry guard so the
-        // phone can be re-asked.
+        // phone can be re-asked. Also unlatch the persisted media-expired
+        // flag — the user explicitly asked us to try again, and if we
+        // first backfill via history-sync the primary device may have
+        // returned fresh keys.
         retriesRequested.remove(messageID)
+        clearMediaExpiredFlag(messageID)
         ensureDownloadFromHistory(id: messageID, kind: kind, refJSON: refJSON)
+    }
+
+    /// Triggered when the user hits the retry affordance on a bubble we
+    /// previously marked `mediaExpired`. Issues an on-demand history-sync
+    /// request anchored at the failing message's timestamp so the
+    /// primary device gets a chance to re-upload the bytes with a fresh
+    /// MediaKey. After ~10s we re-attempt the download.
+    func refetchExpiredMedia(messageID: String) {
+        guard let context else { return }
+        let descriptor = FetchDescriptor<PersistedMessage>(predicate: #Predicate { $0.id == messageID })
+        guard let row = try? context.fetch(descriptor).first else { return }
+        let kind = row.kind
+        clearMediaExpiredFlag(messageID)
+        downloadErrors[messageID] = "asking phone to re-upload…"
+        let chat = chatJID
+        let senderJID = row.senderJID
+        let fromMe = row.fromMe
+        let ts = Int64(row.timestamp.timeIntervalSince1970)
+        let client = self.client
+        Task { [weak self] in
+            do {
+                try client.requestOlderHistory(
+                    chatJID: chat,
+                    oldestMsgID: messageID,
+                    oldestSenderJID: senderJID,
+                    oldestFromMe: fromMe,
+                    oldestTimestampSec: ts,
+                    count: 50)
+            } catch {
+                await MainActor.run {
+                    self?.downloadErrors[messageID] = "backfill failed: \(error.localizedDescription)"
+                }
+                return
+            }
+            try? await Task.sleep(nanoseconds: 10_000_000_000)
+            await MainActor.run {
+                guard let self else { return }
+                // Re-read row in case applyHistorySync persisted a fresher
+                // refJSON in the meantime.
+                let d = FetchDescriptor<PersistedMessage>(predicate: #Predicate { $0.id == messageID })
+                if let fresh = try? self.context?.fetch(d).first,
+                   let ref = fresh.mediaRefJSON {
+                    self.retriesRequested.remove(messageID)
+                    self.ensureDownloadFromHistory(id: messageID, kind: kind, refJSON: ref)
+                }
+            }
+        }
+    }
+
+    /// Fires once per chat session when at least one media row is
+    /// already flagged `mediaExpired`. Issues a single backfill
+    /// request anchored at the oldest expired message — the primary
+    /// device's response covers ~50 messages around that timestamp,
+    /// so we typically refresh refs for many expired media in one
+    /// shot. After waiting for the HistorySync to land we clear the
+    /// expired flag on each candidate and re-attempt the download.
+    private func autoRefetchExpiredBatch(anchor: PersistedMessage, allIDs: [String]) {
+        let chat = chatJID
+        let senderJID = anchor.senderJID
+        let fromMe = anchor.fromMe
+        let anchorID = anchor.id
+        let ts = Int64(anchor.timestamp.timeIntervalSince1970)
+        let client = self.client
+        Task { [weak self] in
+            do {
+                try client.requestOlderHistory(
+                    chatJID: chat,
+                    oldestMsgID: anchorID,
+                    oldestSenderJID: senderJID,
+                    oldestFromMe: fromMe,
+                    oldestTimestampSec: ts,
+                    count: 50)
+            } catch {
+                // Best-effort; don't surface — manual Refetch stays available.
+                return
+            }
+            try? await Task.sleep(nanoseconds: 10_000_000_000)
+            await MainActor.run {
+                guard let self else { return }
+                for id in allIDs {
+                    self.clearMediaExpiredFlag(id)
+                    self.retriesRequested.remove(id)
+                    let d = FetchDescriptor<PersistedMessage>(predicate: #Predicate { $0.id == id })
+                    if let row = try? self.context?.fetch(d).first,
+                       let ref = row.mediaRefJSON {
+                        self.downloadErrors[id] = nil
+                        self.ensureDownloadFromHistory(id: id, kind: row.kind, refJSON: ref)
+                    }
+                }
+            }
+        }
+    }
+
+    private func clearMediaExpiredFlag(_ id: String) {
+        guard let context else { return }
+        let descriptor = FetchDescriptor<PersistedMessage>(predicate: #Predicate { $0.id == id })
+        if let row = try? context.fetch(descriptor).first, row.mediaExpired {
+            row.mediaExpired = false
+            try? context.save()
+        }
     }
 
     func retryHandler(for message: UIMessage) -> (() -> Void)? {
@@ -498,8 +624,16 @@ final class ConversationViewModel {
         let id = message.id
         let descriptor = FetchDescriptor<PersistedMessage>(
             predicate: #Predicate { $0.id == id })
-        guard let row = try? context.fetch(descriptor).first,
-              let refJSON = row.mediaRefJSON else { return nil }
+        guard let row = try? context.fetch(descriptor).first else { return nil }
+        // When the row is already marked expired, retry chains through the
+        // history-sync re-upload request first. Otherwise hit the normal
+        // download path directly.
+        if row.mediaExpired {
+            return { [weak self] in
+                self?.refetchExpiredMedia(messageID: id)
+            }
+        }
+        guard let refJSON = row.mediaRefJSON else { return nil }
         return { [weak self] in
             self?.retryDownload(messageID: id, kind: kind, refJSON: refJSON)
         }
@@ -631,12 +765,44 @@ final class ConversationViewModel {
                     self.downloadErrors[id] = nil
                 case .failed(let reason):
                     self.downloadErrors[id] = reason
-                    self.tryRequestMediaRetry(messageID: id, reason: reason)
+                    // First failure → ask phone to re-upload. Second
+                    // failure (i.e. we already requested retry once and
+                    // it still mismatches) → the bytes are gone for good
+                    // on the server side. Mark expired so we stop trying.
+                    if self.retriesRequested.contains(id),
+                       self.looksLikeExpiredError(reason) {
+                        self.markMediaExpired(id, reason: reason)
+                    } else {
+                        self.tryRequestMediaRetry(messageID: id, reason: reason)
+                    }
                 case .missingRef:
                     self.downloadErrors[id] = "no ref"
                 }
             }
             self?.downloadTasks[id] = nil
+        }
+    }
+
+    private func looksLikeExpiredError(_ reason: String) -> Bool {
+        let r = reason.lowercased()
+        return r.contains("plaintext sha mismatch")
+            || r.contains("hash of media ciphertext")
+            || r.contains("status code 410")
+            || r.contains("status code 404")
+            // Retry-path failures: phone responded but our MediaKey can't
+            // decrypt the notification, or phone said no.
+            || r.contains("failed to decrypt notification")
+            || r.contains("message authentication failed")
+            || r.contains("phone retry returned no path")
+    }
+
+    private func markMediaExpired(_ id: String, reason: String) {
+        downloadErrors[id] = "media expired"
+        guard let context else { return }
+        let descriptor = FetchDescriptor<PersistedMessage>(predicate: #Predicate { $0.id == id })
+        if let row = try? context.fetch(descriptor).first {
+            row.mediaExpired = true
+            try? context.save()
         }
     }
 
@@ -672,7 +838,12 @@ final class ConversationViewModel {
         guard let row = try? context.fetch(descriptor).first,
               let oldRefJSON = row.mediaRefJSON else { return }
         if !ok {
-            downloadErrors[messageID] = "phone retry failed: \(error ?? "?")"
+            let reason = "phone retry failed: \(error ?? "?")"
+            if looksLikeExpiredError(reason) {
+                markMediaExpired(messageID, reason: reason)
+            } else {
+                downloadErrors[messageID] = reason
+            }
             return
         }
         guard let newPath = newDirectPath, !newPath.isEmpty else {

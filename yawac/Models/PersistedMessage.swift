@@ -36,6 +36,14 @@ final class PersistedMessage {
     var revokedBy: String? = nil
     var locallyDeleted: Bool = false
 
+    /// Set when one full download + MediaRetry cycle has already failed
+    /// with a plaintext-SHA mismatch or unrecoverable 4xx. WhatsApp ages
+    /// out old media from its CDN; once we hit this state for a given
+    /// message the bytes are gone server-side and no client-side retry
+    /// can recover them. We persist the flag so relaunches don't hammer
+    /// the server with the same hopeless downloads.
+    var mediaExpired: Bool = false
+
     init(id: String, chatJID: String, senderJID: String, fromMe: Bool,
          timestamp: Date, kind: String, text: String? = nil,
          mediaPath: String? = nil, mediaCaption: String? = nil,
