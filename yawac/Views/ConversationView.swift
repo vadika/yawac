@@ -411,7 +411,11 @@ struct ConversationView: View {
         }
         // Drives the window title (visible in the Window menu + dock
         // context menu + screen readers even with the title bar hidden).
-        .navigationTitle("yawac — \(session.displayName(for: chatJID))")
+        // SwiftUI's navigationTitle takes a plain String — no AttributedString
+        // overload — so we use U+1D432 MATHEMATICAL BOLD SMALL Y which the
+        // system font renders bold even in unstyled contexts (Window menu,
+        // Dock context menu, screen readers).
+        .navigationTitle("𝐲 - \(session.displayName(for: chatJID))")
         .onDrop(of: [.fileURL], isTargeted: nil) { providers in
             guard let vm else { return false }
             for p in providers {
