@@ -287,8 +287,28 @@ final class ChatListViewModel {
 
     private func persistMessage(_ m: BridgeMessage) {
         guard let context else { return }
+        let id = m.id
+
+        // Upsert: history-sync replays sometimes deliver fresher media
+        // refs than what we first persisted — see ConversationViewModel
+        // for the long story. Refresh media fields on an existing row
+        // instead of letting @Attribute(.unique) silently drop the new
+        // arrival.
+        let descriptor = FetchDescriptor<PersistedMessage>(predicate: #Predicate { $0.id == id })
+        if let existing = try? context.fetch(descriptor).first {
+            if let ref = m.media?.ref?.json, ref != existing.mediaRefJSON {
+                existing.mediaRefJSON = ref
+                existing.mediaExpired = false
+            }
+            if let p = m.media?.filePath, !p.isEmpty { existing.mediaPath = p }
+            if let c = m.media?.caption, !c.isEmpty { existing.mediaCaption = c }
+            if let f = m.media?.fileName, !f.isEmpty { existing.mediaFileName = f }
+            try? context.save()
+            return
+        }
+
         let row = PersistedMessage(
-            id: m.id,
+            id: id,
             chatJID: JIDNormalize.canonical(m.chatJID, client: client),
             senderJID: m.senderJID,
             fromMe: m.fromMe,

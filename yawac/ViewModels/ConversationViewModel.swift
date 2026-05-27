@@ -1012,9 +1012,37 @@ final class ConversationViewModel {
         // (device-suffixed / @lid) chatJID and is invisible to future
         // chat-open queries — the symptom is "sidebar shows new preview
         // but conversation view stays stale".
+        let canonChat = JIDNormalize.canonical(m.chatJID, client: client)
+        let id = m.id
+
+        // Upsert: history-sync replays sometimes deliver fresher media
+        // refs (mediaKey, directPath, hashes) than what we first
+        // persisted — the original ingest may have happened before the
+        // primary device's session was warm. With @Attribute(.unique)
+        // a blind insert silently fails and the stale ref stays, so
+        // re-attempts keep using the broken bytes. If the row already
+        // exists, refresh the media fields in place instead.
+        let descriptor = FetchDescriptor<PersistedMessage>(predicate: #Predicate { $0.id == id })
+        if let existing = try? context.fetch(descriptor).first {
+            if let ref = m.media?.ref?.json, ref != existing.mediaRefJSON {
+                existing.mediaRefJSON = ref
+                // Fresh ref means we should try downloading again, even
+                // if we'd previously latched it as expired.
+                existing.mediaExpired = false
+            }
+            if let p = m.media?.filePath, !p.isEmpty { existing.mediaPath = p }
+            if let c = m.media?.caption, !c.isEmpty { existing.mediaCaption = c }
+            if let f = m.media?.fileName, !f.isEmpty { existing.mediaFileName = f }
+            if let push = m.senderPushName, !push.isEmpty {
+                existing.senderPushName = push
+            }
+            try? context.save()
+            return
+        }
+
         let row = PersistedMessage(
-            id: m.id,
-            chatJID: JIDNormalize.canonical(m.chatJID, client: client),
+            id: id,
+            chatJID: canonChat,
             senderJID: m.senderJID,
             fromMe: m.fromMe,
             timestamp: Date(timeIntervalSince1970: TimeInterval(m.timestamp)),
