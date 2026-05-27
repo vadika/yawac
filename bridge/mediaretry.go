@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 
 	"go.mau.fi/whatsmeow"
 	waMmsRetry "go.mau.fi/whatsmeow/proto/waMmsRetry"
@@ -36,21 +35,12 @@ func (c *Client) RequestMediaRetry(chatJID, senderJID, msgID string, fromMe bool
 	}
 
 	isGroup := chat.Server == types.GroupServer
-	// Group participants are persisted with their @lid form, but the
-	// phone indexed the original message by the sender's @s.whatsapp.net
-	// (PN) identity. The retry receipt's `participant` attr feeds into
-	// the GCM AAD on the response notification — if we send LID and the
-	// phone expects PN (or the inverse) the tag fails to verify and we
-	// see "message authentication failed". Canonicalise to PN whenever
-	// the store has a mapping.
-	if isGroup && sender.Server == types.HiddenUserServer && c.wa.Store != nil && c.wa.Store.LIDs != nil {
-		if pn, perr := c.wa.Store.LIDs.GetPNForLID(context.Background(), sender); perr == nil && !pn.IsEmpty() {
-			fmt.Fprintf(os.Stderr,
-				"[yawac/media-retry] LID→PN sender=%s pn=%s msgID=%s\n",
-				sender, pn, msgID)
-			sender = pn
-		}
-	}
+	// Do NOT canonicalize LID→PN for the retry receipt's `participant`
+	// attr. WhatsApp indexes group messages by the LID form on the
+	// phone — sending PN there makes the phone respond with NOT_FOUND
+	// for messages it actually has. This matches mautrix/whatsapp's
+	// reference implementation, which passes msg.Sender through
+	// untouched for groups.
 	info := &types.MessageInfo{
 		MessageSource: types.MessageSource{
 			Chat:     chat,
@@ -89,21 +79,6 @@ func (c *Client) handleMediaRetry(evt *events.MediaRetry) {
 		// Not one of ours — could be a retry triggered by another device.
 		return
 	}
-
-	hasError := evt.Error != nil
-	hasCipher := evt.Ciphertext != nil
-	errCode := 0
-	if evt.Error != nil {
-		errCode = evt.Error.Code
-	}
-	mkPrefix := ""
-	if len(ref.MediaKey) >= 4 {
-		mkPrefix = fmt.Sprintf("%x", ref.MediaKey[:4])
-	}
-	fmt.Fprintf(os.Stderr,
-		"[yawac/media-retry] evt msgID=%s mk_prefix=%s mediaKey=%dB cipher=%dB iv=%dB error=%v code=%d\n",
-		msgID, mkPrefix, len(ref.MediaKey), len(evt.Ciphertext), len(evt.IV), hasError, errCode)
-	_ = hasCipher
 
 	retryData, err := whatsmeow.DecryptMediaRetryNotification(evt, ref.MediaKey)
 	if err != nil {
