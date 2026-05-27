@@ -9,13 +9,17 @@ A native macOS SwiftUI client backed by [tulir/whatsmeow](https://github.com/tul
 - QR-based device pairing (multi-device protocol)
 - Text, image, and file messaging — 1:1 and groups
 - Drag-and-drop attachments, inline image rendering
+- Push-and-hold voice notes (Opus/PTT, slide-up to cancel)
 - Reactions, reply / quote, edit, revoke, delete-for-me
+- Star messages (⌘S) — synced via appstate
+- Pin chats — pinned section at the top of the sidebar
+- Pin messages in chat — banner above the conversation, jump on tap
 - Right-click message menu with quick-reaction strip
 - Shortcuts: double-click to edit/reply, ↑ to recall last own message
 - On-device translation (Apple Translation framework)
-- Chat inspector: contact About text, shared media grid, files list — click any item to jump to its message
+- Chat inspector: contact About text, starred messages, shared media grid, files list — click any item to jump to its message
 - Read receipts, typing indicators, presence
-- Peer-device sync (edits / delete-for-me) via SecretEncrypted
+- Peer-device sync (edits / delete-for-me / star / pin) via appstate + SecretEncrypted
 - History sync, macOS native notifications
 
 ## Install via Homebrew
