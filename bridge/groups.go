@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/types"
@@ -78,6 +79,11 @@ func (c *Client) ListGroups() (string, error) {
 // GetGroupInfo returns JSON of a single JGroup for `jid`, including
 // fresh participants. Uses whatsmeow's GetGroupInfo (which queries the
 // server). Returns ("", error) on failure.
+//
+// Retries once on ErrNotConnected — the inspector pane can be opened
+// during the noise-handshake window right after launch / reconnect,
+// where whatsmeow's socket isn't ready yet. A brief wait usually lets
+// the second call succeed.
 func (c *Client) GetGroupInfo(jidStr string) (string, error) {
 	if c.wa == nil {
 		return "", errors.New("client closed")
@@ -87,6 +93,10 @@ func (c *Client) GetGroupInfo(jidStr string) (string, error) {
 		return "", fmt.Errorf("parse jid: %w", err)
 	}
 	g, err := c.wa.GetGroupInfo(context.Background(), jid)
+	if errors.Is(err, whatsmeow.ErrNotConnected) {
+		time.Sleep(750 * time.Millisecond)
+		g, err = c.wa.GetGroupInfo(context.Background(), jid)
+	}
 	if err != nil {
 		return "", fmt.Errorf("get group: %w", err)
 	}

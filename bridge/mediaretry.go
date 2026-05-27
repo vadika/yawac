@@ -70,6 +70,21 @@ func (c *Client) RequestMediaRetry(chatJID, senderJID, msgID string, fromMe bool
 // handleMediaRetry decrypts an incoming MediaRetry event using the stashed
 // MediaKey, then dispatches a "MediaRetry" event to Swift with either the
 // fresh DirectPath (on success) or an error string.
+//
+// Group history media can hit two unrecoverable error paths here:
+//
+//  1. `failed to decrypt notification: cipher: message authentication failed`
+//     — the stored MediaKey doesn't derive the same GCM key the phone used.
+//     Likely the phone re-keyed the media after our history sync ran.
+//  2. result = NOT_FOUND — phone can't find the (msgID, participant) tuple.
+//
+// Both fall through to Swift's `mediaExpired` latch. Empirically the only
+// known recovery for (1) is to re-pair the client so the primary device
+// re-emits history-sync with current keys. TODO: open an upstream
+// whatsmeow issue with our diagnostic data — the mediaKey-only derivation
+// fails for ~half of LID-addressed group retries in our reproduction, and
+// the 6 obvious salted variants we tried (using whatsmeow_message_secrets)
+// didn't match either, so the protocol detail is still hidden.
 func (c *Client) handleMediaRetry(evt *events.MediaRetry) {
 	msgID := evt.MessageID
 	c.retryMu.Lock()
