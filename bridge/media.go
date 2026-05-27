@@ -207,6 +207,58 @@ func (c *Client) SendAudio(chatJID, filePath string) (string, error) {
 	return string(out), nil
 }
 
+// SendVoiceNote uploads filePath as a push-to-talk AudioMessage (PTT).
+// filePath must be an Ogg-Opus container (mime "audio/ogg; codecs=opus").
+// durationSec is the playback length in seconds; waveformB64 is the
+// base64-encoded 64-byte 6-bit log-meter digest WhatsApp uses to draw
+// the bubble's waveform. PTT=true is what makes phones render the
+// voice-bubble UI (play button + waveform) instead of a plain audio
+// file attachment.
+func (c *Client) SendVoiceNote(chatJID, filePath string, durationSec int32, waveformB64 string) (string, error) {
+	if c.wa == nil {
+		return "", errors.New("client closed")
+	}
+	jid, err := types.ParseJID(chatJID)
+	if err != nil {
+		return "", fmt.Errorf("parse jid: %w", err)
+	}
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return "", fmt.Errorf("read file: %w", err)
+	}
+	waveform, err := base64.StdEncoding.DecodeString(waveformB64)
+	if err != nil {
+		return "", fmt.Errorf("decode waveform: %w", err)
+	}
+
+	up, err := c.wa.Upload(context.Background(), data, whatsmeow.MediaAudio)
+	if err != nil {
+		return "", fmt.Errorf("upload: %w", err)
+	}
+
+	mime := "audio/ogg; codecs=opus"
+	seconds := uint32(durationSec)
+	ptt := true
+	msg := &waE2E.Message{AudioMessage: &waE2E.AudioMessage{
+		URL:           &up.URL,
+		DirectPath:    &up.DirectPath,
+		MediaKey:      up.MediaKey,
+		Mimetype:      proto.String(mime),
+		FileEncSHA256: up.FileEncSHA256,
+		FileSHA256:    up.FileSHA256,
+		FileLength:    proto.Uint64(uint64(len(data))),
+		Seconds:       &seconds,
+		PTT:           &ptt,
+		Waveform:      waveform,
+	}}
+	resp, err := c.wa.SendMessage(context.Background(), jid, msg)
+	if err != nil {
+		return "", fmt.Errorf("send voice note: %w", err)
+	}
+	out, _ := json.Marshal(JSendResult{MessageID: resp.ID, Timestamp: resp.Timestamp.Unix()})
+	return string(out), nil
+}
+
 // SendDocument uploads filePath as a DocumentMessage with caption + filename.
 // Mime auto-detected; falls back to application/octet-stream.
 func (c *Client) SendDocument(chatJID, filePath, caption string) (string, error) {

@@ -6,11 +6,16 @@ struct ComposerView: View {
     @Bindable var vm: ConversationViewModel
     @Environment(SessionViewModel.self) private var session
     @FocusState private var focused: Bool
+    @State private var recorder = VoiceRecorder()
+    @State private var wantsCancel = false
 
     var body: some View {
         VStack(spacing: 8) {
             replyChip
             editChip
+            if recorder.state == .recording {
+                RecordingBar(recorder: recorder, cancelHint: wantsCancel)
+            }
             inputRow
         }
         .padding(.horizontal, 22)
@@ -25,6 +30,14 @@ struct ComposerView: View {
         .onChange(of: vm.replyTarget?.id) { _, new in
             if new != nil { focused = true }
         }
+    }
+
+    private var draftIsEmpty: Bool {
+        vm.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var showMic: Bool {
+        draftIsEmpty && vm.editTarget == nil
     }
 
     private var inputRow: some View {
@@ -78,7 +91,6 @@ struct ComposerView: View {
                 }
 
             Button {
-                // Emoji picker placeholder — system emoji panel via menu.
                 NSApp.orderFrontCharacterPalette(nil)
             } label: {
                 Image(systemName: "face.smiling")
@@ -89,24 +101,28 @@ struct ComposerView: View {
             .buttonStyle(.plain)
             .help("Emoji")
 
-            Button {
-                if vm.editTarget != nil {
-                    Task { await vm.saveEdit(vm.draft); vm.draft = "" }
-                } else {
-                    Task { await vm.sendDraft() }
+            if showMic {
+                micButton
+            } else {
+                Button {
+                    if vm.editTarget != nil {
+                        Task { await vm.saveEdit(vm.draft); vm.draft = "" }
+                    } else {
+                        Task { await vm.sendDraft() }
+                    }
+                } label: {
+                    Image(systemName: vm.editTarget != nil ? "checkmark" : "paperplane.fill")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 32, height: 32)
+                        .background(canSend ? Theme.accent : Theme.surfaceAlt,
+                                    in: Circle())
                 }
-            } label: {
-                Image(systemName: vm.editTarget != nil ? "checkmark" : "paperplane.fill")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 32, height: 32)
-                    .background(canSend ? Theme.accent : Theme.surfaceAlt,
-                                in: Circle())
+                .buttonStyle(.plain)
+                .disabled(!canSend)
+                .keyboardShortcut(.return, modifiers: .command)
+                .help(vm.editTarget != nil ? "Save edit (⌘↩)" : "Send (⌘↩)")
             }
-            .buttonStyle(.plain)
-            .disabled(!canSend)
-            .keyboardShortcut(.return, modifiers: .command)
-            .help(vm.editTarget != nil ? "Save edit (⌘↩)" : "Send (⌘↩)")
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 6)
@@ -205,6 +221,34 @@ struct ComposerView: View {
         return embedded
     }
 
+    /// Push-and-hold mic, drawn entirely by AppKit. Pure NSView keeps
+    /// SwiftUI's _ButtonGesture machinery from touching the click — on
+    /// macOS 26 that pipeline crashes inside `MainActor.assumeIsolated`
+    /// when its host view re-renders during dispatch.
+    private var micButton: some View {
+        MicNSButton(
+            isRecording: recorder.state == .recording,
+            onDown: {
+                Task { @MainActor in
+                    guard await recorder.requestPermission() else { return }
+                    recorder.start()
+                }
+            },
+            onMove: { dy in wantsCancel = dy > 40 },
+            onUp: {
+                if wantsCancel || recorder.state != .recording {
+                    recorder.cancel()
+                } else if let r = try? recorder.finish() {
+                    Task { await vm.sendVoiceNote(r) }
+                } else {
+                    recorder.cancel()
+                }
+                wantsCancel = false
+            }
+        )
+        .frame(width: 32, height: 32)
+    }
+
     private func attachFile() {
         let panel = NSOpenPanel()
         panel.canChooseFiles = true
@@ -212,6 +256,89 @@ struct ComposerView: View {
         panel.allowsMultipleSelection = false
         if panel.runModal() == .OK, let url = panel.url {
             Task { await vm.sendAttachment(at: url) }
+        }
+    }
+}
+
+/// Push-and-hold mic, drawn + click-handled entirely in AppKit so the
+/// SwiftUI Button gesture machinery never sees the click. On macOS 26,
+/// SwiftUI's `_ButtonGesture` dispatch crashes inside
+/// `MainActor.assumeIsolated` when the host view re-renders during a
+/// click — replacing the SwiftUI Image+overlay with a real NSView
+/// sidesteps that pipeline entirely.
+private struct MicNSButton: NSViewRepresentable {
+    let isRecording: Bool
+    let onDown: () -> Void
+    let onMove: (CGFloat) -> Void
+    let onUp: () -> Void
+
+    func makeNSView(context: Context) -> MicView {
+        let v = MicView()
+        v.isRecording = isRecording
+        v.onDown = onDown
+        v.onMove = onMove
+        v.onUp = onUp
+        return v
+    }
+
+    func updateNSView(_ v: MicView, context: Context) {
+        v.isRecording = isRecording
+        v.onDown = onDown
+        v.onMove = onMove
+        v.onUp = onUp
+    }
+
+    final class MicView: NSView {
+        var onDown: (() -> Void)?
+        var onMove: ((CGFloat) -> Void)?
+        var onUp: (() -> Void)?
+        var isRecording: Bool = false {
+            didSet {
+                imageView.image = NSImage(systemSymbolName: isRecording ? "mic.fill" : "mic",
+                                          accessibilityDescription: nil)
+                layer?.backgroundColor = (isRecording ? NSColor.systemRed
+                                                       : NSColor.controlAccentColor).cgColor
+            }
+        }
+        private var startY: CGFloat = 0
+        private let imageView = NSImageView()
+
+        override init(frame: NSRect) {
+            super.init(frame: frame)
+            wantsLayer = true
+            layer?.cornerRadius = 16
+            layer?.backgroundColor = NSColor.controlAccentColor.cgColor
+
+            imageView.translatesAutoresizingMaskIntoConstraints = false
+            imageView.image = NSImage(systemSymbolName: "mic", accessibilityDescription: nil)
+            imageView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 14,
+                                                                       weight: .semibold)
+            imageView.contentTintColor = .white
+            imageView.imageScaling = .scaleProportionallyDown
+            addSubview(imageView)
+            NSLayoutConstraint.activate([
+                imageView.centerXAnchor.constraint(equalTo: centerXAnchor),
+                imageView.centerYAnchor.constraint(equalTo: centerYAnchor),
+                imageView.widthAnchor.constraint(equalToConstant: 16),
+                imageView.heightAnchor.constraint(equalToConstant: 16),
+            ])
+        }
+
+        required init?(coder: NSCoder) { fatalError() }
+
+        override var intrinsicContentSize: NSSize { NSSize(width: 32, height: 32) }
+        override var acceptsFirstResponder: Bool { true }
+        override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+        override func mouseDown(with event: NSEvent) {
+            startY = event.locationInWindow.y
+            onDown?()
+        }
+        override func mouseDragged(with event: NSEvent) {
+            onMove?(event.locationInWindow.y - startY)
+        }
+        override func mouseUp(with event: NSEvent) {
+            onUp?()
         }
     }
 }

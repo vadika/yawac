@@ -121,6 +121,20 @@ final class WAClient: PhoneValidating {
         return try JSONDecoder().decode(BridgeSendResult.self, from: Data(json.utf8))
     }
 
+    func sendVoiceNote(_ chatJID: String,
+                       path: String,
+                       duration: Int32,
+                       waveform: Data) throws -> BridgeSendResult {
+        var err: NSError?
+        let json = go.sendVoiceNote(chatJID,
+                                    filePath: path,
+                                    durationSec: duration,
+                                    waveformB64: waveform.base64EncodedString(),
+                                    error: &err)
+        if let err { throw err }
+        return try JSONDecoder().decode(BridgeSendResult.self, from: Data(json.utf8))
+    }
+
     func sendDocument(_ chatJID: String, path: String, caption: String) throws -> BridgeSendResult {
         var err: NSError?
         let json = go.sendDocument(chatJID, filePath: path, caption: caption, error: &err)

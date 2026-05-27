@@ -11,6 +11,8 @@ packages:
   MLXSwiftExamples:
     url: https://github.com/ml-explore/mlx-swift-examples
     from: "2.29.1"
+  COpus:
+    path: Packages/COpus
 targets:
   yawac:
     type: application
@@ -28,6 +30,8 @@ targets:
         product: MLXLLM
       - package: MLXSwiftExamples
         product: MLXLMCommon
+      - package: COpus
+        product: Opus
     settings:
       base:
         OTHER_LDFLAGS: -lresolv
@@ -36,6 +40,7 @@ targets:
       path: yawac/Info.plist
       properties:
         NSAppleEventsUsageDescription: yawac needs Apple events for notifications
+        NSMicrophoneUsageDescription: yawac needs the microphone to record voice messages
         LSMinimumSystemVersion: "14.0"
         CFBundleDisplayName: yawac
         CFBundleShortVersionString: "0.1.0"

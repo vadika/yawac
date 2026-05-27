@@ -25,3 +25,6 @@ yawac.xcodeproj/
 # Local config
 .env
 *.local
+
+# Code coverage dumps
+*.profraw

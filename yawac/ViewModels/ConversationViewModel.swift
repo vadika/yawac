@@ -972,6 +972,50 @@ final class ConversationViewModel {
         try? client.sendTyping(chatJID, typing)
     }
 
+    func sendVoiceNote(_ result: VoiceRecorder.Result) async {
+        do {
+            let res = try client.sendVoiceNote(chatJID,
+                                               path: result.url.path,
+                                               duration: Int32(result.durationSec),
+                                               waveform: result.waveform)
+            // Move the ogg from temp into the media cache under a
+            // per-message filename so the local bubble keeps playing
+            // after restarts (AudioPlayerView resolves the stored
+            // localPath via AVPlayer, which decodes Ogg-Opus natively).
+            let persistent: URL = {
+                if let dir = try? AppPaths.mediaCacheURL() {
+                    return dir.appendingPathComponent("voice-\(res.messageID).ogg")
+                }
+                return URL(fileURLWithPath: NSTemporaryDirectory())
+                    .appendingPathComponent("yawac-voice-\(res.messageID).ogg")
+            }()
+            try? FileManager.default.removeItem(at: persistent)
+            try? FileManager.default.moveItem(at: result.url, to: persistent)
+            let m = UIMessage(
+                id: res.messageID,
+                chatJID: chatJID,
+                senderJID: "me",
+                fromMe: true,
+                timestamp: Date(timeIntervalSince1970: TimeInterval(res.timestamp)),
+                body: .media(kind: "audio",
+                             caption: nil,
+                             fileName: nil,
+                             localPath: persistent.path))
+            messages.append(m)
+            receiptStatus[m.id] = .sent
+            persistOutgoingMedia(m, kind: "audio", localPath: persistent.path)
+        } catch {
+            messages.append(UIMessage(
+                id: UUID().uuidString,
+                chatJID: chatJID,
+                senderJID: "system",
+                fromMe: false,
+                timestamp: .now,
+                body: .system("voice note failed: \(error.localizedDescription)")))
+            try? FileManager.default.removeItem(at: result.url)
+        }
+    }
+
     func sendAttachment(at url: URL) async {
         let caption = draft
         let type = (try? url.resourceValues(forKeys: [.contentTypeKey]))?.contentType
@@ -1068,6 +1112,24 @@ final class ConversationViewModel {
         let row = PersistedMessage(
             id: m.id, chatJID: m.chatJID, senderJID: m.senderJID,
             fromMe: m.fromMe, timestamp: m.timestamp, kind: kind, text: text,
+            quotedMessageID: m.quotedMessageID,
+            quotedSenderJID: m.quotedSenderJID,
+            quotedFromMe: m.quotedFromMe,
+            quotedTextSnippet: m.quotedTextSnippet,
+            quotedKind: m.quotedKind)
+        context.insert(row)
+        try? context.save()
+    }
+
+    /// Outbound-media persistence. Carries the local file path so the
+    /// bubble survives chat switches / app restarts and the audio /
+    /// image / video keeps rendering from disk without re-download.
+    private func persistOutgoingMedia(_ m: UIMessage, kind: String, localPath: String) {
+        guard let context else { return }
+        let row = PersistedMessage(
+            id: m.id, chatJID: m.chatJID, senderJID: m.senderJID,
+            fromMe: m.fromMe, timestamp: m.timestamp, kind: kind, text: nil,
+            mediaPath: localPath,
             quotedMessageID: m.quotedMessageID,
             quotedSenderJID: m.quotedSenderJID,
             quotedFromMe: m.quotedFromMe,

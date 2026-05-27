@@ -28,5 +28,7 @@
 	<string>14.0</string>
 	<key>NSAppleEventsUsageDescription</key>
 	<string>yawac needs Apple events for notifications</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>yawac needs the microphone to record voice messages</string>
 </dict>
 </plist>
