@@ -106,6 +106,7 @@ struct ContentView: View {
                     vm.resolveNames(cs)
                     vm.mergeContacts(cs)
                     session.ingestContacts(cs)
+                    vm.reconcilePinsWithStore()
                 case .messageEdited(let chatJID, let messageID, let newText, let ts):
                     let when = Date(timeIntervalSince1970: TimeInterval(ts))
                     let canonical = JIDNormalize.canonical(chatJID, client: client)
@@ -125,6 +126,28 @@ struct ContentView: View {
                     vm.applyIncomingLocalDelete(chatJID: canonical, messageID: messageID)
                     session.currentConversation?.applyIncomingLocalDelete(
                         chatJID: chatJID, messageID: messageID)
+                case .messageStarred(let chatJID, let messageID, _, _, let starred, let ts):
+                    let when = Date(timeIntervalSince1970: TimeInterval(ts))
+                    let canonical = JIDNormalize.canonical(chatJID, client: client)
+                    vm.applyIncomingStar(chatJID: canonical, messageID: messageID,
+                                         starred: starred, at: when)
+                    session.currentConversation?.applyIncomingStar(
+                        chatJID: chatJID, messageID: messageID,
+                        starred: starred, at: when)
+                case .chatPinned(let chatJID, let pinned, let ts):
+                    let when = Date(timeIntervalSince1970: TimeInterval(ts))
+                    let canonical = JIDNormalize.canonical(chatJID, client: client)
+                    vm.applyIncomingChatPin(chatJID: canonical,
+                                            pinned: pinned, at: when)
+                case .messagePinned(let chatJID, let targetID, _, let pinned, let ts):
+                    let when = Date(timeIntervalSince1970: TimeInterval(ts))
+                    let canonical = JIDNormalize.canonical(chatJID, client: client)
+                    vm.applyIncomingMessagePin(chatJID: canonical,
+                                               targetMessageID: targetID,
+                                               pinned: pinned, at: when)
+                    session.currentConversation?.applyIncomingMessagePin(
+                        chatJID: chatJID, targetMessageID: targetID,
+                        pinned: pinned, at: when)
                 default:
                     break
                 }

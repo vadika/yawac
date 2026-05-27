@@ -2,6 +2,8 @@ package bridge
 
 import (
 	"encoding/json"
+	"fmt"
+	"os"
 
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
@@ -60,7 +62,48 @@ func (c *Client) handleWAEvent(evt any) {
 		c.handleMediaRetry(v)
 	case *events.DeleteForMe:
 		c.dispatchDeleteForMe(v)
+	case *events.Star:
+		c.dispatchStar(v)
+	case *events.Pin:
+		c.dispatchPin(v)
 	}
+}
+
+// dispatchPin surfaces app-state pin/unpin events (a chat pinned
+// or unpinned from another companion device).
+func (c *Client) dispatchPin(evt *events.Pin) {
+	pinned := false
+	if a := evt.Action; a != nil {
+		pinned = a.GetPinned()
+	}
+	fmt.Fprintf(os.Stderr,
+		"[yawac/pin] dispatch jid=%s pinned=%v fullSync=%v\n",
+		evt.JID.String(), pinned, evt.FromFullSync)
+	b, _ := json.Marshal(JChatPinned{
+		ChatJID:   evt.JID.String(),
+		Pinned:    pinned,
+		Timestamp: evt.Timestamp.Unix(),
+	})
+	c.dispatch("ChatPinned", string(b))
+}
+
+// dispatchStar surfaces app-state star/unstar events (a message
+// (un)starred from another companion device) so the local row's
+// starredAt can be reconciled without a round-trip.
+func (c *Client) dispatchStar(evt *events.Star) {
+	starred := false
+	if a := evt.Action; a != nil {
+		starred = a.GetStarred()
+	}
+	b, _ := json.Marshal(JMessageStarred{
+		ChatJID:   evt.ChatJID.String(),
+		MessageID: evt.MessageID,
+		SenderJID: evt.SenderJID.String(),
+		FromMe:    evt.IsFromMe,
+		Starred:   starred,
+		Timestamp: evt.Timestamp.Unix(),
+	})
+	c.dispatch("MessageStarred", string(b))
 }
 
 // dispatchDeleteForMe surfaces app-state "delete-for-me" events

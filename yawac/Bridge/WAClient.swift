@@ -41,6 +41,9 @@ final class WAClient: PhoneValidating {
         case messageEdited(chatJID: String, messageID: String, newText: String, timestamp: Int64)
         case messageRevoked(chatJID: String, messageID: String, revokedBy: String, timestamp: Int64)
         case messageLocallyDeleted(chatJID: String, messageID: String, timestamp: Int64)
+        case messageStarred(chatJID: String, messageID: String, senderJID: String, fromMe: Bool, starred: Bool, timestamp: Int64)
+        case chatPinned(chatJID: String, pinned: Bool, timestamp: Int64)
+        case messagePinned(chatJID: String, targetMessageID: String, senderJID: String, pinned: Bool, timestamp: Int64)
         case unknown(kind: String, payload: String)
     }
 
@@ -188,6 +191,50 @@ final class WAClient: PhoneValidating {
                                     targetFromMe: targetFromMe, error: &err)
         if let err { throw err }
         return try JSONDecoder().decode(BridgeSendResult.self, from: Data(json.utf8))
+    }
+
+    func starMessage(chatJID: String,
+                     targetMsgID: String,
+                     targetSenderJID: String,
+                     targetFromMe: Bool,
+                     starred: Bool) throws {
+        try go.starMessage(chatJID,
+                           targetMsgID: targetMsgID,
+                           targetSenderJID: targetSenderJID,
+                           targetFromMe: targetFromMe,
+                           starred: starred)
+    }
+
+    func pinChat(chatJID: String, pinned: Bool) throws {
+        try go.pinChat(chatJID, pinned: pinned)
+    }
+
+    func pinMessageInChat(chatJID: String,
+                          targetMsgID: String,
+                          targetSenderJID: String,
+                          targetFromMe: Bool,
+                          pinned: Bool) throws -> BridgeSendResult {
+        var err: NSError?
+        let json = go.pinMessage(inChat: chatJID,
+                                 targetMsgID: targetMsgID,
+                                 targetSenderJID: targetSenderJID,
+                                 targetFromMe: targetFromMe,
+                                 pin: pinned,
+                                 error: &err)
+        if let err { throw err }
+        return try JSONDecoder().decode(BridgeSendResult.self, from: Data(json.utf8))
+    }
+
+    /// Returns the subset of `jids` that whatsmeow's local appstate
+    /// store currently marks as pinned. Used to reconcile the sidebar
+    /// at startup since events.Pin isn't re-emitted on reconnect.
+    func listPinnedChats(jids: [String]) throws -> [String] {
+        let jidsJSON = (try? JSONEncoder().encode(jids))
+            .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+        var err: NSError?
+        let json = go.listPinnedChats(jidsJSON, error: &err)
+        if let err { throw err }
+        return (try? JSONDecoder().decode([String].self, from: Data(json.utf8))) ?? []
     }
 
     func sendPollVote(chatJID: String,
@@ -470,6 +517,53 @@ final class WAClient: PhoneValidating {
             if let l = try? dec.decode(L.self, from: data) {
                 return .messageLocallyDeleted(chatJID: l.chatJID, messageID: l.messageID,
                                               timestamp: l.timestamp)
+            }
+        case "MessageStarred":
+            struct S: Codable {
+                let chatJID: String; let messageID: String
+                let senderJID: String; let fromMe: Bool
+                let starred: Bool; let timestamp: Int64
+                enum CodingKeys: String, CodingKey {
+                    case chatJID = "chat_jid"
+                    case messageID = "message_id"
+                    case senderJID = "sender_jid"
+                    case fromMe = "from_me"
+                    case starred, timestamp
+                }
+            }
+            if let s = try? dec.decode(S.self, from: data) {
+                return .messageStarred(chatJID: s.chatJID, messageID: s.messageID,
+                                       senderJID: s.senderJID, fromMe: s.fromMe,
+                                       starred: s.starred, timestamp: s.timestamp)
+            }
+        case "ChatPinned":
+            struct P: Codable {
+                let chatJID: String; let pinned: Bool; let timestamp: Int64
+                enum CodingKeys: String, CodingKey {
+                    case chatJID = "chat_jid"
+                    case pinned, timestamp
+                }
+            }
+            if let p = try? dec.decode(P.self, from: data) {
+                return .chatPinned(chatJID: p.chatJID, pinned: p.pinned, timestamp: p.timestamp)
+            }
+        case "MessagePinned":
+            struct MP: Codable {
+                let chatJID: String; let targetMessageID: String
+                let senderJID: String; let pinned: Bool; let timestamp: Int64
+                enum CodingKeys: String, CodingKey {
+                    case chatJID = "chat_jid"
+                    case targetMessageID = "target_message_id"
+                    case senderJID = "sender_jid"
+                    case pinned, timestamp
+                }
+            }
+            if let p = try? dec.decode(MP.self, from: data) {
+                return .messagePinned(chatJID: p.chatJID,
+                                      targetMessageID: p.targetMessageID,
+                                      senderJID: p.senderJID,
+                                      pinned: p.pinned,
+                                      timestamp: p.timestamp)
             }
         default:
             break

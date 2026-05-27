@@ -11,6 +11,8 @@ struct Chat: Identifiable, Hashable {
     var isCommunityParent: Bool = false
     var communityParentJID: String? = nil
     var isDefaultSubGroup: Bool = false
+    /// Server-synced pin (WhatsApp app-state). nil = unpinned.
+    var pinnedAt: Date? = nil
     var id: String { jid }
 }
 

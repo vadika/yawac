@@ -16,6 +16,7 @@ struct MessageContextMenu: View {
     let onForward: () -> Void
     let onCopyText: () -> Void
     let onStar: () -> Void
+    let onPin: () -> Void
     let onDeleteForMe: () -> Void
     let onDeleteForEveryone: () -> Void
     let onEdit: () -> Void
@@ -53,10 +54,13 @@ struct MessageContextMenu: View {
                             shortcut: "⌘E",
                             action: { dismiss(); onEdit() })
                 }
-                MenuRow(icon: "star",
-                        label: "Star",
-                        disabled: true,
+                MenuRow(icon: message.starredAt != nil ? "star.fill" : "star",
+                        label: message.starredAt != nil ? "Unstar" : "Star",
+                        shortcut: "⌘S",
                         action: { dismiss(); onStar() })
+                MenuRow(icon: message.pinnedAt != nil ? "pin.fill" : "pin",
+                        label: message.pinnedAt != nil ? "Unpin" : "Pin",
+                        action: { dismiss(); onPin() })
             }
             divider.padding(.horizontal, 8).padding(.vertical, 4)
             VStack(spacing: 0) {
@@ -118,6 +122,8 @@ struct MessageContextMenu: View {
                 Button("") { dismiss(); onEdit() }
                     .keyboardShortcut("e", modifiers: .command)
             }
+            Button("") { dismiss(); onStar() }
+                .keyboardShortcut("s", modifiers: .command)
             Button("") { dismiss(); onDeleteForMe() }
                 .keyboardShortcut(.delete, modifiers: [])
         }

@@ -16,6 +16,8 @@ struct UIMessage: Identifiable, Hashable {
     var revokedAt: Date? = nil
     var revokedBy: String? = nil
     var locallyDeleted: Bool = false
+    var starredAt: Date? = nil
+    var pinnedAt: Date? = nil
 
     enum Body: Hashable {
         case text(String)

@@ -165,14 +165,25 @@ final class ChatListViewModel {
                     unread: row.unread,
                     isCommunityParent: row.isCommunityParent,
                     communityParentJID: row.communityParentJID,
-                    isDefaultSubGroup: row.isDefaultSubGroup)
+                    isDefaultSubGroup: row.isDefaultSubGroup,
+                    pinnedAt: row.pinnedAt)
             }
-            .sorted { a, b in
-                if a.lastTimestamp != b.lastTimestamp {
-                    return a.lastTimestamp > b.lastTimestamp
-                }
-                return a.name.localizedCaseInsensitiveCompare(b.name) == .orderedAscending
+            .sorted(by: Self.chatOrder)
+    }
+
+    /// Total ordering for the sidebar. Pinned chats float to the
+    /// top (newest pin first), unpinned fall back to recency.
+    private static func chatOrder(_ a: Chat, _ b: Chat) -> Bool {
+        switch (a.pinnedAt, b.pinnedAt) {
+        case let (l?, r?): return l > r
+        case (_?, nil):    return true
+        case (nil, _?):    return false
+        case (nil, nil):
+            if a.lastTimestamp != b.lastTimestamp {
+                return a.lastTimestamp > b.lastTimestamp
             }
+            return a.name.localizedCaseInsensitiveCompare(b.name) == .orderedAscending
+        }
     }
 
     func ingest(_ message: BridgeMessage) {
@@ -489,6 +500,34 @@ final class ChatListViewModel {
         refreshPreview(chatJID: chatJID)
     }
 
+    /// Persist a peer-device or peer-participant in-chat pin/unpin
+    /// directly to PersistedMessage, regardless of whether the chat
+    /// is currently open.
+    func applyIncomingMessagePin(chatJID: String, targetMessageID: String,
+                                 pinned: Bool, at: Date) {
+        guard let context else { return }
+        let descriptor = FetchDescriptor<PersistedMessage>(
+            predicate: #Predicate { $0.id == targetMessageID })
+        if let row = try? context.fetch(descriptor).first {
+            row.pinnedAt = pinned ? at : nil
+            try? context.save()
+        }
+    }
+
+    /// Persist a peer-device (un)star directly to PersistedMessage,
+    /// regardless of whether the chat is currently open. No preview
+    /// refresh — starring doesn't change last-message state.
+    func applyIncomingStar(chatJID: String, messageID: String,
+                           starred: Bool, at: Date) {
+        guard let context else { return }
+        let descriptor = FetchDescriptor<PersistedMessage>(
+            predicate: #Predicate { $0.id == messageID })
+        if let row = try? context.fetch(descriptor).first {
+            row.starredAt = starred ? at : nil
+            try? context.save()
+        }
+    }
+
     /// Persist a peer-device edit directly to PersistedMessage row,
     /// regardless of whether the chat is currently open.
     func applyIncomingEdit(chatJID: String, messageID: String, newText: String, at: Date) {
@@ -545,12 +584,7 @@ final class ChatListViewModel {
     }
 
     private func sortChats() {
-        chats.sort { a, b in
-            if a.lastTimestamp != b.lastTimestamp {
-                return a.lastTimestamp > b.lastTimestamp
-            }
-            return a.name.localizedCaseInsensitiveCompare(b.name) == .orderedAscending
-        }
+        chats.sort(by: Self.chatOrder)
     }
 
     func resolveNames(_ cs: [BridgeContact]) {
@@ -575,6 +609,7 @@ final class ChatListViewModel {
             existing.communityParentJID = c.communityParentJID
             existing.isCommunityParent = c.isCommunityParent
             existing.isDefaultSubGroup = c.isDefaultSubGroup
+            existing.pinnedAt = c.pinnedAt
             if let preview { existing.lastMessageText = preview }
         } else {
             let row = PersistedChat(
@@ -585,9 +620,74 @@ final class ChatListViewModel {
                 unread: c.unread,
                 communityParentJID: c.communityParentJID,
                 isCommunityParent: c.isCommunityParent,
-                isDefaultSubGroup: c.isDefaultSubGroup)
+                isDefaultSubGroup: c.isDefaultSubGroup,
+                pinnedAt: c.pinnedAt)
             context.insert(row)
         }
         try? context.save()
+    }
+
+    /// Toggle pin state for `chat`. Sends an appstate patch (the
+    /// server fans out to peer devices) and mutates the row eagerly;
+    /// peer-device echoes converge via `applyIncomingChatPin`.
+    func pinChat(_ chat: Chat, pinned: Bool) {
+        guard let client else { return }
+        Task { @MainActor in
+            do {
+                try client.pinChat(chatJID: chat.jid, pinned: pinned)
+                self.applyLocalPin(chatJID: chat.jid,
+                                   pinnedAt: pinned ? Date() : nil)
+            } catch {
+                NSLog("[yawac/pinChat] failed jid=%@ err=%@",
+                      chat.jid, String(describing: error))
+            }
+        }
+    }
+
+    func applyIncomingChatPin(chatJID: String, pinned: Bool, at: Date) {
+        applyLocalPin(chatJID: chatJID, pinnedAt: pinned ? at : nil)
+    }
+
+    /// Cold-start sync: ask the bridge which of our known chats are
+    /// pinned according to whatsmeow's local appstate store, then
+    /// reconcile any mismatches. whatsmeow doesn't re-emit events.Pin
+    /// for already-synced patches, so without this the sidebar starts
+    /// up with stale state for any chat pinned before our last save.
+    func reconcilePinsWithStore() {
+        guard let client else { return }
+        let jids = chats.map(\.jid)
+        let pinned: Set<String>
+        do {
+            pinned = Set(try client.listPinnedChats(jids: jids))
+        } catch {
+            NSLog("[yawac/pin-reconcile] failed: %@", String(describing: error))
+            return
+        }
+        var changed = false
+        let now = Date()
+        for i in chats.indices {
+            let isPinned = pinned.contains(chats[i].jid)
+            let wasPinned = chats[i].pinnedAt != nil
+            if isPinned == wasPinned { continue }
+            chats[i].pinnedAt = isPinned ? (chats[i].pinnedAt ?? now) : nil
+            upsertPersisted(chats[i])
+            changed = true
+        }
+        if changed { sortChats() }
+    }
+
+    private func applyLocalPin(chatJID: String, pinnedAt: Date?) {
+        if let idx = chats.firstIndex(where: { $0.jid == chatJID }) {
+            chats[idx].pinnedAt = pinnedAt
+            upsertPersisted(chats[idx])
+        } else if let context {
+            let descriptor = FetchDescriptor<PersistedChat>(
+                predicate: #Predicate { $0.jid == chatJID })
+            if let row = try? context.fetch(descriptor).first {
+                row.pinnedAt = pinnedAt
+                try? context.save()
+            }
+        }
+        sortChats()
     }
 }

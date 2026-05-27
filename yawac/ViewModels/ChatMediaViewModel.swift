@@ -23,10 +23,20 @@ final class ChatMediaViewModel {
         let timestamp: Date
     }
 
+    struct StarredItem: Identifiable, Hashable {
+        let id: String        // message id
+        let kind: String      // text / image / video / audio / document / sticker
+        let snippet: String   // text body, caption, fileName, or placeholder
+        let timestamp: Date
+        let starredAt: Date
+    }
+
     private(set) var media: [MediaItem] = []
     private(set) var files: [FileItem] = []
+    private(set) var starred: [StarredItem] = []
     private(set) var mediaTotal: Int = 0
     private(set) var filesTotal: Int = 0
+    private(set) var starredTotal: Int = 0
 
     let chatJID: String
     private let context: ModelContext?
@@ -108,6 +118,20 @@ final class ChatMediaViewModel {
         let mediaRows = (try? context.fetch(mediaDescriptor)) ?? []
         let fileRows = (try? context.fetch(filesDescriptor)) ?? []
 
+        // Starred. SortDescriptor on optional starredAt sorts nils
+        // last; we filter nils out via the predicate anyway.
+        var starredDescriptor = FetchDescriptor<PersistedMessage>(
+            predicate: #Predicate { p in
+                p.chatJID == jid
+                && !p.locallyDeleted
+                && p.revokedAt == nil
+                && p.starredAt != nil
+            },
+            sortBy: [SortDescriptor(\.starredAt, order: .reverse)]
+        )
+        if let limit { starredDescriptor.fetchLimit = limit }
+        let starredRows = (try? context.fetch(starredDescriptor)) ?? []
+
         media = mediaRows.compactMap { row in
             guard mediaKinds.contains(row.kind) else { return nil }
             let resolved = resolvePath(row.mediaPath, id: row.id, diskPaths: diskPaths)
@@ -122,6 +146,15 @@ final class ChatMediaViewModel {
                             fileName: row.mediaFileName ?? "Document",
                             path: resolved,
                             timestamp: row.timestamp)
+        }
+
+        starred = starredRows.compactMap { row in
+            guard let when = row.starredAt else { return nil }
+            return StarredItem(id: row.id,
+                               kind: row.kind,
+                               snippet: Self.snippet(for: row),
+                               timestamp: row.timestamp,
+                               starredAt: when)
         }
 
         // Count descriptors mirror the predicates but skip sorting/limits.
@@ -141,7 +174,31 @@ final class ChatMediaViewModel {
                 && p.kind == "document"
             }
         )
+        let starredCountDescriptor = FetchDescriptor<PersistedMessage>(
+            predicate: #Predicate { p in
+                p.chatJID == jid
+                && !p.locallyDeleted
+                && p.revokedAt == nil
+                && p.starredAt != nil
+            }
+        )
         mediaTotal = (try? context.fetchCount(mediaCountDescriptor)) ?? media.count
         filesTotal = (try? context.fetchCount(filesCountDescriptor)) ?? files.count
+        starredTotal = (try? context.fetchCount(starredCountDescriptor)) ?? starred.count
+    }
+
+    private static func snippet(for row: PersistedMessage) -> String {
+        if let t = row.text, !t.isEmpty { return t }
+        if let c = row.mediaCaption, !c.isEmpty { return c }
+        if let n = row.mediaFileName, !n.isEmpty { return n }
+        switch row.kind {
+        case "image":    return "Photo"
+        case "video":    return "Video"
+        case "audio":    return "Voice note"
+        case "document": return "Document"
+        case "sticker":  return "Sticker"
+        case "poll":     return "Poll"
+        default:         return row.kind
+        }
     }
 }

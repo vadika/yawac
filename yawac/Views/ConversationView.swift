@@ -39,7 +39,9 @@ struct ConversationView: View {
             chatJID: chatJID,
             onClose: { showInfo = false },
             onJumpToMessage: jumpToMessage,
-            messageRevision: (vm?.messages.count ?? 0) + (vm?.localPaths.count ?? 0),
+            messageRevision: (vm?.messages.count ?? 0)
+                + (vm?.localPaths.count ?? 0)
+                + (vm?.messages.reduce(0) { $0 + ($1.starredAt != nil ? 1 : 0) } ?? 0),
             mediaPathResolver: resolveMediaPath
         )
     }
@@ -163,11 +165,76 @@ struct ConversationView: View {
         .background(WindowDragHandle())
     }
 
+    @ViewBuilder
+    private func pinnedBanner(_ vm: ConversationViewModel) -> some View {
+        if let m = vm.pinnedBannerMessage {
+            Button {
+                vm.jumpToQuoted(id: m.id)
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "pin.fill")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Theme.accent)
+                        .rotationEffect(.degrees(35))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Pinned message")
+                            .font(Theme.ui(10.5, weight: .semibold))
+                            .tracking(0.4)
+                            .foregroundStyle(Theme.textFaint)
+                        Text(Self.pinSnippet(m))
+                            .font(Theme.ui(12.5))
+                            .foregroundStyle(Theme.text)
+                            .lineLimit(1)
+                    }
+                    Spacer()
+                    Button {
+                        vm.pinMessage(m, pinned: false)
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(Theme.textMuted)
+                            .frame(width: 22, height: 22)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Unpin")
+                }
+                .padding(.horizontal, 16).padding(.vertical, 8)
+                .background(Theme.surfaceAlt)
+                .overlay(alignment: .bottom) {
+                    Rectangle().fill(Theme.border).frame(height: 1)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private static func pinSnippet(_ m: UIMessage) -> String {
+        switch m.body {
+        case .text(let t): return t
+        case .media(let kind, let caption, let fileName, _):
+            if let c = caption, !c.isEmpty { return c }
+            if let n = fileName, !n.isEmpty { return n }
+            switch kind {
+            case "image":    return "Photo"
+            case "video":    return "Video"
+            case "audio":    return "Voice note"
+            case "document": return "Document"
+            case "sticker":  return "Sticker"
+            default:         return kind
+            }
+        case .poll(let q, _, _): return q
+        case .system(let s):     return s
+        }
+    }
+
     var body: some View {
         Group {
             if let vm {
                 VStack(spacing: 0) {
                     headerBar
+                    pinnedBanner(vm)
                     ScrollViewReader { proxy in
                         ScrollView {
                             LazyVStack(spacing: 6) {
@@ -231,6 +298,8 @@ struct ConversationView: View {
                                             onEdit: { m in vm.startEdit(m) },
                                             onDeleteForEveryone: { m in Task { await vm.deleteForEveryone(m) } },
                                             onDeleteForMe: { m in vm.deleteForMe(m) },
+                                            onStar: { m in vm.starMessage(m, starred: m.starredAt == nil) },
+                                            onPin: { m in vm.pinMessage(m, pinned: m.pinnedAt == nil) },
                                             onJumpToQuoted: { id in vm.jumpToQuoted(id: id) },
                                             isHighlighted: vm.highlightedID == msg.id
                                         )

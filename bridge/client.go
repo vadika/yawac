@@ -103,6 +103,12 @@ func NewClient(dbPath string) (*Client, error) {
 	// Client.UseRetryMessageStore = true to survive restarts during
 	// retry windows."
 	wa.UseRetryMessageStore = true
+	// Surface appstate events (pin, star, mute, archive, delete-for-me)
+	// during full-sync replays. Without this, pin/star state set on
+	// the phone before this device connected — or replayed after a
+	// fresh device link — never reaches the Swift side, leaving the
+	// sidebar/menu stuck in their default state.
+	wa.EmitAppStateEventsOnFullSync = true
 	return &Client{
 		wa:           wa,
 		dbPath:       dbPath,

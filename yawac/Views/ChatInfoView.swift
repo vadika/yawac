@@ -194,6 +194,7 @@ struct ChatInfoView: View {
             .init(label: "Search", icon: "magnifyingglass"),
             .init(label: "Block", icon: "hand.raised", destructive: true),
         ])
+        starredSection
         sharedMediaSection
         filesSection
     }
@@ -234,6 +235,7 @@ struct ChatInfoView: View {
                   destructive: true),
         ])
 
+        starredSection
         sharedMediaSection
         filesSection
 
@@ -251,6 +253,26 @@ struct ChatInfoView: View {
                 ForEach(linkedGroups, id: \.jid) { sub in
                     linkedGroupRow(sub)
                     Rectangle().fill(Theme.hairline).frame(height: 1)
+                }
+            }
+        }
+    }
+
+    // ─── Starred messages ────────────────────────────────────────────
+    @ViewBuilder
+    private var starredSection: some View {
+        if let vm = mediaVM, vm.starredTotal > 0 {
+            VStack(alignment: .leading, spacing: 4) {
+                sectionLabel("STARRED", trailing: "\(vm.starredTotal)")
+                VStack(spacing: 0) {
+                    ForEach(vm.starred) { item in
+                        StarredMessageRow(item: item) {
+                            onJumpToMessage?(item.id)
+                        }
+                        if item.id != vm.starred.last?.id {
+                            Rectangle().fill(Theme.hairline).frame(height: 1)
+                        }
+                    }
                 }
             }
         }
@@ -490,6 +512,55 @@ struct ChatInfoView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+
+    private struct StarredMessageRow: View {
+        let item: ChatMediaViewModel.StarredItem
+        let onTap: () -> Void
+
+        private var icon: String {
+            switch item.kind {
+            case "image":    return "photo"
+            case "video":    return "play.rectangle"
+            case "audio":    return "waveform"
+            case "document": return "doc"
+            case "sticker":  return "face.smiling"
+            case "poll":     return "chart.bar"
+            default:         return "text.bubble"
+            }
+        }
+
+        var body: some View {
+            Button(action: onTap) {
+                HStack(spacing: 10) {
+                    Image(systemName: "star.fill")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.yellow)
+                        .frame(width: 16)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(item.snippet)
+                            .font(Theme.ui(12.5))
+                            .foregroundStyle(Theme.text)
+                            .lineLimit(2)
+                            .multilineTextAlignment(.leading)
+                        HStack(spacing: 6) {
+                            Image(systemName: icon)
+                                .font(.system(size: 9.5))
+                                .foregroundStyle(Theme.textFaint)
+                            Text(item.timestamp,
+                                 format: .dateTime.day().month(.abbreviated)
+                                    .hour(.twoDigits(amPM: .omitted)).minute())
+                                .font(Theme.mono(10.5))
+                                .foregroundStyle(Theme.textFaint)
+                        }
+                    }
+                    Spacer()
+                }
+                .padding(.vertical, 8)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
     }
 
     private func sortedParticipants(_ ps: [BridgeParticipantModel])

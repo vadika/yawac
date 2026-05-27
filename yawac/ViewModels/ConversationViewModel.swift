@@ -93,6 +93,8 @@ final class ConversationViewModel {
         m.revokedAt = p.revokedAt
         m.revokedBy = p.revokedBy
         m.locallyDeleted = p.locallyDeleted
+        m.starredAt = p.starredAt
+        m.pinnedAt = p.pinnedAt
         m.quotedMessageID = p.quotedMessageID
         m.quotedSenderJID = p.quotedSenderJID
         m.quotedFromMe = p.quotedFromMe
@@ -257,6 +259,8 @@ final class ConversationViewModel {
                 m.revokedAt = p.revokedAt
                 m.revokedBy = p.revokedBy
                 m.locallyDeleted = p.locallyDeleted
+                m.starredAt = p.starredAt
+        m.pinnedAt = p.pinnedAt
                 m.quotedMessageID = p.quotedMessageID
                 m.quotedSenderJID = p.quotedSenderJID
                 m.quotedFromMe = p.quotedFromMe
@@ -1492,6 +1496,125 @@ final class ConversationViewModel {
     /// to highlight the active emoji in the quick-pick menu.
     func myReaction(for messageID: String) -> String? {
         reactionsBySender[messageID]?["me"]
+    }
+
+    /// Toggle the starred state on a message. Sends an appstate patch
+    /// to WhatsApp (which fans out to the user's other devices) and
+    /// mutates the row optimistically — peer-device echoes arrive as
+    /// `messageStarred` events and converge on the same row via
+    /// `applyIncomingStar`.
+    func starMessage(_ msg: UIMessage, starred: Bool) {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                try self.client.starMessage(
+                    chatJID: self.chatJID,
+                    targetMsgID: msg.id,
+                    targetSenderJID: msg.senderJID,
+                    targetFromMe: msg.fromMe,
+                    starred: starred)
+                let when = Date()
+                self.applyLocalStar(messageID: msg.id,
+                                    starredAt: starred ? when : nil)
+            } catch {
+                self.messages.append(UIMessage(
+                    id: UUID().uuidString,
+                    chatJID: self.chatJID,
+                    senderJID: "system",
+                    fromMe: false,
+                    timestamp: .now,
+                    body: .system("star failed: \(error.localizedDescription)")))
+            }
+        }
+    }
+
+    func applyIncomingStar(chatJID: String, messageID: String,
+                           starred: Bool, at: Date) {
+        guard JIDNormalize.canonical(chatJID, client: client) == self.chatJID else { return }
+        applyLocalStar(messageID: messageID,
+                       starredAt: starred ? at : nil)
+    }
+
+    private func applyLocalStar(messageID: String, starredAt: Date?) {
+        if let idx = messages.firstIndex(where: { $0.id == messageID }) {
+            messages[idx].starredAt = starredAt
+        }
+        persistStar(messageID: messageID, starredAt: starredAt)
+    }
+
+    private func persistStar(messageID: String, starredAt: Date?) {
+        guard let context else { return }
+        let descriptor = FetchDescriptor<PersistedMessage>(
+            predicate: #Predicate { $0.id == messageID })
+        if let row = try? context.fetch(descriptor).first {
+            row.starredAt = starredAt
+            try? context.save()
+        }
+    }
+
+    /// The newest currently-pinned message in this chat, or nil. The
+    /// banner above the conversation shows this row's snippet and
+    /// jumps to it on tap. WhatsApp allows multiple pinned messages;
+    /// we surface the most recent and rely on the message list /
+    /// info pane for the rest.
+    var pinnedBannerMessage: UIMessage? {
+        messages.filter { $0.pinnedAt != nil
+                       && $0.revokedAt == nil
+                       && !$0.locallyDeleted }
+            .max { ($0.pinnedAt ?? .distantPast) < ($1.pinnedAt ?? .distantPast) }
+    }
+
+    /// Toggle in-chat pin. Sends a PinInChatMessage stanza — every
+    /// participant receives it as a regular message event and the
+    /// bridge routes it to `applyIncomingMessagePin`, which converges
+    /// with our optimistic mutation here.
+    func pinMessage(_ msg: UIMessage, pinned: Bool) {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                _ = try self.client.pinMessageInChat(
+                    chatJID: self.chatJID,
+                    targetMsgID: msg.id,
+                    targetSenderJID: msg.senderJID,
+                    targetFromMe: msg.fromMe,
+                    pinned: pinned)
+                let when = Date()
+                self.applyLocalMessagePin(messageID: msg.id,
+                                          pinnedAt: pinned ? when : nil)
+            } catch {
+                self.messages.append(UIMessage(
+                    id: UUID().uuidString,
+                    chatJID: self.chatJID,
+                    senderJID: "system",
+                    fromMe: false,
+                    timestamp: .now,
+                    body: .system("pin failed: \(error.localizedDescription)")))
+            }
+        }
+    }
+
+    func applyIncomingMessagePin(chatJID: String, targetMessageID: String,
+                                 pinned: Bool, at: Date) {
+        guard JIDNormalize.canonical(chatJID, client: client) == self.chatJID else { return }
+        applyLocalMessagePin(messageID: targetMessageID,
+                             pinnedAt: pinned ? at : nil)
+    }
+
+    private func applyLocalMessagePin(messageID: String, pinnedAt: Date?) {
+        if let idx = messages.firstIndex(where: { $0.id == messageID }) {
+            messages[idx].pinnedAt = pinnedAt
+        }
+        persistMessagePin(messageID: messageID, pinnedAt: pinnedAt)
+    }
+
+    private func persistMessagePin(messageID: String, pinnedAt: Date?) {
+        guard let context else { return }
+        let descriptor = FetchDescriptor<PersistedMessage>(
+            predicate: #Predicate { $0.id == messageID })
+        if let row = try? context.fetch(descriptor).first {
+            row.pinnedAt = pinnedAt
+            try? context.save()
+        }
     }
 
     func applyReaction(_ r: BridgeReaction) {

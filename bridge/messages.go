@@ -2,6 +2,7 @@ package bridge
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +14,72 @@ import (
 	"go.mau.fi/whatsmeow/types/events"
 	"google.golang.org/protobuf/proto"
 )
+
+// PinMessageInChat pins or unpins a target message inside its
+// chat. WhatsApp distributes the pin via a normal stanza carrying
+// a PinInChatMessage payload — every participant's client (including
+// other companion devices on the same account) receives it as a
+// regular Message event and renders it as a banner above the
+// conversation. `targetSenderJID` is the original message's sender
+// (1:1: chat; group: participant). Returns JSON of JSendResult.
+func (c *Client) PinMessageInChat(chatJID, targetMsgID, targetSenderJID string, targetFromMe, pin bool) (string, error) {
+	if c.wa == nil {
+		return "", errors.New("client closed")
+	}
+	chat, err := types.ParseJID(chatJID)
+	if err != nil {
+		return "", fmt.Errorf("parse chat: %w", err)
+	}
+	var sender types.JID
+	if targetFromMe {
+		if c.wa.Store != nil && c.wa.Store.ID != nil {
+			sender = c.wa.Store.ID.ToNonAD()
+		} else {
+			sender = chat
+		}
+	} else {
+		sender, err = types.ParseJID(targetSenderJID)
+		if err != nil {
+			return "", fmt.Errorf("parse sender: %w", err)
+		}
+	}
+	pinType := waE2E.PinInChatMessage_PIN_FOR_ALL
+	if !pin {
+		pinType = waE2E.PinInChatMessage_UNPIN_FOR_ALL
+	}
+	msg := &waE2E.Message{
+		PinInChatMessage: &waE2E.PinInChatMessage{
+			Key:               c.wa.BuildMessageKey(chat, sender, types.MessageID(targetMsgID)),
+			Type:              pinType.Enum(),
+			SenderTimestampMS: proto.Int64(time.Now().UnixMilli()),
+		},
+	}
+	// Phone clients require pin metadata on the outer Message:
+	//   - MessageAddOnDurationInSecs / MessageAddOnExpiryType set
+	//     the visibility window (24h / 7d / 30d on the mobile UI;
+	//     7d is the WhatsApp default).
+	//   - MessageSecret is a 32-byte random handle that the server
+	//     stores per pin envelope so the phone can validate &
+	//     surface the banner; without it SendMessage's ack never
+	//     arrives and the call hangs.
+	if pin {
+		secret := make([]byte, 32)
+		if _, err := rand.Read(secret); err != nil {
+			return "", fmt.Errorf("pin secret: %w", err)
+		}
+		msg.MessageContextInfo = &waE2E.MessageContextInfo{
+			MessageAddOnDurationInSecs: proto.Uint32(7 * 24 * 60 * 60),
+			MessageAddOnExpiryType:     waE2E.MessageContextInfo_STATIC.Enum(),
+			MessageSecret:              secret,
+		}
+	}
+	resp, err := c.wa.SendMessage(context.Background(), chat, msg)
+	if err != nil {
+		return "", fmt.Errorf("send pin: %w", err)
+	}
+	out, _ := json.Marshal(JSendResult{MessageID: resp.ID, Timestamp: resp.Timestamp.Unix()})
+	return string(out), nil
+}
 
 // SendReaction posts a reaction to a target message. emoji="" removes our
 // reaction. targetSenderJID is the original message's sender (group:
@@ -158,6 +225,26 @@ func (c *Client) dispatchMessage(evt *events.Message) {
 			Timestamp: evt.Info.Timestamp.Unix(),
 		})
 		c.dispatch("MessageEdited", string(b))
+		return
+	}
+	// In-chat pin (WhatsApp's PinInChatMessage). Top-level Message
+	// field, not under ProtocolMessage. Surface as a dedicated event
+	// so Swift can update the row's pinnedAt and the banner —
+	// otherwise classifyMessage would route it as "system" and the
+	// pin would render as a noise bubble.
+	if pin := evt.Message.GetPinInChatMessage(); pin != nil {
+		key := pin.GetKey()
+		if key != nil {
+			pinned := pin.GetType() == waE2E.PinInChatMessage_PIN_FOR_ALL
+			b, _ := json.Marshal(JMessagePinned{
+				ChatJID:         evt.Info.Chat.String(),
+				TargetMessageID: key.GetID(),
+				SenderJID:       evt.Info.Sender.String(),
+				Pinned:          pinned,
+				Timestamp:       evt.Info.Timestamp.Unix(),
+			})
+			c.dispatch("MessagePinned", string(b))
+		}
 		return
 	}
 	if r := evt.Message.GetReactionMessage(); r != nil {

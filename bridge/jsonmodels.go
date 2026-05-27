@@ -44,6 +44,29 @@ type JMessageLocallyDeleted struct {
 	Timestamp int64  `json:"timestamp"`
 }
 
+type JMessageStarred struct {
+	ChatJID   string `json:"chat_jid"`
+	MessageID string `json:"message_id"`
+	SenderJID string `json:"sender_jid"`
+	FromMe    bool   `json:"from_me"`
+	Starred   bool   `json:"starred"`
+	Timestamp int64  `json:"timestamp"`
+}
+
+type JChatPinned struct {
+	ChatJID   string `json:"chat_jid"`
+	Pinned    bool   `json:"pinned"`
+	Timestamp int64  `json:"timestamp"`
+}
+
+type JMessagePinned struct {
+	ChatJID         string `json:"chat_jid"`
+	TargetMessageID string `json:"target_message_id"`
+	SenderJID       string `json:"sender_jid"`
+	Pinned          bool   `json:"pinned"`
+	Timestamp       int64  `json:"timestamp"`
+}
+
 type JPoll struct {
 	Question        string        `json:"question"`
 	Options         []JPollOption `json:"options"`

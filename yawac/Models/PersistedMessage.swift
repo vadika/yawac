@@ -36,6 +36,11 @@ final class PersistedMessage {
     var revokedBy: String? = nil
     var locallyDeleted: Bool = false
 
+    // App-state bookmarks. Defaulted so existing rows migrate lightweight.
+    var starredAt: Date? = nil
+    // In-chat pin (WhatsApp's pinInChat protocol). nil = unpinned.
+    var pinnedAt: Date? = nil
+
     /// Set when one full download + MediaRetry cycle has already failed
     /// with a plaintext-SHA mismatch or unrecoverable 4xx. WhatsApp ages
     /// out old media from its CDN; once we hit this state for a given
@@ -60,7 +65,9 @@ final class PersistedMessage {
          editedAt: Date? = nil,
          revokedAt: Date? = nil,
          revokedBy: String? = nil,
-         locallyDeleted: Bool = false) {
+         locallyDeleted: Bool = false,
+         starredAt: Date? = nil,
+         pinnedAt: Date? = nil) {
         self.id = id
         self.chatJID = chatJID
         self.senderJID = senderJID
@@ -84,6 +91,8 @@ final class PersistedMessage {
         self.revokedAt = revokedAt
         self.revokedBy = revokedBy
         self.locallyDeleted = locallyDeleted
+        self.starredAt = starredAt
+        self.pinnedAt = pinnedAt
     }
 }
 
@@ -149,13 +158,15 @@ final class PersistedChat {
     var communityParentJID: String?
     var isCommunityParent: Bool = false
     var isDefaultSubGroup: Bool = false
+    var pinnedAt: Date? = nil
 
     init(jid: String, name: String,
          lastMessageText: String? = nil,
          lastTimestamp: Date = .distantPast, unread: Int = 0,
          communityParentJID: String? = nil,
          isCommunityParent: Bool = false,
-         isDefaultSubGroup: Bool = false) {
+         isDefaultSubGroup: Bool = false,
+         pinnedAt: Date? = nil) {
         self.jid = jid
         self.name = name
         self.lastMessageText = lastMessageText
@@ -164,5 +175,6 @@ final class PersistedChat {
         self.communityParentJID = communityParentJID
         self.isCommunityParent = isCommunityParent
         self.isDefaultSubGroup = isDefaultSubGroup
+        self.pinnedAt = pinnedAt
     }
 }

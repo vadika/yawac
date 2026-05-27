@@ -60,8 +60,13 @@ struct ChatListView: View {
         var standaloneGroups: [Chat] = []
         var directChats: [Chat] = []
         var subsByParent: [String: [Chat]] = [:]
+        var pinned: [Chat] = []
 
         for c in chats {
+            if c.pinnedAt != nil {
+                pinned.append(c)
+                continue
+            }
             if c.isCommunityParent {
                 communities.append(c)
             } else if let parent = c.communityParentJID, !parent.isEmpty {
@@ -74,6 +79,24 @@ struct ChatListView: View {
         }
 
         let s = scope
+
+        // Pinned floats above everything (and across scope buckets).
+        // Hide under .communities — pin lives in the home tabs only.
+        let pinnedVisible: [Chat] = pinned.filter { c in
+            switch s {
+            case .all:         return true
+            case .chats:       return !c.isGroup && !c.isCommunityParent
+            case .groups:      return c.isGroup && !c.isCommunityParent
+            case .communities: return c.isCommunityParent
+            }
+        }
+        if !pinnedVisible.isEmpty {
+            out.append(.section(id: "pinned", label: "Pinned",
+                                count: pinnedVisible.count))
+            for p in pinnedVisible {
+                out.append(.chat(p, indent: 0))
+            }
+        }
 
         if (s == .all || s == .communities) && !communities.isEmpty {
             out.append(.section(id: "channels", label: "Channels",
@@ -247,6 +270,11 @@ struct ChatListView: View {
             chatRowBody(chat, indent: indent)
         }
         .buttonStyle(.plain)
+        .contextMenu {
+            Button(chat.pinnedAt != nil ? "Unpin chat" : "Pin chat") {
+                vm.pinChat(chat, pinned: chat.pinnedAt == nil)
+            }
+        }
     }
 
     @ViewBuilder
@@ -295,6 +323,13 @@ struct ChatListView: View {
                         .lineLimit(1)
                         .tracking(-0.1)
                     Spacer(minLength: 0)
+                    if chat.pinnedAt != nil {
+                        Image(systemName: "pin.fill")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(Theme.textFaint)
+                            .rotationEffect(.degrees(35))
+                            .help("Pinned")
+                    }
                     Text(chat.lastTimestampShort)
                         .font(Theme.mono(11))
                         .foregroundStyle(isSelected ? Theme.accentText : Theme.textFaint)

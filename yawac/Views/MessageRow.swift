@@ -77,6 +77,8 @@ struct MessageRow: View {
     let onEdit: ((UIMessage) -> Void)?
     let onDeleteForEveryone: ((UIMessage) -> Void)?
     let onDeleteForMe: ((UIMessage) -> Void)?
+    let onStar: ((UIMessage) -> Void)?
+    let onPin: ((UIMessage) -> Void)?
     let onJumpToQuoted: ((String) -> Void)?
     let isHighlighted: Bool
 
@@ -110,6 +112,8 @@ struct MessageRow: View {
          onEdit: ((UIMessage) -> Void)? = nil,
          onDeleteForEveryone: ((UIMessage) -> Void)? = nil,
          onDeleteForMe: ((UIMessage) -> Void)? = nil,
+         onStar: ((UIMessage) -> Void)? = nil,
+         onPin: ((UIMessage) -> Void)? = nil,
          onJumpToQuoted: ((String) -> Void)? = nil,
          isHighlighted: Bool = false) {
         self.message = message
@@ -132,6 +136,8 @@ struct MessageRow: View {
         self.onEdit = onEdit
         self.onDeleteForEveryone = onDeleteForEveryone
         self.onDeleteForMe = onDeleteForMe
+        self.onStar = onStar
+        self.onPin = onPin
         self.onJumpToQuoted = onJumpToQuoted
         self.isHighlighted = isHighlighted
     }
@@ -224,7 +230,8 @@ struct MessageRow: View {
                                 NSPasteboard.general.setString(body, forType: .string)
                             }
                         },
-                        onStar: {},
+                        onStar: { onStar?(message) },
+                        onPin: { onPin?(message) },
                         onDeleteForMe: { onDeleteForMe?(message) },
                         onDeleteForEveryone: { onDeleteForEveryone?(message) },
                         onEdit: { onEdit?(message) },
@@ -648,6 +655,19 @@ struct MessageRow: View {
                     .font(Theme.mono(10.5))
                     .foregroundStyle(Theme.textFaint)
                     .help("Edited \(message.editedAt!.formatted(.relative(presentation: .named)))")
+            }
+            if message.starredAt != nil {
+                Image(systemName: "star.fill")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.yellow)
+                    .help("Starred")
+            }
+            if message.pinnedAt != nil {
+                Image(systemName: "pin.fill")
+                    .font(.system(size: 9.5, weight: .semibold))
+                    .foregroundStyle(Theme.accent)
+                    .rotationEffect(.degrees(35))
+                    .help("Pinned")
             }
             if message.fromMe, let status {
                 Image(systemName: statusIcon(status))
