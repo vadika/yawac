@@ -78,6 +78,11 @@ struct ContentView: View {
             selectedChat = new
             session.pendingChatSelection = nil
         }
+        .onChange(of: session.deletedChatJID) { _, jid in
+            guard let jid else { return }
+            if selectedChat == jid { selectedChat = nil }
+            session.deletedChatJID = nil
+        }
         .task {
             guard let client = session.client else { return }
             let vm = ChatListViewModel(client: client, context: modelContext)
@@ -128,12 +133,14 @@ struct ContentView: View {
                     // were dark. The offline message queue is redelivered
                     // by the server as normal .message events.
                     vm.reconcilePinsWithStore()
+                    session.loadBlocklist()
                 case .historySync:
                     let cs = (try? client.listContacts()) ?? []
                     vm.resolveNames(cs)
                     vm.mergeContacts(cs)
                     session.ingestContacts(cs)
                     vm.reconcilePinsWithStore()
+                    session.loadBlocklist()
                 case .messageEdited(let chatJID, let messageID, let newText, let ts):
                     let when = Date(timeIntervalSince1970: TimeInterval(ts))
                     let canonical = JIDNormalize.canonical(chatJID, client: client)
@@ -175,6 +182,17 @@ struct ContentView: View {
                     session.currentConversation?.applyIncomingMessagePin(
                         chatJID: chatJID, targetMessageID: targetID,
                         pinned: pinned, at: when)
+                case .chatArchived(let chatJID, let archived, _):
+                    let canonical = JIDNormalize.canonical(chatJID, client: client)
+                    vm.applyIncomingArchive(chatJID: canonical, archived: archived)
+                case .chatDeleted(let chatJID, _):
+                    let canonical = JIDNormalize.canonical(chatJID, client: client)
+                    vm.applyIncomingDelete(chatJID: canonical)
+                case .contactUpdated(let jid, let fullName, _):
+                    let canonical = JIDNormalize.canonical(jid, client: client)
+                    vm.applyIncomingContact(jid: canonical, fullName: fullName)
+                case .blocklistChanged(let action, let changes):
+                    session.applyBlocklistChange(action: action, changes: changes)
                 default:
                     break
                 }
