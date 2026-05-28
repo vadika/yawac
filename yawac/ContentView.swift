@@ -133,6 +133,7 @@ struct ContentView: View {
                     // were dark. The offline message queue is redelivered
                     // by the server as normal .message events.
                     vm.reconcilePinsWithStore()
+                    vm.reconcileLIDDuplicates()
                     session.loadBlocklist()
                 case .historySync:
                     let cs = (try? client.listContacts()) ?? []
@@ -140,6 +141,7 @@ struct ContentView: View {
                     vm.mergeContacts(cs)
                     session.ingestContacts(cs)
                     vm.reconcilePinsWithStore()
+                    vm.reconcileLIDDuplicates()
                     session.loadBlocklist()
                 case .messageEdited(let chatJID, let messageID, let newText, let ts):
                     let when = Date(timeIntervalSince1970: TimeInterval(ts))

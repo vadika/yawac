@@ -412,6 +412,10 @@ final class WAClient: PhoneValidating {
         return out
     }
 
+    nonisolated func leaveGroup(jid: String) throws {
+        try go.leaveGroup(jid)
+    }
+
     func sendTyping(_ chatJID: String, _ typing: Bool) throws {
         try go.sendTyping(chatJID, typing: typing)
     }

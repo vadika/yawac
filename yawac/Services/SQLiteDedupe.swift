@@ -321,6 +321,51 @@ enum SQLiteDedupe {
         return okMsgs && okChat
     }
 
+    /// Collapses `@lid` chats into their phone-JID twin: reparents the LID
+    /// chat's messages to the phone JID, then deletes the LID chat row.
+    /// Chat metadata (unread/last/name) is merged in-memory by the caller and
+    /// persisted separately, so this only moves messages + drops the dup row.
+    /// Returns the number of LID chats dropped.
+    static func mergeLIDChats(_ pairs: [(lid: String, pn: String)]) -> Int {
+        guard !pairs.isEmpty else { return 0 }
+        let supportDir: URL
+        do {
+            supportDir = try FileManager.default.url(
+                for: .applicationSupportDirectory,
+                in: .userDomainMask,
+                appropriateFor: nil,
+                create: false)
+        } catch {
+            return 0
+        }
+        let storeURL = supportDir.appendingPathComponent("default.store")
+        guard FileManager.default.fileExists(atPath: storeURL.path) else {
+            return 0
+        }
+        var db: OpaquePointer?
+        guard sqlite3_open(storeURL.path, &db) == SQLITE_OK, let db else {
+            return 0
+        }
+        defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 2000)
+        sqlite3_exec(db, "PRAGMA journal_mode=WAL;", nil, nil, nil)
+        sqlite3_exec(db, "PRAGMA synchronous=NORMAL;", nil, nil, nil)
+        sqlite3_exec(db, "BEGIN IMMEDIATE;", nil, nil, nil)
+        var dropped = 0
+        for (lid, pn) in pairs {
+            _ = execStep(db: db,
+                sql: "UPDATE ZPERSISTEDMESSAGE SET ZCHATJID = ? WHERE ZCHATJID = ?;",
+                args: [pn, lid])
+            if execStep(db: db,
+                sql: "DELETE FROM ZPERSISTEDCHAT WHERE ZJID = ?;", args: [lid]) {
+                dropped += 1
+            }
+        }
+        sqlite3_exec(db, "COMMIT;", nil, nil, nil)
+        sqlite3_exec(db, "PRAGMA wal_checkpoint(FULL);", nil, nil, nil)
+        return dropped
+    }
+
     private static func execStep(db: OpaquePointer, sql: String, args: [String]) -> Bool {
         var stmt: OpaquePointer?
         let prep = sqlite3_prepare_v2(db, sql, -1, &stmt, nil)

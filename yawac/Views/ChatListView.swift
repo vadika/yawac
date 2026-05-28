@@ -302,6 +302,12 @@ struct ChatListView: View {
                 vm.addContact(chat, fullName: full, firstName: first)
             }
         }
+        // Keep active search results in sync when the chat list shrinks
+        // (e.g. a delete from within search) — otherwise the stale snapshot
+        // keeps showing the removed chat until the query changes.
+        .onChange(of: vm.chats.count) { _, _ in
+            if !search.query.isEmpty { search.refresh() }
+        }
     }
 
     @ViewBuilder
@@ -424,6 +430,12 @@ struct ChatListView: View {
                         .foregroundStyle(isSelected ? Theme.text : Theme.text)
                         .lineLimit(1)
                         .tracking(-0.1)
+                    if session.isBlocked(chat.jid) {
+                        Image(systemName: "nosign")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(Theme.textFaint)
+                            .help("Blocked")
+                    }
                     Spacer(minLength: 0)
                     if chat.pinnedAt != nil {
                         Image(systemName: "pin.fill")

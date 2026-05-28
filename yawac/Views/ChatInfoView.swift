@@ -31,6 +31,8 @@ struct ChatInfoView: View {
     @State private var userAbout: String?
     @State private var loadingUserInfo = false
     @State private var mediaVM: ChatMediaViewModel?
+    @State private var confirmBlock = false
+    @State private var confirmLeave = false
 
     private var isGroup: Bool { chatJID.hasSuffix("@g.us") }
     private var name: String { session.displayName(for: chatJID) }
@@ -86,6 +88,35 @@ struct ChatInfoView: View {
         .onChange(of: messageRevision) { _, _ in
             mediaVM?.externalPathResolver = mediaPathResolver
             mediaVM?.reload(limit: nil)
+        }
+        .confirmationDialog("Block \(name)?", isPresented: $confirmBlock) {
+            Button("Block", role: .destructive) {
+                session.setBlocked(chatJID, blocked: true)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("They won't be able to message you or see when you're online.")
+        }
+        .confirmationDialog("Leave \(name)?", isPresented: $confirmLeave) {
+            Button("Leave", role: .destructive) { leaveGroup() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("You'll stop receiving messages from this group.")
+        }
+    }
+
+    private func leaveGroup() {
+        guard let client = session.client else { return }
+        let jid = chatJID
+        Task { @MainActor in
+            do {
+                try await Task.detached { try client.leaveGroup(jid: jid) }.value
+                session.chatList?.applyIncomingDelete(chatJID: jid)
+                onClose?()
+            } catch {
+                NSLog("[yawac/leaveGroup] failed jid=%@ err=%@",
+                      jid, String(describing: error))
+            }
         }
     }
 
@@ -192,7 +223,11 @@ struct ChatInfoView: View {
         actionRow(actions: [
             .init(label: "Mute", icon: "speaker.slash"),
             .init(label: "Search", icon: "magnifyingglass"),
-            .init(label: "Block", icon: "hand.raised", destructive: true),
+            session.isBlocked(chatJID)
+                ? .init(label: "Unblock", icon: "hand.raised.slash",
+                        action: { session.setBlocked(chatJID, blocked: false) })
+                : .init(label: "Block", icon: "hand.raised", destructive: true,
+                        action: { confirmBlock = true }),
         ])
         starredSection
         sharedMediaSection
@@ -232,7 +267,7 @@ struct ChatInfoView: View {
             .init(label: "Mute", icon: "speaker.slash"),
             .init(label: "Search", icon: "magnifyingglass"),
             .init(label: "Leave", icon: "rectangle.portrait.and.arrow.right",
-                  destructive: true),
+                  destructive: true, action: { confirmLeave = true }),
         ])
 
         starredSection
@@ -360,26 +395,32 @@ struct ChatInfoView: View {
         let label: String
         let icon: String
         var destructive: Bool = false
+        var action: (() -> Void)? = nil
     }
     @ViewBuilder
     private func actionRow(actions: [ActionItem]) -> some View {
         HStack(spacing: 8) {
             ForEach(actions.indices, id: \.self) { i in
                 let a = actions[i]
-                VStack(spacing: 6) {
-                    Image(systemName: a.icon)
-                        .font(.system(size: 14, weight: .regular))
-                    Text(a.label)
-                        .font(Theme.ui(11.5, weight: .medium))
+                Button { a.action?() } label: {
+                    VStack(spacing: 6) {
+                        Image(systemName: a.icon)
+                            .font(.system(size: 14, weight: .regular))
+                        Text(a.label)
+                            .font(Theme.ui(11.5, weight: .medium))
+                    }
+                    .foregroundStyle(a.destructive ? Color.red.opacity(0.95) : Theme.text)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(Theme.surface, in: RoundedRectangle(cornerRadius: 8))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Theme.border, lineWidth: 1)
+                    )
+                    .contentShape(Rectangle())
                 }
-                .foregroundStyle(a.destructive ? Color.red.opacity(0.95) : Theme.text)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 12)
-                .background(Theme.surface, in: RoundedRectangle(cornerRadius: 8))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(Theme.border, lineWidth: 1)
-                )
+                .buttonStyle(.plain)
+                .disabled(a.action == nil)
             }
         }
     }

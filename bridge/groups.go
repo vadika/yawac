@@ -150,3 +150,15 @@ func (c *Client) CreateGroup(name string, participantJIDs string) (string, error
 	}
 	return info.JID.String(), nil
 }
+
+// LeaveGroup removes the current user from the group `jidStr`.
+func (c *Client) LeaveGroup(jidStr string) error {
+	if c.wa == nil {
+		return errors.New("client closed")
+	}
+	jid, err := types.ParseJID(jidStr)
+	if err != nil {
+		return fmt.Errorf("parse jid: %w", err)
+	}
+	return c.wa.LeaveGroup(context.Background(), jid)
+}

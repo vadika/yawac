@@ -135,7 +135,17 @@ final class SessionViewModel {
     }
 
     func isBlocked(_ jid: String) -> Bool {
-        blockedJIDs.contains(JIDNormalize.bare(jid))
+        let bare = JIDNormalize.bare(jid)
+        if blockedJIDs.contains(bare) { return true }
+        // blockedJIDs is normalized to phone JIDs (see ListBlocked), so a chat
+        // still keyed by @lid must be matched against its PN counterpart —
+        // otherwise the banner (which may use the @lid form) disagrees with the
+        // sidebar/Settings (PN form).
+        if bare.hasSuffix("@lid"), let client {
+            let pn = client.resolveLIDToPN(bare)
+            if pn != bare { return blockedJIDs.contains(JIDNormalize.bare(pn)) }
+        }
+        return false
     }
 
     /// Refetch the full blocklist from the server (off-main, since the
@@ -153,10 +163,12 @@ final class SessionViewModel {
         }
     }
 
-    /// Block/unblock a user. Optimistically updates the local set, then
-    /// re-fetches the authoritative list (the bridge sends the change as a
-    /// fire-and-forget IQ; the re-fetch confirms it and self-corrects on
-    /// rejection, plus normalizes LID→PN).
+    /// Block/unblock a user. The bridge sends the change as a fire-and-forget
+    /// IQ; we update the local set optimistically and let the inbound
+    /// BlocklistChanged event (and connect/settings refreshes) reconcile with
+    /// the server. We deliberately do NOT eagerly re-fetch here — the server
+    /// applies the change asynchronously, so a quick GET would race it and
+    /// make the banner flicker off→on.
     func setBlocked(_ jid: String, blocked: Bool) {
         guard let client else { return }
         let bare = JIDNormalize.bare(jid)
@@ -165,8 +177,6 @@ final class SessionViewModel {
                 try await Task.detached { try client.setBlocked(jid: bare, blocked: blocked) }.value
                 if blocked { self?.blockedJIDs.insert(bare) }
                 else { self?.blockedJIDs.remove(bare) }
-                try? await Task.sleep(for: .milliseconds(800))
-                self?.loadBlocklist()
             } catch {
                 NSLog("[yawac/blocklist] setBlocked failed jid=%@ err=%@",
                       bare, String(describing: error))

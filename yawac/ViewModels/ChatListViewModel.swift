@@ -26,6 +26,36 @@ final class ChatListViewModel {
         session?.totalUnread = total
     }
 
+    // MARK: - Delete tombstones
+
+    /// Persistent map of deleted-chat JID → deletion time (unix seconds).
+    /// A deleted *chat* is still a *contact* in the address book and its
+    /// history may be re-delivered by a later history sync, so without this
+    /// `mergeContacts`/`ingest` would re-add it. A tombstoned chat resurfaces
+    /// only when a message *newer than the deletion* arrives (matching
+    /// WhatsApp) or when the user explicitly starts the chat again.
+    private static let tombstoneKey = "yawac.deletedChats"
+    private var deletedChats: [String: Double] {
+        get { (UserDefaults.standard.dictionary(forKey: Self.tombstoneKey)
+                as? [String: Double]) ?? [:] }
+        set { UserDefaults.standard.set(newValue, forKey: Self.tombstoneKey) }
+    }
+    private func tombstone(_ jid: String) {
+        var d = deletedChats; d[jid] = Date().timeIntervalSince1970; deletedChats = d
+    }
+    private func untombstone(_ jid: String) {
+        var d = deletedChats
+        guard d[jid] != nil else { return }
+        d.removeValue(forKey: jid); deletedChats = d
+    }
+    private func isTombstoned(_ jid: String) -> Bool { deletedChats[jid] != nil }
+    /// True when a message at `timestamp` (unix seconds) should keep the chat
+    /// suppressed (it's an old replay of a deleted conversation).
+    private func suppressedByTombstone(_ jid: String, messageTS: Int64) -> Bool {
+        guard let deletedAt = deletedChats[jid] else { return false }
+        return Double(messageTS) <= deletedAt
+    }
+
     private func loadChats() {
         guard let context else { return }
         let descriptor = FetchDescriptor<PersistedChat>(
@@ -169,6 +199,7 @@ final class ChatListViewModel {
                     pinnedAt: row.pinnedAt,
                     archivedAt: row.archivedAt)
             }
+            .filter { !isTombstoned($0.jid) }
             .sorted(by: Self.chatOrder)
     }
 
@@ -191,6 +222,13 @@ final class ChatListViewModel {
         // Skip protocol/system noise — no UI value
         if message.kind == "protocol" || message.kind == "system" { return }
         let chatJID = JIDNormalize.canonical(message.chatJID, client: client)
+
+        // Deleted-chat handling: a message older-or-equal to the deletion is a
+        // history-sync replay of the cleared conversation — drop it so the chat
+        // stays deleted. A newer message means the conversation is alive again,
+        // so lift the tombstone and ingest normally (WhatsApp behavior).
+        if suppressedByTombstone(chatJID, messageTS: message.timestamp) { return }
+        untombstone(chatJID)
 
         // Dedupe: if this message id is already persisted, this is a replay
         // (e.g. HistorySync redelivering on reconnect). Skip unread/preview
@@ -365,6 +403,8 @@ final class ChatListViewModel {
         if let existing = chats.first(where: { $0.jid == jid }) {
             return existing.id
         }
+        // Explicit re-open of a previously deleted chat clears its tombstone.
+        untombstone(jid)
         let chat = Chat(
             jid: jid,
             name: displayName,
@@ -451,6 +491,7 @@ final class ChatListViewModel {
                 upsertPersisted(c)
                 continue
             }
+            if isTombstoned(jid) { continue }
             chats.append(Chat(
                 jid: jid,
                 name: g.name.isEmpty ? jid : g.name,
@@ -469,6 +510,7 @@ final class ChatListViewModel {
         for c in cs {
             let jid = JIDNormalize.bare(c.jid)
             if chats.contains(where: { $0.jid == jid }) { continue }
+            if isTombstoned(jid) { continue }
             let chat = Chat(
                 jid: jid,
                 name: c.name,
@@ -688,6 +730,48 @@ final class ChatListViewModel {
         if changed { sortChats() }
     }
 
+    /// Collapse `@lid` chats that now resolve (via whatsmeow's LID map) to a
+    /// phone JID we already have a chat for — the WhatsApp LID/PN duality that
+    /// surfaces the same person as two rows. The startup dedupe only catches
+    /// mappings known at load time; this re-runs it live once a mapping has
+    /// been learned (e.g. after a block resolves one, or on reconnect/sync).
+    /// Merges unread/last/name into the phone chat, reparents the LID chat's
+    /// messages, and drops the LID row. No-op when no resolvable dups exist.
+    func reconcileLIDDuplicates() {
+        guard let client else { return }
+        let pnJIDs = Set(chats.filter { $0.jid.hasSuffix("@s.whatsapp.net") }.map(\.jid))
+        var pairs: [(lid: String, pn: String)] = []
+        for c in chats where c.jid.hasSuffix("@lid") {
+            let pn = client.resolveLIDToPN(c.jid)
+            if pn != c.jid, pn.hasSuffix("@s.whatsapp.net"), pnJIDs.contains(pn) {
+                pairs.append((lid: c.jid, pn: pn))
+            }
+        }
+        guard !pairs.isEmpty else { return }
+        for (lid, pn) in pairs {
+            guard let li = chats.firstIndex(where: { $0.jid == lid }),
+                  let pi = chats.firstIndex(where: { $0.jid == pn }) else { continue }
+            let lidChat = chats[li]
+            var pnChat = chats[pi]
+            pnChat.unread += lidChat.unread
+            if lidChat.lastTimestamp > pnChat.lastTimestamp {
+                pnChat.lastTimestamp = lidChat.lastTimestamp
+                pnChat.lastMessage = lidChat.lastMessage
+            }
+            // Adopt the LID row's name only if the phone row is still an
+            // unresolved placeholder (its jid as the name).
+            if pnChat.name == pn, lidChat.name != lid {
+                pnChat.name = lidChat.name
+            }
+            chats[pi] = pnChat
+            upsertPersisted(pnChat)
+        }
+        let lids = Set(pairs.map(\.lid))
+        chats.removeAll { lids.contains($0.jid) }
+        _ = SQLiteDedupe.mergeLIDChats(pairs)
+        sortChats()
+    }
+
     private func applyLocalPin(chatJID: String, pinnedAt: Date?) {
         if let idx = chats.firstIndex(where: { $0.jid == chatJID }) {
             chats[idx].pinnedAt = pinnedAt
@@ -784,6 +868,7 @@ final class ChatListViewModel {
     }
 
     private func removeChatLocally(_ chatJID: String) {
+        tombstone(chatJID)
         chats.removeAll { $0.jid == chatJID }
         if let context {
             let msgs = FetchDescriptor<PersistedMessage>(

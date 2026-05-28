@@ -121,11 +121,28 @@ final class ChatSearchViewModel {
     }
 
     private func runFilter(_ q: String) async {
+        filteredChats = matches(for: q)
+    }
+
+    /// Re-run the current text filter against the latest `listVM.chats`.
+    /// Called when the chat list mutates (e.g. a delete) while a search is
+    /// active, so removed chats drop out of the results immediately instead
+    /// of lingering until the next query change / reload.
+    func refresh() {
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else {
+            filteredChats = listVM?.chats ?? []
+            return
+        }
+        filteredChats = matches(for: query)
+    }
+
+    private func matches(for q: String) -> [Chat] {
         let normalized = q.trimmingCharacters(in: .whitespacesAndNewlines)
                            .lowercased()
         let digits = Self.digitsOnly(q)
         let source = listVM?.chats ?? []
-        let matches = source.filter { chat in
+        return source.filter { chat in
             if chat.name.localizedCaseInsensitiveContains(normalized) {
                 return true
             }
@@ -134,7 +151,6 @@ final class ChatSearchViewModel {
             }
             return false
         }
-        self.filteredChats = matches
     }
 
     static func digitsOnly(_ s: String) -> String {
