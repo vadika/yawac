@@ -152,7 +152,12 @@ final class SessionViewModel {
             let monitor = ConnectivityMonitor(
                 isReady: { [weak self] in self?.state == .ready },
                 isConnected: { [weak self] in self?.client?.connected ?? false },
-                reconnect: { [weak self] _ in self?.client?.forceReconnect() })
+                reconnect: { [weak self] _ in
+                    guard let c = self?.client else { return }
+                    // forceReconnect blocks on gomobile (DNS dial) — run
+                    // off-main and await so the retry loop serializes.
+                    await Task.detached { c.forceReconnect() }.value
+                })
             monitor.start()
             self.connectivity = monitor
         } catch {

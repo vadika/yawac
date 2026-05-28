@@ -19,11 +19,19 @@ final class ConnectivityMonitor {
     enum Reason { case wake, network, appActive }
 
     private let debounce: Duration
+    /// Delays *between* reconnect attempts; the last value repeats for
+    /// every attempt past the array's end. The loop retries
+    /// indefinitely while disconnected (until connected, cancelled, or
+    /// `stop()`), because the window after a path flips `.satisfied`
+    /// but DNS/routing isn't usable yet can outlast any fixed schedule
+    /// — observed 50s+ of `no such host` after Wi-Fi returned.
+    private let retryBackoff: [Duration]
     private let isReady: () -> Bool
     private let isConnected: () -> Bool
-    private let reconnect: (_ force: Bool) -> Void
+    private let reconnect: (_ force: Bool) async -> Void
 
-    private var pending: Task<Void, Never>?
+    private var debounceTask: Task<Void, Never>?
+    private var loopTask: Task<Void, Never>?
     private var wakeInWindow = false
 
     private let pathMonitor = NWPathMonitor()
@@ -32,10 +40,13 @@ final class ConnectivityMonitor {
     private var observers: [NSObjectProtocol] = []
 
     init(debounce: Duration = .seconds(2),
+         retryBackoff: [Duration] = [.seconds(2), .seconds(4), .seconds(8),
+                                     .seconds(8), .seconds(8)],
          isReady: @escaping () -> Bool,
          isConnected: @escaping () -> Bool,
-         reconnect: @escaping (_ force: Bool) -> Void) {
+         reconnect: @escaping (_ force: Bool) async -> Void) {
         self.debounce = debounce
+        self.retryBackoff = retryBackoff
         self.isReady = isReady
         self.isConnected = isConnected
         self.reconnect = reconnect
@@ -64,8 +75,8 @@ final class ConnectivityMonitor {
     }
 
     func stop() {
-        pending?.cancel()
-        pending = nil
+        debounceTask?.cancel(); debounceTask = nil
+        loopTask?.cancel(); loopTask = nil
         pathMonitor.cancel()
         let ws = NSWorkspace.shared.notificationCenter
         for o in observers {
@@ -87,8 +98,8 @@ final class ConnectivityMonitor {
     /// reconnect decision. Exposed (not private) for unit tests.
     func trigger(_ reason: Reason) {
         if reason == .wake { wakeInWindow = true }
-        pending?.cancel()
-        pending = Task { @MainActor [weak self] in
+        debounceTask?.cancel()
+        debounceTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: self?.debounce ?? .seconds(2))
             guard let self, !Task.isCancelled else { return }
             self.fire()
@@ -99,8 +110,36 @@ final class ConnectivityMonitor {
         let force = wakeInWindow
         wakeInWindow = false
         guard isReady() else { return }
-        if force || !isConnected() {
-            reconnect(force)
+        // Already up and this isn't a post-sleep half-open suspicion →
+        // nothing to do.
+        if !force && isConnected() { return }
+        startReconnectLoop(force: force)
+    }
+
+    /// Retries reconnect with backoff until the socket is up or the
+    /// backoff schedule is exhausted. Attempts are awaited (serialized)
+    /// so two `Connect()` calls never overlap and contend on the socket
+    /// lock. A fresh trigger cancels an in-flight loop and starts over.
+    /// A `force` first attempt (post-sleep wake) bypasses the
+    /// `isConnected()` guard because that flag is stale-true on a
+    /// half-open socket.
+    private func startReconnectLoop(force: Bool) {
+        loopTask?.cancel()
+        loopTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            var i = 0
+            while !Task.isCancelled {
+                let mustForce = force && i == 0
+                if !mustForce && self.isConnected() { return }
+                NSLog("[yawac/connectivity] reconnect attempt \(i + 1) force=\(mustForce)")
+                await self.reconnect(mustForce)
+                if Task.isCancelled || self.isConnected() { return }
+                // Escalate through the schedule, then hold at its last
+                // value forever so a late DNS recovery still reconnects.
+                let delay = self.retryBackoff[min(i, self.retryBackoff.count - 1)]
+                try? await Task.sleep(for: delay)
+                i += 1
+            }
         }
     }
 }

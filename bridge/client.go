@@ -142,8 +142,11 @@ func (c *Client) Reconnect() error {
 	if c.wa.Store.ID == nil {
 		return nil // unpaired → QR/pair flow owns connect
 	}
+	fmt.Fprintf(os.Stderr, "[yawac/reconnect] forced; wasConnected=%v\n", c.wa.IsConnected())
 	c.wa.Disconnect()
-	return c.wa.Connect()
+	err := c.wa.Connect()
+	fmt.Fprintf(os.Stderr, "[yawac/reconnect] connect returned err=%v nowConnected=%v\n", err, c.wa.IsConnected())
+	return err
 }
 
 // IsConnected reports whether the websocket is currently up. Note: after
