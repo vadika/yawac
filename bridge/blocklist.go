@@ -6,17 +6,19 @@ import (
 	"errors"
 	"fmt"
 
+	waBinary "go.mau.fi/whatsmeow/binary"
 	"go.mau.fi/whatsmeow/types"
-	"go.mau.fi/whatsmeow/types/events"
 )
 
-// SetBlocked blocks or unblocks a user via the WhatsApp blocklist IQ
-// (UpdateBlocklist). The change propagates to the user's other devices.
+// SetBlocked blocks or unblocks a user.
 //
-// WhatsApp's blocklist set requires the LID form for users that have a LID
-// (post privacy-migration); sending the phone JID returns "400 bad-request".
-// So when given a phone JID we resolve it to its LID first. Contacts with no
-// known LID mapping fall back to the phone JID.
+// WhatsApp migrated the blocklist to LID addressing: the server stores each
+// entry as <item jid="<lid>@lid" pn_jid="<phone>@s.whatsapp.net"/> and rejects
+// a set request that carries only one of the two forms ("400 bad-request",
+// addressing_mode="lid"). whatsmeow's UpdateBlocklist sends only `jid`, so it
+// can't satisfy this. We build the dual-addressed IQ ourselves and send it via
+// the raw node API. The server pushes a blocklist notification on success,
+// which whatsmeow turns into events.Blocklist → the Swift side re-fetches.
 func (c *Client) SetBlocked(jid string, blocked bool) error {
 	if c.wa == nil {
 		return errors.New("client closed")
@@ -25,18 +27,52 @@ func (c *Client) SetBlocked(jid string, blocked bool) error {
 	if err != nil {
 		return fmt.Errorf("parse jid: %w", err)
 	}
-	if target.Server == types.DefaultUserServer &&
-		c.wa.Store != nil && c.wa.Store.LIDs != nil {
-		if lid, lerr := c.wa.Store.LIDs.GetLIDForPN(context.Background(), target); lerr == nil && !lid.IsEmpty() {
-			target = lid
+	ctx := context.Background()
+
+	// Resolve both addressing forms from whichever one we were given.
+	var lid, pn types.JID
+	switch target.Server {
+	case types.HiddenUserServer:
+		lid = target
+		if c.wa.Store != nil && c.wa.Store.LIDs != nil {
+			pn, _ = c.wa.Store.LIDs.GetPNForLID(ctx, target)
+		}
+	default:
+		pn = target
+		if c.wa.Store != nil && c.wa.Store.LIDs != nil {
+			lid, _ = c.wa.Store.LIDs.GetLIDForPN(ctx, target)
 		}
 	}
-	action := events.BlocklistChangeActionUnblock
+
+	action := "unblock"
 	if blocked {
-		action = events.BlocklistChangeActionBlock
+		action = "block"
 	}
-	_, err = c.wa.UpdateBlocklist(context.Background(), target, action)
-	return err
+
+	itemAttrs := waBinary.Attrs{"action": action}
+	if !lid.IsEmpty() {
+		itemAttrs["jid"] = lid
+		if !pn.IsEmpty() {
+			itemAttrs["pn_jid"] = pn
+		}
+	} else {
+		// No known LID mapping — fall back to the phone JID alone. Older
+		// (pre-LID) accounts still accept this; LID accounts will reject it,
+		// but we have nothing better without a server usync.
+		itemAttrs["jid"] = target
+	}
+
+	node := waBinary.Node{
+		Tag: "iq",
+		Attrs: waBinary.Attrs{
+			"id":    c.wa.DangerousInternals().GenerateRequestID(),
+			"to":    types.ServerJID,
+			"type":  "set",
+			"xmlns": "blocklist",
+		},
+		Content: []waBinary.Node{{Tag: "item", Attrs: itemAttrs}},
+	}
+	return c.wa.DangerousInternals().SendNode(ctx, node)
 }
 
 // ListBlocked returns a JSON array of blocked JID strings (GetBlocklist).

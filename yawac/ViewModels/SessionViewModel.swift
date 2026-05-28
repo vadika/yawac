@@ -153,7 +153,10 @@ final class SessionViewModel {
         }
     }
 
-    /// Block/unblock a user. Updates the local set on success.
+    /// Block/unblock a user. Optimistically updates the local set, then
+    /// re-fetches the authoritative list (the bridge sends the change as a
+    /// fire-and-forget IQ; the re-fetch confirms it and self-corrects on
+    /// rejection, plus normalizes LID→PN).
     func setBlocked(_ jid: String, blocked: Bool) {
         guard let client else { return }
         let bare = JIDNormalize.bare(jid)
@@ -162,6 +165,8 @@ final class SessionViewModel {
                 try await Task.detached { try client.setBlocked(jid: bare, blocked: blocked) }.value
                 if blocked { self?.blockedJIDs.insert(bare) }
                 else { self?.blockedJIDs.remove(bare) }
+                try? await Task.sleep(for: .milliseconds(800))
+                self?.loadBlocklist()
             } catch {
                 NSLog("[yawac/blocklist] setBlocked failed jid=%@ err=%@",
                       bare, String(describing: error))
