@@ -5,9 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"go.mau.fi/whatsmeow/appstate"
+	"go.mau.fi/whatsmeow/proto/waCommon"
 	"go.mau.fi/whatsmeow/types"
+	"google.golang.org/protobuf/proto"
 )
 
 // StarMessage stars or unstars a target message via the WhatsApp
@@ -92,5 +95,59 @@ func (c *Client) PinChat(chatJID string, pinned bool) error {
 		return fmt.Errorf("parse chat: %w", err)
 	}
 	patch := appstate.BuildPin(chat, pinned)
+	return c.wa.SendAppState(context.Background(), patch)
+}
+
+// messageKeyOrNil builds a *waCommon.MessageKey for archive/delete message
+// ranges, or nil when no last-message id is known. whatsmeow's
+// newMessageRange is zero-safe and substitutes time.Now() for a zero
+// timestamp, so passing nil here is valid for empty chats.
+func messageKeyOrNil(chatJID, lastMsgID string, fromMe bool) *waCommon.MessageKey {
+	if lastMsgID == "" {
+		return nil
+	}
+	return &waCommon.MessageKey{
+		RemoteJID: proto.String(chatJID),
+		FromMe:    proto.Bool(fromMe),
+		ID:        proto.String(lastMsgID),
+	}
+}
+
+// ArchiveChat archives or unarchives a chat. whatsmeow's BuildArchive uses
+// WAPatchRegularLow (version 3) and auto-unpins the chat when archiving.
+// lastTS/lastMsgID/fromMe anchor the archive to the chat's last message;
+// pass 0/""/false when unknown.
+func (c *Client) ArchiveChat(chatJID string, archived bool, lastTS int64, lastMsgID string, fromMe bool) error {
+	if c.wa == nil {
+		return errors.New("client closed")
+	}
+	chat, err := types.ParseJID(chatJID)
+	if err != nil {
+		return fmt.Errorf("parse chat: %w", err)
+	}
+	ts := time.Time{}
+	if lastTS > 0 {
+		ts = time.Unix(lastTS, 0)
+	}
+	patch := appstate.BuildArchive(chat, archived, ts, messageKeyOrNil(chatJID, lastMsgID, fromMe))
+	return c.wa.SendAppState(context.Background(), patch)
+}
+
+// DeleteChat clears a conversation on every device. whatsmeow's
+// BuildDeleteChat uses WAPatchRegularHigh (version 6); we never delete media
+// server-side (deleteMedia=false).
+func (c *Client) DeleteChat(chatJID string, lastTS int64, lastMsgID string, fromMe bool) error {
+	if c.wa == nil {
+		return errors.New("client closed")
+	}
+	chat, err := types.ParseJID(chatJID)
+	if err != nil {
+		return fmt.Errorf("parse chat: %w", err)
+	}
+	ts := time.Time{}
+	if lastTS > 0 {
+		ts = time.Unix(lastTS, 0)
+	}
+	patch := appstate.BuildDeleteChat(chat, ts, messageKeyOrNil(chatJID, lastMsgID, fromMe), false)
 	return c.wa.SendAppState(context.Background(), patch)
 }
