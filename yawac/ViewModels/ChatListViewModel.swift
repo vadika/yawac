@@ -740,14 +740,19 @@ final class ChatListViewModel {
     }
 
     private func applyLocalArchive(chatJID: String, archivedAt: Date?) {
+        // whatsmeow's BuildArchive auto-unpins on archive, so mirror that
+        // locally — otherwise an archived chat keeps a stale pinnedAt and
+        // briefly re-floats to the Pinned section on unarchive.
         if let idx = chats.firstIndex(where: { $0.jid == chatJID }) {
             chats[idx].archivedAt = archivedAt
+            if archivedAt != nil { chats[idx].pinnedAt = nil }
             upsertPersisted(chats[idx])
         } else if let context {
             let descriptor = FetchDescriptor<PersistedChat>(
                 predicate: #Predicate { $0.jid == chatJID })
             if let row = try? context.fetch(descriptor).first {
                 row.archivedAt = archivedAt
+                if archivedAt != nil { row.pinnedAt = nil }
                 try? context.save()
             }
         }
