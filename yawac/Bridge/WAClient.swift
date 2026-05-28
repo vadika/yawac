@@ -176,6 +176,22 @@ final class WAClient: PhoneValidating {
         return try JSONDecoder().decode(BridgeSendResult.self, from: Data(json.utf8))
     }
 
+    func forwardText(_ chatJID: String, text: String) throws -> BridgeSendResult {
+        var err: NSError?
+        let json = go.forwardText(chatJID, text: text, error: &err)
+        if let err { throw err }
+        return try JSONDecoder().decode(BridgeSendResult.self, from: Data(json.utf8))
+    }
+
+    func forwardMedia(_ chatJID: String, refJSON: String,
+                      caption: String, fileName: String) throws -> BridgeSendResult {
+        var err: NSError?
+        let json = go.forwardMedia(chatJID, refJSON: refJSON,
+                                   caption: caption, fileName: fileName, error: &err)
+        if let err { throw err }
+        return try JSONDecoder().decode(BridgeSendResult.self, from: Data(json.utf8))
+    }
+
     func editText(_ chatJID: String, _ msgID: String, _ newBody: String) throws -> BridgeSendResult {
         var err: NSError?
         let json = go.editText(chatJID, msgID: msgID, newBody: newBody, error: &err)
