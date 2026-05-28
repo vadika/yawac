@@ -41,10 +41,9 @@ struct ContactNameSheet: View {
                 Spacer()
                 Button("Cancel") { dismiss() }
                 Button("Save") {
-                    if !trimmedFull.isEmpty {
-                        onSave(trimmedFull,
-                               firstName.trimmingCharacters(in: .whitespacesAndNewlines))
-                    }
+                    guard !trimmedFull.isEmpty else { return }
+                    onSave(trimmedFull,
+                           firstName.trimmingCharacters(in: .whitespacesAndNewlines))
                     dismiss()
                 }
                 .buttonStyle(.borderedProminent)

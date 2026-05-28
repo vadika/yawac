@@ -268,38 +268,40 @@ struct ChatListView: View {
                 .padding(.horizontal, 8)
                 .padding(.bottom, 12)
             }
-            .confirmationDialog(
-                "Delete chat with \(pendingDelete?.name ?? "")?",
-                isPresented: Binding(get: { pendingDelete != nil },
-                                     set: { if !$0 { pendingDelete = nil } }),
-                presenting: pendingDelete
-            ) { chat in
-                Button("Delete", role: .destructive) {
-                    vm.deleteChat(chat); pendingDelete = nil
-                }
-                Button("Cancel", role: .cancel) { pendingDelete = nil }
-            } message: { _ in
-                Text("This clears the conversation on all your devices.")
-            }
-            .confirmationDialog(
-                "Block \(pendingBlock?.name ?? "")?",
-                isPresented: Binding(get: { pendingBlock != nil },
-                                     set: { if !$0 { pendingBlock = nil } }),
-                presenting: pendingBlock
-            ) { chat in
-                Button("Block", role: .destructive) {
-                    session.setBlocked(chat.jid, blocked: true); pendingBlock = nil
-                }
-                Button("Cancel", role: .cancel) { pendingBlock = nil }
-            }
-            .sheet(item: $contactEditing) { chat in
-                ContactNameSheet(initialName: chat.name == chat.jid ? "" : chat.name) { full, first in
-                    vm.addContact(chat, fullName: full, firstName: first)
-                }
-            }
         }
         .background(Theme.sidebarBg)
         .ignoresSafeArea(.container, edges: .top)
+        .confirmationDialog(
+            "Delete chat with \(pendingDelete?.name ?? "")?",
+            isPresented: Binding(get: { pendingDelete != nil },
+                                 set: { if !$0 { pendingDelete = nil } }),
+            presenting: pendingDelete
+        ) { chat in
+            Button("Delete", role: .destructive) {
+                vm.deleteChat(chat); pendingDelete = nil
+            }
+            Button("Cancel", role: .cancel) { pendingDelete = nil }
+        } message: { _ in
+            Text("This clears the conversation on all your devices.")
+        }
+        .confirmationDialog(
+            "Block \(pendingBlock?.name ?? "")?",
+            isPresented: Binding(get: { pendingBlock != nil },
+                                 set: { if !$0 { pendingBlock = nil } }),
+            presenting: pendingBlock
+        ) { chat in
+            Button("Block", role: .destructive) {
+                session.setBlocked(chat.jid, blocked: true); pendingBlock = nil
+            }
+            Button("Cancel", role: .cancel) { pendingBlock = nil }
+        } message: { _ in
+            Text("They won't be able to message you or see when you're online.")
+        }
+        .sheet(item: $contactEditing) { chat in
+            ContactNameSheet(initialName: chat.name == chat.jid ? "" : chat.name) { full, first in
+                vm.addContact(chat, fullName: full, firstName: first)
+            }
+        }
     }
 
     @ViewBuilder
