@@ -32,6 +32,7 @@ struct ConversationView: View {
     @State private var lastSeenCount = 0
     @State private var showInfo = false
     @State private var atBottom = true
+    @State private var showForwardPicker = false
 
     @ViewBuilder
     private var inspectorPane: some View {
@@ -99,6 +100,28 @@ struct ConversationView: View {
             return (Theme.textFaint, "last seen \(fmt.localizedString(for: date, relativeTo: Date()))")
         }
         return nil
+    }
+
+    /// Replaces the composer while forwarding: selection count + actions.
+    @ViewBuilder
+    private func forwardBar(_ vm: ConversationViewModel) -> some View {
+        HStack(spacing: 14) {
+            Button("Cancel") { vm.cancelForward() }
+                .buttonStyle(.plain)
+                .foregroundStyle(Theme.textMuted)
+            Spacer()
+            Text("\(vm.forwardSelection.count) selected")
+                .font(Theme.ui(13))
+                .foregroundStyle(Theme.text)
+            Spacer()
+            Button("Forward") { showForwardPicker = true }
+                .buttonStyle(.plain)
+                .foregroundStyle(vm.forwardSelection.isEmpty ? Theme.textFaint : Theme.accent)
+                .disabled(vm.forwardSelection.isEmpty)
+        }
+        .padding(.horizontal, 22).padding(.vertical, 14)
+        .background(Theme.bg)
+        .overlay(alignment: .top) { Rectangle().fill(Theme.border).frame(height: 1) }
     }
 
     /// Custom header bar replaces SwiftUI's titlebar so we can apply
@@ -289,8 +312,13 @@ struct ConversationView: View {
                                             onDeleteForMe: { m in vm.deleteForMe(m) },
                                             onStar: { m in vm.starMessage(m, starred: m.starredAt == nil) },
                                             onPin: { m in vm.pinMessage(m, pinned: m.pinnedAt == nil) },
+                                            onForward: { m in vm.beginForward(m) },
                                             onJumpToQuoted: { id in vm.jumpToQuoted(id: id) },
-                                            isHighlighted: vm.highlightedID == msg.id
+                                            isHighlighted: vm.highlightedID == msg.id,
+                                            selecting: vm.forwardSelecting,
+                                            selected: vm.forwardSelection.contains(msg.id),
+                                            selectable: vm.canForward(msg),
+                                            onToggleSelect: { vm.toggleForward(msg.id) }
                                         )
                                         .id(msg.id)
                                         .modifier(BottomVisibilityTracker(
@@ -378,7 +406,11 @@ struct ConversationView: View {
                         }
                         .padding(.horizontal, 26).padding(.bottom, 4)
                     }
-                    ComposerView(vm: vm)
+                    if vm.forwardSelecting {
+                        forwardBar(vm)
+                    } else {
+                        ComposerView(vm: vm)
+                    }
                 }
                 .background(Theme.bg)
             } else {
@@ -397,6 +429,15 @@ struct ConversationView: View {
         // system font renders bold even in unstyled contexts (Window menu,
         // Dock context menu, screen readers).
         .navigationTitle("𝐲 - \(session.displayName(for: chatJID))")
+        .sheet(isPresented: $showForwardPicker) {
+            if let vm {
+                ForwardPickerView { jid in
+                    showForwardPicker = false
+                    Task { await vm.executeForward(to: jid) }
+                }
+                .environment(session)
+            }
+        }
         .onDrop(of: [.fileURL], isTargeted: nil) { providers in
             guard let vm else { return false }
             for p in providers {
@@ -422,6 +463,7 @@ struct ConversationView: View {
             didInitialScroll = false
             atBottom = false
             lastSeenCount = 0
+            self.vm?.cancelForward()
             let vm = ConversationViewModel(chatJID: chatJID, client: client, context: modelContext)
             vm.loadHistory()
             // Don't bulk-clear unread on chat open — let
