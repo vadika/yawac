@@ -378,6 +378,18 @@ final class WAClient: PhoneValidating {
         try go.sendPresence(available)
     }
 
+    /// Forces a clean socket cycle on the Go side. nonisolated so the
+    /// blocking gomobile call runs off the main actor.
+    nonisolated func forceReconnect() {
+        try? go.reconnect()
+    }
+
+    /// Current websocket state per whatsmeow. Stale-true after sleep —
+    /// see bridge IsConnected doc. nonisolated for off-main calls.
+    nonisolated var connected: Bool {
+        go.isConnected()
+    }
+
     private func startPump() {
         let stream = bus.stream
         pump = Task { @MainActor [weak self] in
