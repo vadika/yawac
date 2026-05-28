@@ -4,6 +4,11 @@ struct ChatListView: View {
     @Environment(ChatListViewModel.self) private var vm
     @Environment(ChatSearchViewModel.self) private var search
     @FocusState private var searchFocused: Bool
+    @Environment(SessionViewModel.self) private var session
+    @State private var archivedExpanded = false
+    @State private var pendingDelete: Chat?
+    @State private var pendingBlock: Chat?
+    @State private var contactEditing: Chat?
     @Binding var selection: Chat.ID?
     @AppStorage("yawac.chatListScope") private var scopeRaw: String = Scope.all.rawValue
 
@@ -35,11 +40,13 @@ struct ChatListView: View {
         case section(id: String, label: String, count: Int)
         case chat(Chat, indent: CGFloat)
         case suggestion(PhoneSuggestion)
+        case archivedHeader(count: Int)
         var id: String {
             switch self {
             case .section(let id, _, _): return "sec:" + id
             case .chat(let c, let i):    return "row:\(c.jid)#\(Int(i))"
             case .suggestion(let s):     return "sug:" + s.jid
+            case .archivedHeader:        return "sec:archived-header"
             }
         }
     }
@@ -61,8 +68,13 @@ struct ChatListView: View {
         var directChats: [Chat] = []
         var subsByParent: [String: [Chat]] = [:]
         var pinned: [Chat] = []
+        var archived: [Chat] = []
 
         for c in chats {
+            if search.query.isEmpty, c.archivedAt != nil {
+                archived.append(c)
+                continue
+            }
             if c.pinnedAt != nil {
                 pinned.append(c)
                 continue
@@ -79,6 +91,23 @@ struct ChatListView: View {
         }
 
         let s = scope
+
+        let archivedVisible: [Chat] = archived.filter { c in
+            switch s {
+            case .all:         return true
+            case .chats:       return !c.isGroup && !c.isCommunityParent
+            case .groups:      return c.isGroup && !c.isCommunityParent
+            case .communities: return c.isCommunityParent
+            }
+        }
+        if !archivedVisible.isEmpty {
+            out.append(.archivedHeader(count: archivedVisible.count))
+            if archivedExpanded {
+                for a in archivedVisible {
+                    out.append(.chat(a, indent: 0))
+                }
+            }
+        }
 
         // Pinned floats above everything (and across scope buckets).
         // Hide under .communities — pin lives in the home tabs only.
@@ -231,11 +260,42 @@ struct ChatListView: View {
                             chatRowButton(chat, indent: indent)
                         case .suggestion(let s):
                             suggestionRowButton(s)
+                        case .archivedHeader(let count):
+                            archivedHeaderRow(count: count)
                         }
                     }
                 }
                 .padding(.horizontal, 8)
                 .padding(.bottom, 12)
+            }
+            .confirmationDialog(
+                "Delete chat with \(pendingDelete?.name ?? "")?",
+                isPresented: Binding(get: { pendingDelete != nil },
+                                     set: { if !$0 { pendingDelete = nil } }),
+                presenting: pendingDelete
+            ) { chat in
+                Button("Delete", role: .destructive) {
+                    vm.deleteChat(chat); pendingDelete = nil
+                }
+                Button("Cancel", role: .cancel) { pendingDelete = nil }
+            } message: { _ in
+                Text("This clears the conversation on all your devices.")
+            }
+            .confirmationDialog(
+                "Block \(pendingBlock?.name ?? "")?",
+                isPresented: Binding(get: { pendingBlock != nil },
+                                     set: { if !$0 { pendingBlock = nil } }),
+                presenting: pendingBlock
+            ) { chat in
+                Button("Block", role: .destructive) {
+                    session.setBlocked(chat.jid, blocked: true); pendingBlock = nil
+                }
+                Button("Cancel", role: .cancel) { pendingBlock = nil }
+            }
+            .sheet(item: $contactEditing) { chat in
+                ContactNameSheet(initialName: chat.name == chat.jid ? "" : chat.name) { full, first in
+                    vm.addContact(chat, fullName: full, firstName: first)
+                }
             }
         }
         .background(Theme.sidebarBg)
@@ -263,6 +323,31 @@ struct ChatListView: View {
     }
 
     @ViewBuilder
+    private func archivedHeaderRow(count: Int) -> some View {
+        Button { archivedExpanded.toggle() } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "archivebox")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.textFaint)
+                Text("Archived")
+                    .font(Theme.ui(13, weight: .medium))
+                    .foregroundStyle(Theme.textMuted)
+                Spacer()
+                Text("\(count)")
+                    .font(Theme.mono(10.5))
+                    .foregroundStyle(Theme.textFaint)
+                    .monospacedDigit()
+                Image(systemName: archivedExpanded ? "chevron.down" : "chevron.right")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Theme.textFaint)
+            }
+            .padding(.horizontal, 10).padding(.vertical, 8)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
     private func chatRowButton(_ chat: Chat, indent: CGFloat = 0) -> some View {
         Button {
             selection = chat.id
@@ -274,6 +359,19 @@ struct ChatListView: View {
             Button(chat.pinnedAt != nil ? "Unpin chat" : "Pin chat") {
                 vm.pinChat(chat, pinned: chat.pinnedAt == nil)
             }
+            Button(chat.archivedAt != nil ? "Unarchive" : "Archive") {
+                vm.archiveChat(chat, archived: chat.archivedAt == nil)
+            }
+            if !chat.isGroup && !chat.isCommunityParent {
+                Button("Add to contacts…") { contactEditing = chat }
+                if session.isBlocked(chat.jid) {
+                    Button("Unblock") { session.setBlocked(chat.jid, blocked: false) }
+                } else {
+                    Button("Block…") { pendingBlock = chat }
+                }
+            }
+            Divider()
+            Button("Delete chat…", role: .destructive) { pendingDelete = chat }
         }
     }
 
