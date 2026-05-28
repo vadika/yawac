@@ -101,6 +101,12 @@ struct ContentView: View {
                     }
                 case .presence(let jid, let online, let lastSeen):
                     session.ingestPresence(jid: jid, online: online, lastSeen: lastSeen)
+                case .connected:
+                    // Reconnect (initial or auto/forced) — re-reconcile
+                    // appstate-backed UI that may have changed while we
+                    // were dark. The offline message queue is redelivered
+                    // by the server as normal .message events.
+                    vm.reconcilePinsWithStore()
                 case .historySync:
                     let cs = (try? client.listContacts()) ?? []
                     vm.resolveNames(cs)
