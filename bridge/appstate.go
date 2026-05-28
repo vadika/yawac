@@ -9,6 +9,7 @@ import (
 
 	"go.mau.fi/whatsmeow/appstate"
 	"go.mau.fi/whatsmeow/proto/waCommon"
+	"go.mau.fi/whatsmeow/proto/waSyncAction"
 	"go.mau.fi/whatsmeow/types"
 	"google.golang.org/protobuf/proto"
 )
@@ -131,6 +132,42 @@ func (c *Client) ArchiveChat(chatJID string, archived bool, lastTS int64, lastMs
 	}
 	patch := appstate.BuildArchive(chat, archived, ts, messageKeyOrNil(chat, lastMsgID, fromMe))
 	return c.wa.SendAppState(context.Background(), patch)
+}
+
+// buildContactPatch constructs the appstate patch that saves a contact name,
+// synced to the phone address book. whatsmeow ships no helper for the
+// "contact" index, so we assemble it directly (modeled on appstate.BuildPin).
+// Version 2 is the WhatsApp contact-action version; if the server rejects the
+// patch in live testing, this is the value to revisit (see spec).
+func buildContactPatch(target types.JID, fullName, firstName string) appstate.PatchInfo {
+	action := &waSyncAction.ContactAction{
+		FullName:                 proto.String(fullName),
+		SaveOnPrimaryAddressbook: proto.Bool(true),
+	}
+	if firstName != "" {
+		action.FirstName = proto.String(firstName)
+	}
+	return appstate.PatchInfo{
+		Type: appstate.WAPatchCriticalUnblockLow,
+		Mutations: []appstate.MutationInfo{{
+			Index:   []string{appstate.IndexContact, target.String()},
+			Version: 2,
+			Value:   &waSyncAction.SyncActionValue{ContactAction: action},
+		}},
+	}
+}
+
+// SetContactName saves a display name for jid, synced to the phone address
+// book and the user's other linked devices.
+func (c *Client) SetContactName(jid, fullName, firstName string) error {
+	if c.wa == nil {
+		return errors.New("client closed")
+	}
+	target, err := types.ParseJID(jid)
+	if err != nil {
+		return fmt.Errorf("parse jid: %w", err)
+	}
+	return c.wa.SendAppState(context.Background(), buildContactPatch(target, fullName, firstName))
 }
 
 // DeleteChat clears a conversation on every device. whatsmeow's
