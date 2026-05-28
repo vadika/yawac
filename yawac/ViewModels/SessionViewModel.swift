@@ -122,8 +122,13 @@ final class SessionViewModel {
     func loadBlocklist() {
         guard let client else { return }
         Task { @MainActor [weak self] in
-            let jids = await Task.detached { try? client.listBlocked() }.value ?? []
-            self?.blockedJIDs = Set(jids.map { JIDNormalize.bare($0) })
+            do {
+                let jids = try await Task.detached { try client.listBlocked() }.value
+                self?.blockedJIDs = Set(jids.map { JIDNormalize.bare($0) })
+            } catch {
+                NSLog("[yawac/blocklist] loadBlocklist failed: %@",
+                      String(describing: error))
+            }
         }
     }
 
