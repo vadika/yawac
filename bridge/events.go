@@ -66,6 +66,14 @@ func (c *Client) handleWAEvent(evt any) {
 		c.dispatchStar(v)
 	case *events.Pin:
 		c.dispatchPin(v)
+	case *events.Archive:
+		c.dispatchArchive(v)
+	case *events.DeleteChat:
+		c.dispatchDeleteChat(v)
+	case *events.Contact:
+		c.dispatchContact(v)
+	case *events.Blocklist:
+		c.dispatchBlocklist(v)
 	}
 }
 
@@ -166,4 +174,62 @@ func (c *Client) dispatchHistory(evt *events.HistorySync) {
 	}
 	b, _ := json.Marshal(payload)
 	c.dispatch("HistorySync", string(b))
+}
+
+// dispatchArchive surfaces app-state archive/unarchive events (a chat
+// (un)archived from the phone or another companion device).
+func (c *Client) dispatchArchive(evt *events.Archive) {
+	archived := false
+	if a := evt.Action; a != nil {
+		archived = a.GetArchived()
+	}
+	b, _ := json.Marshal(JChatArchived{
+		ChatJID:   evt.JID.String(),
+		Archived:  archived,
+		Timestamp: evt.Timestamp.Unix(),
+	})
+	c.dispatch("ChatArchived", string(b))
+}
+
+// dispatchDeleteChat surfaces app-state delete-chat events (a conversation
+// cleared on the phone or another companion device).
+func (c *Client) dispatchDeleteChat(evt *events.DeleteChat) {
+	b, _ := json.Marshal(JChatDeleted{
+		ChatJID:   evt.JID.String(),
+		Timestamp: evt.Timestamp.Unix(),
+	})
+	c.dispatch("ChatDeleted", string(b))
+}
+
+// dispatchContact surfaces app-state contact-name changes so a name saved
+// on the phone shows up locally.
+func (c *Client) dispatchContact(evt *events.Contact) {
+	full, first := "", ""
+	if a := evt.Action; a != nil {
+		full = a.GetFullName()
+		first = a.GetFirstName()
+	}
+	b, _ := json.Marshal(JContactUpdated{
+		JID:       evt.JID.String(),
+		FullName:  full,
+		FirstName: first,
+	})
+	c.dispatch("ContactUpdated", string(b))
+}
+
+// dispatchBlocklist surfaces blocklist changes. When Action == "modify"
+// the Changes list is empty and the Swift side re-fetches the whole list.
+func (c *Client) dispatchBlocklist(evt *events.Blocklist) {
+	changes := make([]JBlockChange, 0, len(evt.Changes))
+	for _, ch := range evt.Changes {
+		changes = append(changes, JBlockChange{
+			JID:    ch.JID.String(),
+			Action: string(ch.Action),
+		})
+	}
+	b, _ := json.Marshal(JBlocklistChanged{
+		Action:  string(evt.Action),
+		Changes: changes,
+	})
+	c.dispatch("BlocklistChanged", string(b))
 }

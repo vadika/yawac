@@ -120,3 +120,30 @@ type JReaction struct {
 	Emoji           string `json:"emoji"`
 	Timestamp       int64  `json:"timestamp"`
 }
+
+type JChatArchived struct {
+	ChatJID   string `json:"chat_jid"`
+	Archived  bool   `json:"archived"`
+	Timestamp int64  `json:"timestamp"`
+}
+
+type JChatDeleted struct {
+	ChatJID   string `json:"chat_jid"`
+	Timestamp int64  `json:"timestamp"`
+}
+
+type JContactUpdated struct {
+	JID       string `json:"jid"`
+	FullName  string `json:"full_name"`
+	FirstName string `json:"first_name"`
+}
+
+type JBlockChange struct {
+	JID    string `json:"jid"`
+	Action string `json:"action"`
+}
+
+type JBlocklistChanged struct {
+	Action  string         `json:"action"`
+	Changes []JBlockChange `json:"changes"`
+}
