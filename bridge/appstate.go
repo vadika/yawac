@@ -102,12 +102,12 @@ func (c *Client) PinChat(chatJID string, pinned bool) error {
 // ranges, or nil when no last-message id is known. whatsmeow's
 // newMessageRange is zero-safe and substitutes time.Now() for a zero
 // timestamp, so passing nil here is valid for empty chats.
-func messageKeyOrNil(chatJID, lastMsgID string, fromMe bool) *waCommon.MessageKey {
+func messageKeyOrNil(chat types.JID, lastMsgID string, fromMe bool) *waCommon.MessageKey {
 	if lastMsgID == "" {
 		return nil
 	}
 	return &waCommon.MessageKey{
-		RemoteJID: proto.String(chatJID),
+		RemoteJID: proto.String(chat.String()),
 		FromMe:    proto.Bool(fromMe),
 		ID:        proto.String(lastMsgID),
 	}
@@ -129,7 +129,7 @@ func (c *Client) ArchiveChat(chatJID string, archived bool, lastTS int64, lastMs
 	if lastTS > 0 {
 		ts = time.Unix(lastTS, 0)
 	}
-	patch := appstate.BuildArchive(chat, archived, ts, messageKeyOrNil(chatJID, lastMsgID, fromMe))
+	patch := appstate.BuildArchive(chat, archived, ts, messageKeyOrNil(chat, lastMsgID, fromMe))
 	return c.wa.SendAppState(context.Background(), patch)
 }
 
@@ -148,6 +148,6 @@ func (c *Client) DeleteChat(chatJID string, lastTS int64, lastMsgID string, from
 	if lastTS > 0 {
 		ts = time.Unix(lastTS, 0)
 	}
-	patch := appstate.BuildDeleteChat(chat, ts, messageKeyOrNil(chatJID, lastMsgID, fromMe), false)
+	patch := appstate.BuildDeleteChat(chat, ts, messageKeyOrNil(chat, lastMsgID, fromMe), false)
 	return c.wa.SendAppState(context.Background(), patch)
 }

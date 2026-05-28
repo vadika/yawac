@@ -3,16 +3,20 @@ package bridge
 import (
 	"strings"
 	"testing"
+
+	"go.mau.fi/whatsmeow/types"
 )
 
 func TestMessageKeyOrNilEmptyID(t *testing.T) {
-	if k := messageKeyOrNil("12345@s.whatsapp.net", "", false); k != nil {
+	jid, _ := types.ParseJID("12345@s.whatsapp.net")
+	if k := messageKeyOrNil(jid, "", false); k != nil {
 		t.Fatalf("want nil for empty id, got %+v", k)
 	}
 }
 
 func TestMessageKeyOrNilPopulated(t *testing.T) {
-	k := messageKeyOrNil("12345@s.whatsapp.net", "MID1", true)
+	jid, _ := types.ParseJID("12345@s.whatsapp.net")
+	k := messageKeyOrNil(jid, "MID1", true)
 	if k == nil {
 		t.Fatal("want non-nil key")
 	}
