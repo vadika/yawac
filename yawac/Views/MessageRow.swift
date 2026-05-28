@@ -177,20 +177,24 @@ struct MessageRow: View {
     }
 
     var body: some View {
-        HStack(spacing: 8) {
-            if selecting {
+        // Normal rendering is exactly `rowContent` (no extra wrapper) — a
+        // flexible HStack + .contentShape around the Spacer-padded row sent
+        // SwiftUI into an infinite layout-sizing cycle. The selection
+        // wrapper only exists while forwarding.
+        if selecting {
+            HStack(spacing: 8) {
                 Image(systemName: selected ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 18))
                     .foregroundStyle(selected ? Theme.accent : Theme.textFaint)
                     .opacity(selectable ? 1 : 0.3)
+                rowContent
+                    .opacity(selectable ? 1 : 0.4)
+                    .allowsHitTesting(false)
             }
+            .contentShape(Rectangle())
+            .onTapGesture { if selectable { onToggleSelect?() } }
+        } else {
             rowContent
-                .opacity(selecting && !selectable ? 0.4 : 1)
-                .allowsHitTesting(!selecting)
-        }
-        .contentShape(Rectangle())
-        .onTapGesture {
-            if selecting, selectable { onToggleSelect?() }
         }
     }
 
