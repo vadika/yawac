@@ -129,6 +129,31 @@ func (c *Client) Close() {
 	}
 }
 
+// Reconnect forces a clean socket cycle. Calls whatsmeow's
+// Disconnect/Connect directly (NOT the bridge Connect wrapper) so the
+// event handler + prekey loop registered on first Connect aren't
+// duplicated — handlers live on the Client, not the socket, so they
+// persist across cycles. Disconnect sets whatsmeow's expectedDisconnect
+// flag so its own auto-reconnect goroutine won't race us.
+func (c *Client) Reconnect() error {
+	if c.wa == nil {
+		return errors.New("client closed")
+	}
+	if c.wa.Store.ID == nil {
+		return nil // unpaired → QR/pair flow owns connect
+	}
+	c.wa.Disconnect()
+	return c.wa.Connect()
+}
+
+// IsConnected reports whether the websocket is currently up. Note: after
+// a macOS sleep the socket can be half-open and this returns a stale
+// true — callers that must recover from sleep should force a reconnect
+// rather than gating on this.
+func (c *Client) IsConnected() bool {
+	return c.wa != nil && c.wa.IsConnected()
+}
+
 // IsLoggedIn reports whether the underlying device has registration creds.
 func (c *Client) IsLoggedIn() bool {
 	return c.wa != nil && c.wa.Store.ID != nil
