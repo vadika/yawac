@@ -1,6 +1,6 @@
 # Connectivity State + Resync Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Accelerate WhatsApp reconnection after sleep/network-change/app-activate, surface accurate connection state in the UI, and resync state on every reconnect.
 
@@ -9,6 +9,22 @@
 **Tech Stack:** Go (whatsmeow bridge via gomobile), Swift/SwiftUI, Network.framework (`NWPathMonitor`), AppKit (`NSWorkspace`/`NSApplication` notifications).
 
 **Spec:** `docs/superpowers/specs/2026-05-28-connectivity-resync-design.md`
+
+> **STATUS: Shipped** in release `0.1.0+be7e053`. All tasks implemented + tested.
+>
+> **As-built deviations from the plan** (discovered during execution):
+> - The single debounced reconnect raced DNS recovery (NWPathMonitor reports
+>   `.satisfied` before DNS is usable). Replaced the one-shot attempt with an
+>   **indefinite retry loop** (escalating backoff 2/4/8s, capped, until
+>   connected/cancelled), serialized + off-main, with separate debounce/loop
+>   task handles to avoid a self-cancel race.
+> - Tried the `netcgo` build tag to force Go's cgo DNS resolver (the pure-Go
+>   resolver lags `resolv.conf` ~40–60s after a Wi-Fi flap). It **destabilized
+>   gomobile** (beachball/crash on disconnect) → reverted. Indefinite retry is
+>   the accepted stable fix; the DNS lag is documented in `docs/TODO.md`.
+> - Banner lifted to app level (ContentView) instead of staying conversation-only,
+>   so it shows with no chat open.
+> - Read-receipt dwell (2s viewport) landed alongside (pre-existing uncommitted work).
 
 ---
 
@@ -34,7 +50,7 @@ After adding the two new Swift files, the Xcode project must be regenerated with
 - Modify: `bridge/client.go`
 - Test: `bridge/reconnect_test.go`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `bridge/reconnect_test.go`:
 
@@ -60,12 +76,12 @@ func TestReconnectNoopWhenUnpaired(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd bridge && go test -run TestReconnectNoopWhenUnpaired ./...`
 Expected: FAIL — `c.Reconnect undefined` / `c.IsConnected undefined` (compile error).
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 In `bridge/client.go`, add after the `Close()` method (around line 124):
 
@@ -98,17 +114,17 @@ func (c *Client) IsConnected() bool {
 
 `errors` is already imported in `client.go`. No new imports needed.
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cd bridge && go test -run TestReconnectNoopWhenUnpaired ./...`
 Expected: PASS.
 
-- [ ] **Step 5: Verify whole bridge still builds + tests**
+- [x] **Step 5: Verify whole bridge still builds + tests**
 
 Run: `cd bridge && go build ./... && go test -short ./...`
 Expected: build success; tests pass (network tests skipped under `-short`).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add bridge/client.go bridge/reconnect_test.go
@@ -124,12 +140,12 @@ git commit -m "bridge: add Reconnect() + IsConnected() for forced socket cycle"
 
 This task exposes the new bridge methods to Swift. It has no unit test (the calls block on gomobile and need a live socket); it is compile-checked and exercised manually in Task 7.
 
-- [ ] **Step 1: Rebuild the bridge xcframework so the new Go methods are visible to Swift**
+- [x] **Step 1: Rebuild the bridge xcframework so the new Go methods are visible to Swift**
 
 Run: `cd /Users/vadikas/Work/yawac && ./scripts/build-xcframework.sh`
 Expected: ends with `Built: build/Bridge.xcframework`.
 
-- [ ] **Step 2: Add the Swift wrappers**
+- [x] **Step 2: Add the Swift wrappers**
 
 In `yawac/Bridge/WAClient.swift`, add after the `sendPresence(available:)` method (near line 332):
 
@@ -149,12 +165,12 @@ In `yawac/Bridge/WAClient.swift`, add after the `sendPresence(available:)` metho
 
 Note: gomobile maps Go `Reconnect()` → Swift `reconnect()` and `IsConnected()` → `isConnected()`. `go.reconnect()` is a throwing call (Go method returns `error`); `go.isConnected()` returns `Bool`.
 
-- [ ] **Step 3: Verify the app builds**
+- [x] **Step 3: Verify the app builds**
 
 Run: `cd /Users/vadikas/Work/yawac && xcodebuild -scheme yawac -destination 'platform=macOS' build 2>&1 | grep -E 'error:|BUILD '`
 Expected: `** BUILD SUCCEEDED **`.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add yawac/Bridge/WAClient.swift build/Bridge.xcframework
@@ -171,7 +187,7 @@ git commit -m "WAClient: forceReconnect() + connected wrappers"
 
 The monitor's OS wiring (`NWPathMonitor`, notification observers) lives in `start()`, which tests do not call. Tests drive `trigger(_:)` directly with injected closures, so the debounce/coalesce/gating logic is verified without real sleep or network.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `yawacTests/ConnectivityMonitorTests.swift`:
 
@@ -235,12 +251,12 @@ final class ConnectivityMonitorTests: XCTestCase {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd /Users/vadikas/Work/yawac && xcodebuild test -scheme yawac -destination 'platform=macOS' -only-testing:yawacTests/ConnectivityMonitorTests 2>&1 | grep -E 'error:|Cannot find|FAIL|PASS|** TEST'`
 Expected: FAIL — `Cannot find 'ConnectivityMonitor' in scope` (type doesn't exist yet).
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Create `yawac/Services/ConnectivityMonitor.swift`:
 
@@ -350,17 +366,17 @@ final class ConnectivityMonitor {
 }
 ```
 
-- [ ] **Step 4: Regenerate the Xcode project so the new file is in the target**
+- [x] **Step 4: Regenerate the Xcode project so the new file is in the target**
 
 Run: `cd /Users/vadikas/Work/yawac && xcodegen generate`
 Expected: `Created project at /Users/vadikas/Work/yawac/yawac.xcodeproj`.
 
-- [ ] **Step 5: Run test to verify it passes**
+- [x] **Step 5: Run test to verify it passes**
 
 Run: `cd /Users/vadikas/Work/yawac && xcodebuild test -scheme yawac -destination 'platform=macOS' -only-testing:yawacTests/ConnectivityMonitorTests 2>&1 | grep -E 'error:|FAIL|** TEST'`
 Expected: `** TEST SUCCEEDED **`.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add yawac/Services/ConnectivityMonitor.swift yawacTests/ConnectivityMonitorTests.swift yawac.xcodeproj
@@ -377,7 +393,7 @@ git commit -m "ConnectivityMonitor: debounced reconnect on wake/network/active"
 
 The connection transitions are extracted into internal `markConnected()` / `markDisconnected()` methods (called from the existing `handle(_:)` cases) so they're directly testable via `@testable import`. The offline watchdog delay is an internal var so tests can shrink it.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `yawacTests/SessionConnectionStateTests.swift`:
 
@@ -426,12 +442,12 @@ final class SessionConnectionStateTests: XCTestCase {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd /Users/vadikas/Work/yawac && xcodebuild test -scheme yawac -destination 'platform=macOS' -only-testing:yawacTests/SessionConnectionStateTests 2>&1 | grep -E 'error:|Cannot find|** TEST'`
 Expected: FAIL — `value of type 'SessionViewModel' has no member 'connection'`.
 
-- [ ] **Step 3: Add the connection sub-state + transitions**
+- [x] **Step 3: Add the connection sub-state + transitions**
 
 In `yawac/ViewModels/SessionViewModel.swift`:
 
@@ -500,12 +516,12 @@ In `yawac/ViewModels/SessionViewModel.swift`:
         connection = .connecting
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cd /Users/vadikas/Work/yawac && xcodebuild test -scheme yawac -destination 'platform=macOS' -only-testing:yawacTests/SessionConnectionStateTests 2>&1 | grep -E 'error:|** TEST'`
 Expected: `** TEST SUCCEEDED **`.
 
-- [ ] **Step 5: Create + start the ConnectivityMonitor in boot()**
+- [x] **Step 5: Create + start the ConnectivityMonitor in boot()**
 
 In `SessionViewModel.swift`, add a stored property near `offlineWatchdog`:
 
@@ -531,12 +547,12 @@ In `logout()`, tear it down — after the `connection = .connecting` line added 
         connectivity = nil
 ```
 
-- [ ] **Step 6: Verify the app builds and the connection tests still pass**
+- [x] **Step 6: Verify the app builds and the connection tests still pass**
 
 Run: `cd /Users/vadikas/Work/yawac && xcodebuild test -scheme yawac -destination 'platform=macOS' -only-testing:yawacTests/SessionConnectionStateTests -only-testing:yawacTests/ConnectivityMonitorTests 2>&1 | grep -E 'error:|** TEST'`
 Expected: `** TEST SUCCEEDED **`.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add yawac/ViewModels/SessionViewModel.swift yawacTests/SessionConnectionStateTests.swift
@@ -552,7 +568,7 @@ git commit -m "session: connection sub-state + own ConnectivityMonitor"
 
 Manual/visual verification (the banner derivation is in a SwiftUI `View`, exercised in Task 7). No unit test.
 
-- [ ] **Step 1: Fold `connection` into `currentSyncState`**
+- [x] **Step 1: Fold `connection` into `currentSyncState`**
 
 In `yawac/Views/ConversationView.swift`, replace the body of `currentSyncState` (around lines 78-84) with:
 
@@ -571,12 +587,12 @@ In `yawac/Views/ConversationView.swift`, replace the body of `currentSyncState` 
     }
 ```
 
-- [ ] **Step 2: Verify the app builds**
+- [x] **Step 2: Verify the app builds**
 
 Run: `cd /Users/vadikas/Work/yawac && xcodebuild -scheme yawac -destination 'platform=macOS' build 2>&1 | grep -E 'error:|BUILD '`
 Expected: `** BUILD SUCCEEDED **`.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add yawac/Views/ConversationView.swift
@@ -592,7 +608,7 @@ git commit -m "banner: reflect runtime connection state (connecting/offline)"
 
 The server redelivers the offline message queue automatically once the socket is clean; this task adds the pin/appstate reconcile that `.historySync` alone may miss on a plain reconnect. Manual verification in Task 7.
 
-- [ ] **Step 1: Add a `.connected` case to ContentView's event loop**
+- [x] **Step 1: Add a `.connected` case to ContentView's event loop**
 
 In `yawac/ContentView.swift`, find the event `switch` (the one handling `.message`, `.historySync`, etc., around lines 80-130). Add a case alongside the others:
 
@@ -607,12 +623,12 @@ In `yawac/ContentView.swift`, find the event `switch` (the one handling `.messag
 
 Here `vm` is the `ChatListViewModel` already in scope in that loop (same `vm` that calls `vm.applyIncomingEdit(...)`). If a `case .connected` already exists in this switch, add the `vm.reconcilePinsWithStore()` line to it instead of creating a duplicate case.
 
-- [ ] **Step 2: Verify the app builds**
+- [x] **Step 2: Verify the app builds**
 
 Run: `cd /Users/vadikas/Work/yawac && xcodebuild -scheme yawac -destination 'platform=macOS' build 2>&1 | grep -E 'error:|BUILD '`
 Expected: `** BUILD SUCCEEDED **`.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add yawac/ContentView.swift
@@ -625,32 +641,32 @@ git commit -m "resync: reconcile pins/appstate on every reconnect"
 
 **Files:** none (verification only).
 
-- [ ] **Step 1: Full build + full test suite**
+- [x] **Step 1: Full build + full test suite**
 
 Run: `cd /Users/vadikas/Work/yawac && xcodebuild test -scheme yawac -destination 'platform=macOS' 2>&1 | grep -E 'error:|** TEST|** BUILD'`
 Expected: `** TEST SUCCEEDED **`.
 
-- [ ] **Step 2: Launch the app**
+- [x] **Step 2: Launch the app**
 
 Run: `pkill -f 'yawac.app/Contents/MacOS/yawac' 2>/dev/null; sleep 1; open /Users/vadikas/Library/Developer/Xcode/DerivedData/yawac-*/Build/Products/Debug/yawac.app`
 Expected: app launches, connects (banner settles to idle).
 
-- [ ] **Step 3: Sleep/wake test**
+- [x] **Step 3: Sleep/wake test**
 
 Close the laptop lid (or `pmset sleepnow`) for ~1 minute, then wake.
 Expected: within ~2s of wake the banner shows `connecting` then returns to `idle`; new messages sent from the phone during sleep appear shortly after wake (no multi-minute stall).
 
-- [ ] **Step 4: Network-change test**
+- [x] **Step 4: Network-change test**
 
 Toggle Wi-Fi off ~10s, then on.
 Expected: banner reaches `offline` after ~8s while off; on Wi-Fi return it reconnects (`connecting` → `idle`) without waiting on whatsmeow's backoff.
 
-- [ ] **Step 5: Missed-message + pin resync test**
+- [x] **Step 5: Missed-message + pin resync test**
 
 With the app connected, on the phone: send a message AND pin a chat. Sleep the laptop ~30s, wake.
 Expected: the message arrives and the chat shows pinned in the sidebar shortly after wake (reconcile-on-reconnect).
 
-- [ ] **Step 6: Final commit (if any verification tweaks were needed)**
+- [x] **Step 6: Final commit (if any verification tweaks were needed)**
 
 Only if Steps 3–5 surfaced a fix. Otherwise nothing to commit — the feature is complete.
 

@@ -178,6 +178,10 @@ client-side; they shape what yawac can sensibly support.
 - `ClearChatAction.DeleteMedia` may parse wrong (`appstate.go:298`).
 - Key-request retry interval hard-coded 24 h (`appstate.go:469`); mute
   /archive can lag a day.
+- ~~Pin / star / delete-for-me not surfaced~~ — yawac sets
+  `EmitAppStateEventsOnFullSync = true` and handles `events.Pin` / `events.Star`
+  / `events.DeleteForMe`; cold-start pin state reconciled from
+  `Store.ChatSettings` (`ChatListViewModel.reconcilePinsWithStore`).
 
 #### LID / Privacy
 - Encryption-time LID lookups are local-cache only (`send.go:1290`).
@@ -191,6 +195,23 @@ client-side; they shape what yawac can sensibly support.
 - Fresh-pair first outbound may not deliver (upstream #1095). Add 2-3 s
   delay after pair-success before first send.
 - iOS pairing first attempt often fails (upstream #1039).
+
+#### Connectivity / reconnect
+- whatsmeow auto-reconnects (`EnableAutoReconnect`, backoff `errors×2s`) +
+  keepalive-pings (20–30s, forces reconnect after 3 min of failures). yawac
+  adds a `ConnectivityMonitor` that forces an immediate reconnect on
+  wake-from-sleep / network-path change / app-active, retrying with backoff
+  until connected (`yawac/Services/ConnectivityMonitor.swift`).
+- **Slow recovery after a Wi-Fi flap (~40–60s).** Go's pure-Go DNS resolver
+  lags reading `resolv.conf` after a network change — `lookup …: no such host`
+  persists for tens of seconds even though the system resolver (and other apps)
+  resolve instantly. The indefinite retry loop reconnects once the resolver
+  catches up; the banner shows Connecting/Offline meanwhile.
+  - The `netcgo` build tag (force cgo `getaddrinfo`) makes recovery instant but
+    **destabilizes gomobile — beachball/crash on disconnect**. Reverted; not
+    usable. Accepted constraint: self-healing but not instant.
+- Post-sleep sockets are half-open: `IsConnected()` returns stale `true`, so the
+  wake trigger forces a reconnect unconditionally rather than gating on it.
 
 #### Rate limits
 - No global IQ throttle in whatsmeow. yawac mitigates via:
@@ -230,7 +251,8 @@ client-side; they shape what yawac can sensibly support.
   contacts: leave as raw digits (no push-name source).
 - Multi-select poll UI: tap = replaces current selection; no batch
   "select multiple then submit" flow.
-- Reactions and poll-vote tallies are in-memory only; lost on restart
-  (live re-arrival re-populates).
+- ~~Reactions and poll-vote tallies are in-memory only; lost on restart~~ —
+  both now persist (`PersistedReaction` / `PersistedPollVote`) and hydrate on
+  chat load. (Historical pre-pair tallies remain unrecoverable — see above.)
 - Video/audio/document larger than 100 MB skipped with "Too large" badge
   (size cap intentional).
