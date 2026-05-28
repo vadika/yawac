@@ -751,6 +751,7 @@ final class ChatListViewModel {
                 try? context.save()
             }
         }
+        sortChats()
     }
 
     /// Delete a chat locally and on every device. Sends the DeleteChat

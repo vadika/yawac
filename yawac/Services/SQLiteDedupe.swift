@@ -280,8 +280,8 @@ enum SQLiteDedupe {
     /// Hard-deletes a chat and all its messages directly via SQLite.
     /// SwiftData's `ModelContext.delete + save` does not reliably persist
     /// deletions of these unique-key rows in our setup (see collapseLIDRows),
-    /// so a user-initiated chat delete goes straight to the store. Returns
-    /// true when both deletes ran.
+    /// so a user-initiated or peer-device chat delete goes straight to the
+    /// store. Returns true when both deletes ran.
     static func purgeChat(jid: String) -> Bool {
         let supportDir: URL
         do {
@@ -310,8 +310,14 @@ enum SQLiteDedupe {
             sql: "DELETE FROM ZPERSISTEDMESSAGE WHERE ZCHATJID = ?;", args: [jid])
         let okChat = execStep(db: db,
             sql: "DELETE FROM ZPERSISTEDCHAT WHERE ZJID = ?;", args: [jid])
-        sqlite3_exec(db, "COMMIT;", nil, nil, nil)
-        sqlite3_exec(db, "PRAGMA wal_checkpoint(FULL);", nil, nil, nil)
+        // The two deletes are coupled — orphaned messages without their chat
+        // is worse than nothing deleted, so roll back on partial failure.
+        if okMsgs && okChat {
+            sqlite3_exec(db, "COMMIT;", nil, nil, nil)
+            sqlite3_exec(db, "PRAGMA wal_checkpoint(FULL);", nil, nil, nil)
+        } else {
+            sqlite3_exec(db, "ROLLBACK;", nil, nil, nil)
+        }
         return okMsgs && okChat
     }
 
