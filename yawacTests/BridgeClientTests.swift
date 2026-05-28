@@ -50,4 +50,48 @@ final class BridgeClientTests: XCTestCase {
         XCTAssertEqual(r.pushName, "Alice")
         XCTAssertEqual(r.fullName, "Alice Smith")
     }
+
+    func testDecodeChatArchived() {
+        let e = WAClient.decode(kind: "ChatArchived",
+            payload: #"{"chat_jid":"a@s.whatsapp.net","archived":true,"timestamp":7}"#)
+        guard case let .chatArchived(jid, archived, ts) = e else {
+            return XCTFail("not chatArchived: \(e)")
+        }
+        XCTAssertEqual(jid, "a@s.whatsapp.net")
+        XCTAssertTrue(archived)
+        XCTAssertEqual(ts, 7)
+    }
+
+    func testDecodeChatDeleted() {
+        let e = WAClient.decode(kind: "ChatDeleted",
+            payload: #"{"chat_jid":"a@s.whatsapp.net","timestamp":9}"#)
+        guard case let .chatDeleted(jid, ts) = e else {
+            return XCTFail("not chatDeleted: \(e)")
+        }
+        XCTAssertEqual(jid, "a@s.whatsapp.net")
+        XCTAssertEqual(ts, 9)
+    }
+
+    func testDecodeContactUpdated() {
+        let e = WAClient.decode(kind: "ContactUpdated",
+            payload: #"{"jid":"a@s.whatsapp.net","full_name":"Bob","first_name":"B"}"#)
+        guard case let .contactUpdated(jid, full, first) = e else {
+            return XCTFail("not contactUpdated: \(e)")
+        }
+        XCTAssertEqual(jid, "a@s.whatsapp.net")
+        XCTAssertEqual(full, "Bob")
+        XCTAssertEqual(first, "B")
+    }
+
+    func testDecodeBlocklistChanged() {
+        let e = WAClient.decode(kind: "BlocklistChanged",
+            payload: #"{"action":"","changes":[{"jid":"a@s.whatsapp.net","action":"block"}]}"#)
+        guard case let .blocklistChanged(action, changes) = e else {
+            return XCTFail("not blocklistChanged: \(e)")
+        }
+        XCTAssertEqual(action, "")
+        XCTAssertEqual(changes.count, 1)
+        XCTAssertEqual(changes[0].jid, "a@s.whatsapp.net")
+        XCTAssertEqual(changes[0].action, "block")
+    }
 }

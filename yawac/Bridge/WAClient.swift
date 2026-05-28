@@ -44,6 +44,10 @@ final class WAClient: PhoneValidating {
         case messageStarred(chatJID: String, messageID: String, senderJID: String, fromMe: Bool, starred: Bool, timestamp: Int64)
         case chatPinned(chatJID: String, pinned: Bool, timestamp: Int64)
         case messagePinned(chatJID: String, targetMessageID: String, senderJID: String, pinned: Bool, timestamp: Int64)
+        case chatArchived(chatJID: String, archived: Bool, timestamp: Int64)
+        case chatDeleted(chatJID: String, timestamp: Int64)
+        case contactUpdated(jid: String, fullName: String, firstName: String)
+        case blocklistChanged(action: String, changes: [(jid: String, action: String)])
         case unknown(kind: String, payload: String)
     }
 
@@ -241,6 +245,32 @@ final class WAClient: PhoneValidating {
         return try JSONDecoder().decode(BridgeSendResult.self, from: Data(json.utf8))
     }
 
+    func archiveChat(chatJID: String, archived: Bool,
+                     lastTS: Int64, lastMsgID: String, fromMe: Bool) throws {
+        try go.archiveChat(chatJID, archived: archived,
+                           lastTS: lastTS, lastMsgID: lastMsgID, fromMe: fromMe)
+    }
+
+    func deleteChat(chatJID: String, lastTS: Int64,
+                    lastMsgID: String, fromMe: Bool) throws {
+        try go.deleteChat(chatJID, lastTS: lastTS, lastMsgID: lastMsgID, fromMe: fromMe)
+    }
+
+    func setContactName(jid: String, fullName: String, firstName: String) throws {
+        try go.setContactName(jid, fullName: fullName, firstName: firstName)
+    }
+
+    nonisolated func setBlocked(jid: String, blocked: Bool) throws {
+        try go.setBlocked(jid, blocked: blocked)
+    }
+
+    nonisolated func listBlocked() throws -> [String] {
+        var err: NSError?
+        let json = go.listBlocked(&err)
+        if let err { throw err }
+        return (try? JSONDecoder().decode([String].self, from: Data(json.utf8))) ?? []
+    }
+
     /// Returns the subset of `jids` that whatsmeow's local appstate
     /// store currently marks as pinned. Used to reconcile the sidebar
     /// at startup since events.Pin isn't re-emitted on reconnect.
@@ -423,7 +453,7 @@ final class WAClient: PhoneValidating {
         }
     }
 
-    static func decode(kind: String, payload: String) -> Event {
+    nonisolated static func decode(kind: String, payload: String) -> Event {
         let data = Data(payload.utf8)
         let dec = JSONDecoder()
         switch kind {
@@ -592,6 +622,47 @@ final class WAClient: PhoneValidating {
                                       senderJID: p.senderJID,
                                       pinned: p.pinned,
                                       timestamp: p.timestamp)
+            }
+        case "ChatArchived":
+            struct A: Codable {
+                let chatJID: String; let archived: Bool; let timestamp: Int64
+                enum CodingKeys: String, CodingKey {
+                    case chatJID = "chat_jid"
+                    case archived, timestamp
+                }
+            }
+            if let a = try? dec.decode(A.self, from: data) {
+                return .chatArchived(chatJID: a.chatJID, archived: a.archived, timestamp: a.timestamp)
+            }
+        case "ChatDeleted":
+            struct D: Codable {
+                let chatJID: String; let timestamp: Int64
+                enum CodingKeys: String, CodingKey {
+                    case chatJID = "chat_jid"
+                    case timestamp
+                }
+            }
+            if let d = try? dec.decode(D.self, from: data) {
+                return .chatDeleted(chatJID: d.chatJID, timestamp: d.timestamp)
+            }
+        case "ContactUpdated":
+            struct C: Codable {
+                let jid: String; let fullName: String; let firstName: String
+                enum CodingKeys: String, CodingKey {
+                    case jid
+                    case fullName = "full_name"
+                    case firstName = "first_name"
+                }
+            }
+            if let c = try? dec.decode(C.self, from: data) {
+                return .contactUpdated(jid: c.jid, fullName: c.fullName, firstName: c.firstName)
+            }
+        case "BlocklistChanged":
+            struct Ch: Codable { let jid: String; let action: String }
+            struct B: Codable { let action: String; let changes: [Ch] }
+            if let b = try? dec.decode(B.self, from: data) {
+                return .blocklistChanged(action: b.action,
+                                         changes: b.changes.map { ($0.jid, $0.action) })
             }
         default:
             break
