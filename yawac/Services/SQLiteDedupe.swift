@@ -277,6 +277,44 @@ enum SQLiteDedupe {
         }
     }
 
+    /// Hard-deletes a chat and all its messages directly via SQLite.
+    /// SwiftData's `ModelContext.delete + save` does not reliably persist
+    /// deletions of these unique-key rows in our setup (see collapseLIDRows),
+    /// so a user-initiated chat delete goes straight to the store. Returns
+    /// true when both deletes ran.
+    static func purgeChat(jid: String) -> Bool {
+        let supportDir: URL
+        do {
+            supportDir = try FileManager.default.url(
+                for: .applicationSupportDirectory,
+                in: .userDomainMask,
+                appropriateFor: nil,
+                create: false)
+        } catch {
+            return false
+        }
+        let storeURL = supportDir.appendingPathComponent("default.store")
+        guard FileManager.default.fileExists(atPath: storeURL.path) else {
+            return false
+        }
+        var db: OpaquePointer?
+        guard sqlite3_open(storeURL.path, &db) == SQLITE_OK, let db else {
+            return false
+        }
+        defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 2000)
+        sqlite3_exec(db, "PRAGMA journal_mode=WAL;", nil, nil, nil)
+        sqlite3_exec(db, "PRAGMA synchronous=NORMAL;", nil, nil, nil)
+        sqlite3_exec(db, "BEGIN IMMEDIATE;", nil, nil, nil)
+        let okMsgs = execStep(db: db,
+            sql: "DELETE FROM ZPERSISTEDMESSAGE WHERE ZCHATJID = ?;", args: [jid])
+        let okChat = execStep(db: db,
+            sql: "DELETE FROM ZPERSISTEDCHAT WHERE ZJID = ?;", args: [jid])
+        sqlite3_exec(db, "COMMIT;", nil, nil, nil)
+        sqlite3_exec(db, "PRAGMA wal_checkpoint(FULL);", nil, nil, nil)
+        return okMsgs && okChat
+    }
+
     private static func execStep(db: OpaquePointer, sql: String, args: [String]) -> Bool {
         var stmt: OpaquePointer?
         let prep = sqlite3_prepare_v2(db, sql, -1, &stmt, nil)

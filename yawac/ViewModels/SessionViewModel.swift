@@ -25,6 +25,10 @@ final class SessionViewModel {
     /// MenuBarExtra can flip between the idle (template) and active
     /// (red-dot) menubar glyphs without subscribing to the chat list.
     var totalUnread: Int = 0
+    /// Set by ChatListViewModel when a chat is deleted so ContentView can
+    /// clear the detail selection if that chat was open. Consumed + cleared
+    /// by ContentView via `.onChange`.
+    var deletedChatJID: String?
 
     enum Connection { case connecting, online, offline }
     /// Runtime socket health, independent of the pairing `state`.

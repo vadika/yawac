@@ -702,4 +702,124 @@ final class ChatListViewModel {
         }
         sortChats()
     }
+
+    // MARK: - Archive / delete / contact
+
+    /// Latest persisted message metadata for `chatJID`, used to anchor the
+    /// archive/delete app-state patch. Returns zero values when unknown.
+    private func lastMessageMeta(_ chatJID: String) -> (id: String, ts: Int64, fromMe: Bool) {
+        guard let context else { return ("", 0, false) }
+        var d = FetchDescriptor<PersistedMessage>(
+            predicate: #Predicate { $0.chatJID == chatJID },
+            sortBy: [SortDescriptor(\.timestamp, order: .reverse)])
+        d.fetchLimit = 1
+        guard let row = try? context.fetch(d).first else { return ("", 0, false) }
+        return (row.id, Int64(row.timestamp.timeIntervalSince1970), row.fromMe)
+    }
+
+    /// Toggle archive state. Sends the app-state patch (server fans out to
+    /// peer devices) and updates the row on success; peer echoes converge
+    /// via `applyIncomingArchive`.
+    func archiveChat(_ chat: Chat, archived: Bool) {
+        guard let client else { return }
+        let last = lastMessageMeta(chat.jid)
+        Task { @MainActor in
+            do {
+                try client.archiveChat(chatJID: chat.jid, archived: archived,
+                                       lastTS: last.ts, lastMsgID: last.id, fromMe: last.fromMe)
+                self.applyLocalArchive(chatJID: chat.jid, archivedAt: archived ? Date() : nil)
+            } catch {
+                NSLog("[yawac/archiveChat] failed jid=%@ err=%@",
+                      chat.jid, String(describing: error))
+            }
+        }
+    }
+
+    func applyIncomingArchive(chatJID: String, archived: Bool) {
+        applyLocalArchive(chatJID: chatJID, archivedAt: archived ? Date() : nil)
+    }
+
+    private func applyLocalArchive(chatJID: String, archivedAt: Date?) {
+        if let idx = chats.firstIndex(where: { $0.jid == chatJID }) {
+            chats[idx].archivedAt = archivedAt
+            upsertPersisted(chats[idx])
+        } else if let context {
+            let descriptor = FetchDescriptor<PersistedChat>(
+                predicate: #Predicate { $0.jid == chatJID })
+            if let row = try? context.fetch(descriptor).first {
+                row.archivedAt = archivedAt
+                try? context.save()
+            }
+        }
+    }
+
+    /// Delete a chat locally and on every device. Sends the DeleteChat
+    /// app-state patch, then removes the local rows.
+    func deleteChat(_ chat: Chat) {
+        let last = lastMessageMeta(chat.jid)
+        if let client {
+            Task { @MainActor in
+                do {
+                    try client.deleteChat(chatJID: chat.jid, lastTS: last.ts,
+                                          lastMsgID: last.id, fromMe: last.fromMe)
+                } catch {
+                    NSLog("[yawac/deleteChat] failed jid=%@ err=%@",
+                          chat.jid, String(describing: error))
+                }
+            }
+        }
+        removeChatLocally(chat.jid)
+        session?.deletedChatJID = chat.jid
+    }
+
+    func applyIncomingDelete(chatJID: String) {
+        removeChatLocally(chatJID)
+        session?.deletedChatJID = chatJID
+    }
+
+    private func removeChatLocally(_ chatJID: String) {
+        chats.removeAll { $0.jid == chatJID }
+        if let context {
+            let msgs = FetchDescriptor<PersistedMessage>(
+                predicate: #Predicate { $0.chatJID == chatJID })
+            if let rows = try? context.fetch(msgs) {
+                for r in rows { context.delete(r) }
+            }
+            let chatDesc = FetchDescriptor<PersistedChat>(
+                predicate: #Predicate { $0.jid == chatJID })
+            if let row = try? context.fetch(chatDesc).first {
+                context.delete(row)
+            }
+            try? context.save()
+        }
+        // SwiftData delete of unique-key rows is unreliable here, so purge
+        // directly so the chat doesn't resurrect on next launch.
+        _ = SQLiteDedupe.purgeChat(jid: chatJID)
+    }
+
+    /// Save a contact name (synced to the phone). Updates the local name on
+    /// success; peer echoes converge via `applyIncomingContact`.
+    func addContact(_ chat: Chat, fullName: String, firstName: String) {
+        guard let client, !fullName.isEmpty else { return }
+        Task { @MainActor in
+            do {
+                try client.setContactName(jid: chat.jid, fullName: fullName, firstName: firstName)
+                self.applyIncomingContact(jid: chat.jid, fullName: fullName)
+            } catch {
+                NSLog("[yawac/addContact] failed jid=%@ err=%@",
+                      chat.jid, String(describing: error))
+            }
+        }
+    }
+
+    func applyIncomingContact(jid: String, fullName: String) {
+        guard !fullName.isEmpty else { return }
+        let bare = JIDNormalize.bare(jid)
+        session?.contactNames[bare] = fullName
+        if let idx = chats.firstIndex(where: { $0.jid == bare }) {
+            chats[idx].name = fullName
+            upsertPersisted(chats[idx])
+            sortChats()
+        }
+    }
 }
