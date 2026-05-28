@@ -40,7 +40,6 @@ struct MessageContextMenu: View {
                         action: { dismiss(); onReply() })
                 MenuRow(icon: "arrowshape.turn.up.right",
                         label: "Forward",
-                        disabled: true,
                         action: { dismiss(); onForward() })
                 if let _ = bodyText {
                     MenuRow(icon: "doc.on.doc",

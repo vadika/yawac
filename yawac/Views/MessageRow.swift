@@ -79,8 +79,13 @@ struct MessageRow: View {
     let onDeleteForMe: ((UIMessage) -> Void)?
     let onStar: ((UIMessage) -> Void)?
     let onPin: ((UIMessage) -> Void)?
+    let onForward: ((UIMessage) -> Void)?
     let onJumpToQuoted: ((String) -> Void)?
     let isHighlighted: Bool
+    let selecting: Bool
+    let selected: Bool
+    let selectable: Bool
+    let onToggleSelect: (() -> Void)?
 
     @Environment(TranslationViewModel.self) private var translation
 
@@ -114,8 +119,13 @@ struct MessageRow: View {
          onDeleteForMe: ((UIMessage) -> Void)? = nil,
          onStar: ((UIMessage) -> Void)? = nil,
          onPin: ((UIMessage) -> Void)? = nil,
+         onForward: ((UIMessage) -> Void)? = nil,
          onJumpToQuoted: ((String) -> Void)? = nil,
-         isHighlighted: Bool = false) {
+         isHighlighted: Bool = false,
+         selecting: Bool = false,
+         selected: Bool = false,
+         selectable: Bool = true,
+         onToggleSelect: (() -> Void)? = nil) {
         self.message = message
         self.status = status
         self.senderName = senderName
@@ -138,8 +148,13 @@ struct MessageRow: View {
         self.onDeleteForMe = onDeleteForMe
         self.onStar = onStar
         self.onPin = onPin
+        self.onForward = onForward
         self.onJumpToQuoted = onJumpToQuoted
         self.isHighlighted = isHighlighted
+        self.selecting = selecting
+        self.selected = selected
+        self.selectable = selectable
+        self.onToggleSelect = onToggleSelect
     }
 
     /// Returns true when the bubble should render the sender header
@@ -162,6 +177,24 @@ struct MessageRow: View {
     }
 
     var body: some View {
+        HStack(spacing: 8) {
+            if selecting {
+                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 18))
+                    .foregroundStyle(selected ? Theme.accent : Theme.textFaint)
+                    .opacity(selectable ? 1 : 0.3)
+            }
+            rowContent
+                .opacity(selecting && !selectable ? 0.4 : 1)
+                .allowsHitTesting(!selecting)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            if selecting, selectable { onToggleSelect?() }
+        }
+    }
+
+    private var rowContent: some View {
         HStack {
             if message.fromMe { Spacer(minLength: 60) }
             VStack(alignment: message.fromMe ? .trailing : .leading, spacing: 2) {
@@ -223,7 +256,7 @@ struct MessageRow: View {
                         canRevoke: MessageLifecycle.canRevoke(message),
                         onPickReaction: { emoji in onReact?(emoji) },
                         onReply: { onReply?(message) },
-                        onForward: {},
+                        onForward: { onForward?(message) },
                         onCopyText: {
                             if case .text(let body) = message.body, !body.isEmpty {
                                 NSPasteboard.general.clearContents()
@@ -379,6 +412,16 @@ struct MessageRow: View {
             tombstoneText("You deleted this for yourself")
         } else {
             VStack(alignment: message.fromMe ? .trailing : .leading, spacing: 4) {
+                if message.isForwarded {
+                    HStack(spacing: 3) {
+                        Image(systemName: "arrowshape.turn.up.right")
+                            .font(.system(size: 10))
+                        Text("Forwarded")
+                            .font(Theme.ui(11))
+                            .italic()
+                    }
+                    .foregroundStyle(Theme.textFaint)
+                }
                 if message.quotedMessageID != nil {
                     quotedStrip
                 }
