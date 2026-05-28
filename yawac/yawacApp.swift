@@ -64,6 +64,7 @@ struct YawacApp: App {
         Settings {
             SettingsView()
                 .environment(translation)
+                .environment(session)
         }
     }
 }

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SettingsView: View {
     @Environment(TranslationViewModel.self) private var translation
+    @Environment(SessionViewModel.self) private var session
 
     @AppStorage("yawac.translate.targetLang")
     private var targetLang: String = "en"
@@ -56,13 +57,33 @@ struct SettingsView: View {
                 }
             }
 
+            Section("Blocked contacts") {
+                if session.blockedJIDs.isEmpty {
+                    Text("No blocked contacts.")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(session.blockedJIDs.sorted(), id: \.self) { jid in
+                        HStack {
+                            Text(session.displayName(for: jid))
+                            Spacer()
+                            Button("Unblock") {
+                                session.setBlocked(jid, blocked: false)
+                            }
+                        }
+                    }
+                }
+            }
+
             Section("Translation model") {
                 modelSection
             }
         }
         .formStyle(.grouped)
         .frame(minWidth: 460, minHeight: 420)
-        .onAppear { translation.model.refreshState() }
+        .onAppear {
+            translation.model.refreshState()
+            session.loadBlocklist()
+        }
     }
 
     @ViewBuilder
