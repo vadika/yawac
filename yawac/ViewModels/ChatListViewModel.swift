@@ -166,7 +166,8 @@ final class ChatListViewModel {
                     isCommunityParent: row.isCommunityParent,
                     communityParentJID: row.communityParentJID,
                     isDefaultSubGroup: row.isDefaultSubGroup,
-                    pinnedAt: row.pinnedAt)
+                    pinnedAt: row.pinnedAt,
+                    archivedAt: row.archivedAt)
             }
             .sorted(by: Self.chatOrder)
     }
@@ -619,6 +620,7 @@ final class ChatListViewModel {
             existing.isCommunityParent = c.isCommunityParent
             existing.isDefaultSubGroup = c.isDefaultSubGroup
             existing.pinnedAt = c.pinnedAt
+            existing.archivedAt = c.archivedAt
             if let preview { existing.lastMessageText = preview }
         } else {
             let row = PersistedChat(
@@ -630,7 +632,8 @@ final class ChatListViewModel {
                 communityParentJID: c.communityParentJID,
                 isCommunityParent: c.isCommunityParent,
                 isDefaultSubGroup: c.isDefaultSubGroup,
-                pinnedAt: c.pinnedAt)
+                pinnedAt: c.pinnedAt,
+                archivedAt: c.archivedAt)
             context.insert(row)
         }
         try? context.save()

@@ -164,6 +164,7 @@ final class PersistedChat {
     var isCommunityParent: Bool = false
     var isDefaultSubGroup: Bool = false
     var pinnedAt: Date? = nil
+    var archivedAt: Date? = nil
 
     init(jid: String, name: String,
          lastMessageText: String? = nil,
@@ -171,7 +172,8 @@ final class PersistedChat {
          communityParentJID: String? = nil,
          isCommunityParent: Bool = false,
          isDefaultSubGroup: Bool = false,
-         pinnedAt: Date? = nil) {
+         pinnedAt: Date? = nil,
+         archivedAt: Date? = nil) {
         self.jid = jid
         self.name = name
         self.lastMessageText = lastMessageText
@@ -181,5 +183,6 @@ final class PersistedChat {
         self.isCommunityParent = isCommunityParent
         self.isDefaultSubGroup = isDefaultSubGroup
         self.pinnedAt = pinnedAt
+        self.archivedAt = archivedAt
     }
 }

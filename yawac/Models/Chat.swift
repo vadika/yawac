@@ -13,6 +13,8 @@ struct Chat: Identifiable, Hashable {
     var isDefaultSubGroup: Bool = false
     /// Server-synced pin (WhatsApp app-state). nil = unpinned.
     var pinnedAt: Date? = nil
+    /// Server-synced archive (WhatsApp app-state). nil = not archived.
+    var archivedAt: Date? = nil
     var id: String { jid }
 }
 
