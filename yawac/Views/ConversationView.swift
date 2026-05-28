@@ -163,7 +163,9 @@ struct ConversationView: View {
                         session.chatList?.archiveChat(chat, archived: chat.archivedAt == nil)
                     }
                     if !chat.isGroup && !chat.isCommunityParent {
-                        Button("Add to contacts…") { contactEditing = chat }
+                        Button(session.isSavedContact(chat.jid) ? "Edit name…" : "Add to contacts…") {
+                            contactEditing = chat
+                        }
                         if session.isBlocked(chat.jid) {
                             Button("Unblock") { session.setBlocked(chat.jid, blocked: false) }
                         } else {

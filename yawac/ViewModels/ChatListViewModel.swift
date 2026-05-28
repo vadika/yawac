@@ -822,6 +822,7 @@ final class ChatListViewModel {
         guard !fullName.isEmpty else { return }
         let bare = JIDNormalize.bare(jid)
         session?.contactNames[bare] = fullName
+        session?.markSavedContact(bare)
         if let idx = chats.firstIndex(where: { $0.jid == bare }) {
             chats[idx].name = fullName
             upsertPersisted(chats[idx])

@@ -81,7 +81,28 @@ final class SessionViewModel {
     }
 
     func ingestContacts(_ cs: [BridgeContact]) {
-        for c in cs { contactNames[c.jid] = c.name }
+        for c in cs {
+            contactNames[c.jid] = c.name
+            // A non-empty FullName means a saved address-book contact (vs a
+            // push-name-only acquaintance). Drives the "Add to contacts…" vs
+            // "Edit name…" menu label.
+            if let full = c.fullName, !full.isEmpty {
+                savedContactJIDs.insert(JIDNormalize.bare(c.jid))
+            }
+        }
+    }
+
+    /// JIDs (bare) that are saved address-book contacts (have a FullName).
+    private(set) var savedContactJIDs: Set<String> = []
+
+    func isSavedContact(_ jid: String) -> Bool {
+        savedContactJIDs.contains(JIDNormalize.bare(jid))
+    }
+
+    /// Mark a JID as a saved contact after a successful add/edit, so the
+    /// menu label flips without waiting for the next contact sync.
+    func markSavedContact(_ jid: String) {
+        savedContactJIDs.insert(JIDNormalize.bare(jid))
     }
 
     func ingestGroups(_ gs: [BridgeGroupModel]) {
