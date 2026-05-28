@@ -14,6 +14,7 @@ type JMessage struct {
 	Media          *JMedia  `json:"media,omitempty"`
 	Poll           *JPoll   `json:"poll,omitempty"`
 	Quoted         *JQuoted `json:"quoted,omitempty"`
+	IsForwarded    bool     `json:"is_forwarded,omitempty"`
 }
 
 type JQuoted struct {

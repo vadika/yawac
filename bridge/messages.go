@@ -173,6 +173,104 @@ func (c *Client) SendText(chatJID, body string) (string, error) {
 	return string(out), nil
 }
 
+// ForwardText re-sends text to another chat tagged as forwarded. Plain
+// Conversation carries no ContextInfo, so forwards use ExtendedTextMessage
+// to carry the IsForwarded flag.
+func (c *Client) ForwardText(chatJID, text string) (string, error) {
+	if c.wa == nil {
+		return "", errors.New("client closed")
+	}
+	chat, err := types.ParseJID(chatJID)
+	if err != nil {
+		return "", fmt.Errorf("parse chat: %w", err)
+	}
+	if chat.User == "" || chat.Server == "" {
+		return "", fmt.Errorf("parse chat: %q is not a valid jid", chatJID)
+	}
+	msg := &waE2E.Message{ExtendedTextMessage: &waE2E.ExtendedTextMessage{
+		Text:        proto.String(text),
+		ContextInfo: &waE2E.ContextInfo{IsForwarded: proto.Bool(true), ForwardingScore: proto.Uint32(1)},
+	}}
+	resp, err := c.wa.SendMessage(context.Background(), chat, msg)
+	if err != nil {
+		return "", fmt.Errorf("send forward text: %w", err)
+	}
+	out, _ := json.Marshal(JSendResult{MessageID: resp.ID, Timestamp: resp.Timestamp.Unix()})
+	return string(out), nil
+}
+
+// ForwardMedia re-sends already-uploaded media to another chat by
+// reconstructing the media proto from the stored MediaRef — no
+// re-download/re-upload. WhatsApp media is content-addressed and
+// encrypted by mediaKey, so the same CDN blob is reusable across chats.
+// `kind` is taken from the ref. `fileName` applies to documents only.
+func (c *Client) ForwardMedia(chatJID, refJSON, caption, fileName string) (string, error) {
+	if c.wa == nil {
+		return "", errors.New("client closed")
+	}
+	chat, err := types.ParseJID(chatJID)
+	if err != nil {
+		return "", fmt.Errorf("parse chat: %w", err)
+	}
+	if chat.User == "" || chat.Server == "" {
+		return "", fmt.Errorf("parse chat: %q is not a valid jid", chatJID)
+	}
+	var ref MediaRef
+	if err := json.Unmarshal([]byte(refJSON), &ref); err != nil {
+		return "", fmt.Errorf("parse ref: %w", err)
+	}
+	fwd := &waE2E.ContextInfo{IsForwarded: proto.Bool(true), ForwardingScore: proto.Uint32(1)}
+	var msg *waE2E.Message
+	switch ref.Kind {
+	case "image":
+		msg = &waE2E.Message{ImageMessage: &waE2E.ImageMessage{
+			Caption: proto.String(caption), URL: proto.String(ref.URL),
+			DirectPath: proto.String(ref.DirectPath), MediaKey: ref.MediaKey,
+			Mimetype: proto.String(ref.Mimetype), FileEncSHA256: ref.FileEncSHA256,
+			FileSHA256: ref.FileSHA256, FileLength: proto.Uint64(ref.FileLength),
+			ContextInfo: fwd,
+		}}
+	case "video":
+		msg = &waE2E.Message{VideoMessage: &waE2E.VideoMessage{
+			Caption: proto.String(caption), URL: proto.String(ref.URL),
+			DirectPath: proto.String(ref.DirectPath), MediaKey: ref.MediaKey,
+			Mimetype: proto.String(ref.Mimetype), FileEncSHA256: ref.FileEncSHA256,
+			FileSHA256: ref.FileSHA256, FileLength: proto.Uint64(ref.FileLength),
+			ContextInfo: fwd,
+		}}
+	case "audio":
+		msg = &waE2E.Message{AudioMessage: &waE2E.AudioMessage{
+			URL: proto.String(ref.URL), DirectPath: proto.String(ref.DirectPath),
+			MediaKey: ref.MediaKey, Mimetype: proto.String(ref.Mimetype),
+			FileEncSHA256: ref.FileEncSHA256, FileSHA256: ref.FileSHA256,
+			FileLength: proto.Uint64(ref.FileLength), ContextInfo: fwd,
+		}}
+	case "document":
+		msg = &waE2E.Message{DocumentMessage: &waE2E.DocumentMessage{
+			Caption: proto.String(caption), FileName: proto.String(fileName),
+			URL: proto.String(ref.URL), DirectPath: proto.String(ref.DirectPath),
+			MediaKey: ref.MediaKey, Mimetype: proto.String(ref.Mimetype),
+			FileEncSHA256: ref.FileEncSHA256, FileSHA256: ref.FileSHA256,
+			FileLength: proto.Uint64(ref.FileLength), ContextInfo: fwd,
+		}}
+	case "sticker":
+		msg = &waE2E.Message{StickerMessage: &waE2E.StickerMessage{
+			URL: proto.String(ref.URL), DirectPath: proto.String(ref.DirectPath),
+			MediaKey: ref.MediaKey, Mimetype: proto.String(ref.Mimetype),
+			FileEncSHA256: ref.FileEncSHA256, FileSHA256: ref.FileSHA256,
+			FileLength: proto.Uint64(ref.FileLength), ContextInfo: fwd,
+		}}
+	default:
+		return "", fmt.Errorf("unsupported kind: %q", ref.Kind)
+	}
+	resp, err := c.wa.SendMessage(context.Background(), chat, msg)
+	if err != nil {
+		return "", fmt.Errorf("send forward media: %w", err)
+	}
+	out, _ := json.Marshal(JSendResult{MessageID: resp.ID, Timestamp: resp.Timestamp.Unix()})
+	return string(out), nil
+}
+
 // dispatchMessage converts whatsmeow Message events to JMessage JSON.
 func (c *Client) dispatchMessage(evt *events.Message) {
 	// Edits across companion devices arrive as a SecretEncryptedMessage
@@ -338,6 +436,9 @@ func (c *Client) dispatchMessage(evt *events.Message) {
 			Kind:      classifyMessage(ctx.GetQuotedMessage()),
 			Snippet:   extractSnippet(ctx.GetQuotedMessage()),
 		}
+	}
+	if ctx := contextInfoFromMessage(evt.Message); ctx != nil && ctx.GetIsForwarded() {
+		jm.IsForwarded = true
 	}
 	if m := evt.Message.GetImageMessage(); m != nil {
 		jm.Media = mediaFromImage(m)
