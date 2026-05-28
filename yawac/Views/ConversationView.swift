@@ -81,7 +81,12 @@ struct ConversationView: View {
         switch session.state {
         case .needsPair, .loading: return .connecting
         case .error: return .offline
-        case .ready: return session.syncing ? .syncing : .idle
+        case .ready:
+            switch session.connection {
+            case .offline:    return .offline
+            case .connecting: return .connecting
+            case .online:     return session.syncing ? .syncing : .idle
+            }
         }
     }
 
@@ -307,6 +312,8 @@ struct ConversationView: View {
                                         .modifier(BottomVisibilityTracker(
                                             isLast: msg.id == vm.messages.last?.id,
                                             atBottom: $atBottom))
+                                        .modifier(ViewportReadModifier(
+                                            messageID: msg.id, vm: vm))
                                     }
                                 }
                             }
@@ -443,10 +450,10 @@ struct ConversationView: View {
             lastSeenCount = 0
             let vm = ConversationViewModel(chatJID: chatJID, client: client, context: modelContext)
             vm.loadHistory()
-            // markRead AFTER loadHistory so the unread snapshot used for
-            // the scroll anchor isn't pre-cleared.
-            session.chatList?.markRead(chatJID)
-            vm.markAllAsRead()
+            // Don't bulk-clear unread on chat open — let
+            // ViewportReadModifier dwell-mark each visible row instead
+            // (WhatsApp semantics: receipts fire only after the user
+            // has actually looked at a row).
             // Background-refresh poll tallies if any poll is in view. The
             // primary phone's response carries the current pollUpdates
             // bundle so tallies for polls created during this companion's
@@ -495,6 +502,35 @@ struct ConversationView: View {
         if bare == chat { return true }
         guard bare.hasSuffix("@lid") else { return false }
         return JIDNormalize.canonical(receiptJID, client: client) == chat
+    }
+}
+
+/// 2s viewport-dwell read marker. WhatsApp's read-receipt semantics
+/// aren't "chat opened" — it's "the user actually looked at the row".
+/// Attach to every MessageRow; the modifier bails for outbound rows
+/// and for ids that aren't tracked as unread, so the cost on read
+/// messages is nil.
+private struct ViewportReadModifier: ViewModifier {
+    let messageID: String
+    let vm: ConversationViewModel
+    @State private var task: Task<Void, Never>?
+
+    func body(content: Content) -> some View {
+        content
+            .onAppear {
+                guard vm.unreadInboundIDs.contains(messageID) else { return }
+                task?.cancel()
+                task = Task { @MainActor in
+                    try? await Task.sleep(for: .seconds(2))
+                    if Task.isCancelled { return }
+                    guard NSApp.isActive else { return }
+                    vm.markVisibleAsRead(messageID: messageID)
+                }
+            }
+            .onDisappear {
+                task?.cancel()
+                task = nil
+            }
     }
 }
 
