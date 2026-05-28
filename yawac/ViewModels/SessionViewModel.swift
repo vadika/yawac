@@ -25,6 +25,17 @@ final class SessionViewModel {
     /// MenuBarExtra can flip between the idle (template) and active
     /// (red-dot) menubar glyphs without subscribing to the chat list.
     var totalUnread: Int = 0
+
+    enum Connection { case connecting, online, offline }
+    /// Runtime socket health, independent of the pairing `state`.
+    /// Drives the sync banner alongside `state`.
+    private(set) var connection: Connection = .connecting
+    /// How long after a disconnect we wait before declaring `.offline`
+    /// (whatsmeow is auto-retrying during this window). Var so tests
+    /// can shrink it.
+    var offlineDelay: Duration = .seconds(8)
+    private var offlineWatchdog: Task<Void, Never>?
+    private var connectivity: ConnectivityMonitor?
     /// When non-nil, the chat list / detail pane should focus this JID.
     /// Consumed and cleared by `ContentView` via `.onChange`.
     var pendingChatSelection: String?
@@ -98,6 +109,28 @@ final class SessionViewModel {
     private var eventTask: Task<Void, Never>?
     private var syncWatchdog: Task<Void, Never>?
 
+    /// Socket came up (initial connect OR a whatsmeow auto/forced
+    /// reconnect — Connected fires every time).
+    func markConnected() {
+        offlineWatchdog?.cancel()
+        offlineWatchdog = nil
+        connection = .online
+    }
+
+    /// Socket dropped. whatsmeow is already retrying with backoff, so we
+    /// show `.connecting` and only escalate to `.offline` if it hasn't
+    /// recovered within `offlineDelay`.
+    func markDisconnected() {
+        connection = .connecting
+        offlineWatchdog?.cancel()
+        offlineWatchdog = Task { @MainActor [weak self] in
+            guard let self else { return }
+            try? await Task.sleep(for: self.offlineDelay)
+            guard !Task.isCancelled else { return }
+            if self.connection != .online { self.connection = .offline }
+        }
+    }
+
     private func armSyncWatchdog() {
         syncWatchdog?.cancel()
         syncWatchdog = Task { @MainActor [weak self] in
@@ -116,6 +149,12 @@ final class SessionViewModel {
             self.state = c.isLoggedIn ? .ready : .needsPair
             hydratePushNamesFromStore()
             consumeEvents()
+            let monitor = ConnectivityMonitor(
+                isReady: { [weak self] in self?.state == .ready },
+                isConnected: { [weak self] in self?.client?.connected ?? false },
+                reconnect: { [weak self] _ in self?.client?.forceReconnect() })
+            monitor.start()
+            self.connectivity = monitor
         } catch {
             state = .error(error.localizedDescription)
         }
@@ -149,6 +188,11 @@ final class SessionViewModel {
         syncWatchdog?.cancel()
         syncing = false
         syncedConversations = 0
+        offlineWatchdog?.cancel()
+        offlineWatchdog = nil
+        connection = .connecting
+        connectivity?.stop()
+        connectivity = nil
         state = .loading
         eventTask?.cancel()
         eventTask = nil
@@ -166,6 +210,7 @@ final class SessionViewModel {
         case .connected:
             qrCode = nil
             state = .ready
+            markConnected()
             syncing = true
             armSyncWatchdog()
             // Publish our own presence as available so whatsmeow honors
@@ -181,7 +226,7 @@ final class SessionViewModel {
             syncWatchdog?.cancel()
             syncing = false
         case .disconnected:
-            break
+            markDisconnected()
         case .message(let m):
             // Capture pushName globally so closed chats also build the
             // contactNames map — otherwise senders are only learned when
