@@ -43,6 +43,9 @@ final class ConversationViewModel {
 
     var pendingScrollToID: String?
     var highlightedID: String?
+    /// Forward selection mode. `forwardSelection` holds the chosen message ids.
+    var forwardSelecting = false
+    var forwardSelection: Set<String> = []
     /// Inbound message ids that still owe a read receipt — populated
     /// from `PersistedChat.unread` (last-N inbound rows) at history
     /// load and from `ingest` on the fly. `markVisibleAsRead` drains
@@ -100,6 +103,7 @@ final class ConversationViewModel {
         m.locallyDeleted = p.locallyDeleted
         m.starredAt = p.starredAt
         m.pinnedAt = p.pinnedAt
+        m.isForwarded = p.isForwarded
         m.quotedMessageID = p.quotedMessageID
         m.quotedSenderJID = p.quotedSenderJID
         m.quotedFromMe = p.quotedFromMe
@@ -172,6 +176,118 @@ final class ConversationViewModel {
     func cancelCompose() {
         replyTarget = nil
         editTarget = nil
+    }
+
+    /// Whether a message can be forwarded: text always; media only if we can
+    /// rebuild it (a stored media ref) or it has a caption to forward as text;
+    /// poll / system / revoked / locally-deleted never.
+    func canForward(_ m: UIMessage) -> Bool {
+        if m.revokedAt != nil || m.locallyDeleted { return false }
+        switch m.body {
+        case .text:
+            return true
+        case .media(_, let caption, _, _):
+            if let c = caption, !c.isEmpty { return true }
+            return mediaRefJSON(for: m.id) != nil
+        case .poll, .system:
+            return false
+        }
+    }
+
+    func beginForward(_ m: UIMessage) {
+        forwardSelecting = true
+        if canForward(m) { forwardSelection.insert(m.id) }
+    }
+
+    func toggleForward(_ id: String) {
+        if forwardSelection.contains(id) {
+            forwardSelection.remove(id)
+        } else if let m = messages.first(where: { $0.id == id }), canForward(m) {
+            forwardSelection.insert(id)
+        }
+    }
+
+    func cancelForward() {
+        forwardSelecting = false
+        forwardSelection.removeAll()
+    }
+
+    /// Forward the selected messages to `chatJID` in chronological order.
+    func executeForward(to chatJID: String) async {
+        let ids = forwardSelection
+        let ordered = messages.filter { ids.contains($0.id) }
+        for m in ordered {
+            do {
+                let result: BridgeSendResult
+                switch m.body {
+                case .text(let t):
+                    result = try client.forwardText(chatJID, text: t)
+                case .media(let kind, let caption, let fileName, _):
+                    if let ref = mediaRefJSON(for: m.id) {
+                        result = try client.forwardMedia(chatJID, refJSON: ref,
+                                                          caption: caption ?? "",
+                                                          fileName: fileName ?? "")
+                    } else if let c = caption, !c.isEmpty {
+                        result = try client.forwardText(chatJID, text: c)
+                    } else {
+                        continue
+                    }
+                    _ = kind
+                case .poll, .system:
+                    continue
+                }
+                persistForwarded(messageID: result.messageID, chatJID: chatJID,
+                                 timestamp: result.timestamp, source: m)
+            } catch {
+                messages.append(UIMessage(
+                    id: UUID().uuidString, chatJID: self.chatJID, senderJID: "system",
+                    fromMe: false, timestamp: .now,
+                    body: .system("forward failed: \(error.localizedDescription)")))
+            }
+        }
+        cancelForward()
+    }
+
+    /// Persist a forwarded outgoing message under the destination chat so it
+    /// shows there (with the Forwarded tag) on switch / restart. Mirrors the
+    /// kind/text/media of the source message.
+    private func persistForwarded(messageID: String, chatJID: String,
+                                  timestamp: Int64, source: UIMessage) {
+        guard let context else { return }
+        let when = Date(timeIntervalSince1970: TimeInterval(timestamp))
+        let row: PersistedMessage
+        switch source.body {
+        case .text(let t):
+            row = PersistedMessage(id: messageID, chatJID: chatJID,
+                                   senderJID: client.ownJID, fromMe: true,
+                                   timestamp: when, kind: "text", text: t,
+                                   isForwarded: true)
+        case .media(let kind, let caption, let fileName, _):
+            let ref = mediaRefJSON(for: source.id)
+            if ref == nil, let c = caption, !c.isEmpty {
+                row = PersistedMessage(id: messageID, chatJID: chatJID,
+                                       senderJID: client.ownJID, fromMe: true,
+                                       timestamp: when, kind: "text", text: c,
+                                       isForwarded: true)
+            } else {
+                row = PersistedMessage(id: messageID, chatJID: chatJID,
+                                       senderJID: client.ownJID, fromMe: true,
+                                       timestamp: when, kind: kind,
+                                       mediaCaption: caption, mediaFileName: fileName,
+                                       mediaRefJSON: ref, isForwarded: true)
+            }
+        case .poll, .system:
+            return
+        }
+        context.insert(row)
+        try? context.save()
+    }
+
+    /// Reads the persisted media ref JSON for a message id, if any.
+    private func mediaRefJSON(for id: String) -> String? {
+        guard let context else { return nil }
+        let d = FetchDescriptor<PersistedMessage>(predicate: #Predicate { $0.id == id })
+        return (try? context.fetch(d).first)?.mediaRefJSON
     }
 
     init(chatJID: String, client: WAClient, context: ModelContext? = nil) {
@@ -266,6 +382,7 @@ final class ConversationViewModel {
                 m.locallyDeleted = p.locallyDeleted
                 m.starredAt = p.starredAt
         m.pinnedAt = p.pinnedAt
+        m.isForwarded = p.isForwarded
                 m.quotedMessageID = p.quotedMessageID
                 m.quotedSenderJID = p.quotedSenderJID
                 m.quotedFromMe = p.quotedFromMe
@@ -1140,7 +1257,8 @@ final class ConversationViewModel {
             quotedSenderJID: m.quoted?.senderJID,
             quotedFromMe: m.quoted?.fromMe ?? false,
             quotedTextSnippet: m.quoted?.snippet,
-            quotedKind: m.quoted?.kind)
+            quotedKind: m.quoted?.kind,
+            isForwarded: m.isForwarded ?? false)
         context.insert(row)
         try? context.save()
     }
