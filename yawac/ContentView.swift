@@ -10,6 +10,18 @@ struct ContentView: View {
     /// Last selected chat JID, persisted across launches.
     @AppStorage("yawac.lastSelectedChatJID") private var lastSelectedChatJID: String = ""
 
+    /// App-wide connection/sync banner state. ContentView only renders
+    /// once paired (`state == .ready` — AppRoot owns the pairing screens),
+    /// so this is driven purely by the runtime connection health and the
+    /// history-sync flag. Surfaced regardless of whether a chat is open.
+    private var bannerState: SyncState {
+        switch session.connection {
+        case .offline:    return .offline
+        case .connecting: return .connecting
+        case .online:     return session.syncing ? .syncing : .idle
+        }
+    }
+
     var body: some View {
         NavigationSplitView {
             if let chatList, let chatSearch {
@@ -35,6 +47,15 @@ struct ContentView: View {
         // (the lone "split-pane" button). The title bar itself stays so
         // traffic lights still render.
         .toolbar(removing: .sidebarToggle)
+        .overlay(alignment: .top) {
+            if bannerState != .idle {
+                SyncBanner(state: bannerState)
+                    .padding(.top, 14)
+                    .allowsHitTesting(false)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+        .animation(.easeOut(duration: 0.2), value: bannerState)
         .onChange(of: selectedChat) { _, new in
             guard let new else { return }
             lastSelectedChatJID = new

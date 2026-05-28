@@ -74,22 +74,6 @@ struct ConversationView: View {
         return out
     }
 
-    /// Derives the banner state from the global session signals.
-    /// Sync is shown only while the global syncing flag is set; offline
-    /// reflects the connection state. Idle hides the banner entirely.
-    private var currentSyncState: SyncState {
-        switch session.state {
-        case .needsPair, .loading: return .connecting
-        case .error: return .offline
-        case .ready:
-            switch session.connection {
-            case .offline:    return .offline
-            case .connecting: return .connecting
-            case .online:     return session.syncing ? .syncing : .idle
-            }
-        }
-    }
-
     /// Returns the optional dot color + label for the status segment of
     /// the header. nil → nothing rendered.
     ///
@@ -402,16 +386,6 @@ struct ConversationView: View {
             }
         }
         .ignoresSafeArea(.container, edges: .top)
-        .overlay(alignment: .top) {
-            let s = currentSyncState
-            if s != .idle {
-                SyncBanner(state: s)
-                    .padding(.top, 78) // clears the 64pt header strip
-                    .allowsHitTesting(false)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
-            }
-        }
-        .animation(.easeOut(duration: 0.2), value: currentSyncState)
         .inspector(isPresented: $showInfo) {
             inspectorPane
                 .inspectorColumnWidth(min: 280, ideal: 340, max: 480)
