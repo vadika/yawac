@@ -346,6 +346,15 @@ final class ChatListViewModel {
         upsertPersisted(chats[i])
     }
 
+    /// Decrement a chat's unread count by 1 (clamped at 0). Called by
+    /// `ConversationViewModel` when a visible message satisfies the
+    /// dwell threshold and gets marked read.
+    func decrementUnread(_ jid: String, by n: Int = 1) {
+        guard let i = chats.firstIndex(where: { $0.jid == jid }) else { return }
+        chats[i].unread = max(0, chats[i].unread - n)
+        upsertPersisted(chats[i])
+    }
+
     /// Insert a placeholder chat for a JID that isn't yet known locally
     /// (typically because the user just searched for an unknown phone
     /// number and tapped the "Start chat" suggestion). Idempotent: if a

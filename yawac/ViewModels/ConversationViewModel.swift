@@ -43,6 +43,11 @@ final class ConversationViewModel {
 
     var pendingScrollToID: String?
     var highlightedID: String?
+    /// Inbound message ids that still owe a read receipt — populated
+    /// from `PersistedChat.unread` (last-N inbound rows) at history
+    /// load and from `ingest` on the fly. `markVisibleAsRead` drains
+    /// entries as their rows clear the 2s viewport-dwell threshold.
+    var unreadInboundIDs: Set<String> = []
     /// Back-ref to the chat list so mutations (edit/revoke/delete-for-me)
     /// can push an updated preview to the sidebar. Set by ConversationView
     /// when the chat becomes active.
@@ -371,6 +376,16 @@ final class ConversationViewModel {
                 self.initialAnchorID = self.messages[firstUnreadIdx].id
             } else {
                 self.initialAnchorID = self.messages.last?.id
+            }
+            // Seed the dwell-tracked unread set. We don't know exactly
+            // which message ids were unread on the phone, so we take
+            // the trailing `unread` inbound rows as the best guess —
+            // matches the first-unread scroll anchor above.
+            if unread > 0 {
+                let inbound = self.messages.filter { !$0.fromMe }
+                for m in inbound.suffix(unread) {
+                    self.unreadInboundIDs.insert(m.id)
+                }
             }
         }
     }
@@ -927,8 +942,27 @@ final class ConversationViewModel {
         persist(b)
         ensureDownload(for: b)
         if !b.fromMe {
-            sendReadReceipts(for: [b])
+            // Don't fire the receipt yet — wait until the row has been
+            // on screen long enough that the user actually saw it.
+            // ViewportReadModifier drives `markVisibleAsRead`.
+            unreadInboundIDs.insert(b.id)
         }
+    }
+
+    /// Called once a MessageRow has been in the viewport for the
+    /// dwell window AND the app is frontmost. Fires the read receipt
+    /// and decrements the sidebar badge.
+    func markVisibleAsRead(messageID: String) {
+        guard unreadInboundIDs.contains(messageID) else { return }
+        guard let msg = messages.first(where: { $0.id == messageID }),
+              !msg.fromMe
+        else {
+            unreadInboundIDs.remove(messageID)
+            return
+        }
+        unreadInboundIDs.remove(messageID)
+        sendReadReceipts(for: [BridgeIDPair(msg)])
+        chatList?.decrementUnread(chatJID)
     }
 
     /// Sends read receipts for all currently-loaded inbound messages.
