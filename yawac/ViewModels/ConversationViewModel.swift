@@ -213,31 +213,71 @@ final class ConversationViewModel {
     }
 
     /// Forward the selected messages to `chatJID` in chronological order.
-    func executeForward(to chatJID: String) async {
+    /// WhatsApp forwards carry no original author, so we embed the source
+    /// sender's display name as a header line in the text / caption —
+    /// otherwise a batch forwarded from several people is indistinguishable.
+    /// `senderName` resolves a JID to a display name.
+    func executeForward(to chatJID: String, senderName: (String) -> String) async {
         let ids = forwardSelection
         let ordered = messages.filter { ids.contains($0.id) }
         for m in ordered {
+            let srcJID = m.fromMe ? client.ownJID : m.senderJID
+            var author = senderName(srcJID)
+            if author.isEmpty || author == srcJID {
+                author = m.fromMe ? "You" : ""
+            }
+            let prefix = author.isEmpty ? "" : "\(author):\n"
             do {
                 let result: BridgeSendResult
+                var outKind = "text"
+                var outText: String?
+                var outCaption: String?
+                var outFileName: String?
+                var outRef: String?
                 switch m.body {
                 case .text(let t):
-                    result = try client.forwardText(chatJID, text: t)
+                    let body = prefix + t
+                    result = try client.forwardText(chatJID, text: body)
+                    outText = body
                 case .media(let kind, let caption, let fileName, _):
                     if let ref = mediaRefJSON(for: m.id) {
+                        let cap = prefix + (caption ?? "")
                         result = try client.forwardMedia(chatJID, refJSON: ref,
-                                                          caption: caption ?? "",
-                                                          fileName: fileName ?? "")
+                                                          caption: cap, fileName: fileName ?? "")
+                        outKind = kind
+                        outCaption = cap.isEmpty ? nil : cap
+                        outFileName = fileName
+                        outRef = ref
                     } else if let c = caption, !c.isEmpty {
-                        result = try client.forwardText(chatJID, text: c)
+                        let body = prefix + c
+                        result = try client.forwardText(chatJID, text: body)
+                        outText = body
                     } else {
                         continue
                     }
-                    _ = kind
                 case .poll, .system:
                     continue
                 }
                 persistForwarded(messageID: result.messageID, chatJID: chatJID,
-                                 timestamp: result.timestamp, source: m)
+                                 timestamp: result.timestamp, kind: outKind, text: outText,
+                                 caption: outCaption, fileName: outFileName, refJSON: outRef)
+                // Forwarding into the chat we're viewing: append optimistically
+                // so it shows immediately (no echo updates our own sends).
+                if chatJID == self.chatJID {
+                    let body: UIMessage.Body = outKind == "text"
+                        ? .text(outText ?? "")
+                        : .media(kind: outKind, caption: outCaption,
+                                 fileName: outFileName, localPath: nil)
+                    var um = UIMessage(
+                        id: result.messageID, chatJID: self.chatJID,
+                        senderJID: client.ownJID, fromMe: true,
+                        timestamp: Date(timeIntervalSince1970: TimeInterval(result.timestamp)),
+                        body: body)
+                    um.isForwarded = true
+                    if !messages.contains(where: { $0.id == um.id }) {
+                        messages.append(um)
+                    }
+                }
             } catch {
                 messages.append(UIMessage(
                     id: UUID().uuidString, chatJID: self.chatJID, senderJID: "system",
@@ -245,40 +285,26 @@ final class ConversationViewModel {
                     body: .system("forward failed: \(error.localizedDescription)")))
             }
         }
+        // Refresh the destination's sidebar preview/timestamp from the
+        // freshly-persisted forwarded rows (it's a different chat than the
+        // one we're viewing, so no echo updates it otherwise).
+        chatList?.refreshPreview(chatJID: chatJID)
         cancelForward()
     }
 
     /// Persist a forwarded outgoing message under the destination chat so it
-    /// shows there (with the Forwarded tag) on switch / restart. Mirrors the
-    /// kind/text/media of the source message.
-    private func persistForwarded(messageID: String, chatJID: String,
-                                  timestamp: Int64, source: UIMessage) {
+    /// shows there (with the Forwarded tag) on switch / restart. Stores the
+    /// exact text/caption we sent (incl. the author header).
+    private func persistForwarded(messageID: String, chatJID: String, timestamp: Int64,
+                                  kind: String, text: String?, caption: String?,
+                                  fileName: String?, refJSON: String?) {
         guard let context else { return }
         let when = Date(timeIntervalSince1970: TimeInterval(timestamp))
-        let row: PersistedMessage
-        switch source.body {
-        case .text(let t):
-            row = PersistedMessage(id: messageID, chatJID: chatJID,
+        let row = PersistedMessage(id: messageID, chatJID: chatJID,
                                    senderJID: client.ownJID, fromMe: true,
-                                   timestamp: when, kind: "text", text: t,
-                                   isForwarded: true)
-        case .media(let kind, let caption, let fileName, _):
-            let ref = mediaRefJSON(for: source.id)
-            if ref == nil, let c = caption, !c.isEmpty {
-                row = PersistedMessage(id: messageID, chatJID: chatJID,
-                                       senderJID: client.ownJID, fromMe: true,
-                                       timestamp: when, kind: "text", text: c,
-                                       isForwarded: true)
-            } else {
-                row = PersistedMessage(id: messageID, chatJID: chatJID,
-                                       senderJID: client.ownJID, fromMe: true,
-                                       timestamp: when, kind: kind,
-                                       mediaCaption: caption, mediaFileName: fileName,
-                                       mediaRefJSON: ref, isForwarded: true)
-            }
-        case .poll, .system:
-            return
-        }
+                                   timestamp: when, kind: kind, text: text,
+                                   mediaCaption: caption, mediaFileName: fileName,
+                                   mediaRefJSON: refJSON, isForwarded: true)
         context.insert(row)
         try? context.save()
     }

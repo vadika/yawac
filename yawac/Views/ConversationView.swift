@@ -431,9 +431,10 @@ struct ConversationView: View {
         .navigationTitle("𝐲 - \(session.displayName(for: chatJID))")
         .sheet(isPresented: $showForwardPicker) {
             if let vm {
-                ForwardPickerView { jid in
+                ForwardPickerView(messageCount: vm.forwardSelection.count) { jid in
                     showForwardPicker = false
-                    Task { await vm.executeForward(to: jid) }
+                    Task { await vm.executeForward(to: jid,
+                                                   senderName: { session.displayName(for: $0) }) }
                 }
                 .environment(session)
             }

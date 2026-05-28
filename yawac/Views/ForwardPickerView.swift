@@ -4,10 +4,12 @@ import SwiftUI
 /// known chats (filtered locally) + a flat list; tapping a chat calls
 /// `onPick(jid)`. Intentionally flat — no scope tabs / community nesting.
 struct ForwardPickerView: View {
+    let messageCount: Int
     let onPick: (String) -> Void
     @Environment(SessionViewModel.self) private var session
     @Environment(\.dismiss) private var dismiss
     @State private var query = ""
+    @State private var pending: Chat?
 
     private var chats: [Chat] {
         let all = session.chatList?.chats ?? []
@@ -45,7 +47,7 @@ struct ForwardPickerView: View {
                 LazyVStack(spacing: 1) {
                     ForEach(chats) { chat in
                         Button {
-                            onPick(chat.jid)
+                            pending = chat
                         } label: {
                             HStack(spacing: 11) {
                                 AvatarView(jid: chat.jid, name: chat.name, size: 34)
@@ -70,5 +72,14 @@ struct ForwardPickerView: View {
         }
         .frame(width: 360, height: 480)
         .background(Theme.sidebarBg)
+        .alert("Forward \(messageCount) message\(messageCount == 1 ? "" : "s")?",
+               isPresented: Binding(get: { pending != nil },
+                                    set: { if !$0 { pending = nil } }),
+               presenting: pending) { chat in
+            Button("Forward") { onPick(chat.jid) }
+            Button("Cancel", role: .cancel) { pending = nil }
+        } message: { chat in
+            Text("To \(chat.name)")
+        }
     }
 }
