@@ -43,11 +43,19 @@ struct ConversationView: View {
             chatJID: chatJID,
             onClose: { showInfo = false },
             onJumpToMessage: jumpToMessage,
-            messageRevision: (vm?.messages.count ?? 0)
-                + (vm?.localPaths.count ?? 0)
-                + (vm?.messages.reduce(0) { $0 + ($1.starredAt != nil ? 1 : 0) } ?? 0),
+            messageRevision: messageRevisionToken,
             mediaPathResolver: resolveMediaPath
         )
+    }
+
+    /// Cheap change-token that bumps when the message list, downloaded paths,
+    /// or starred set changes — drives the inspector's media/files refresh.
+    /// Extracted from the call site so the Swift type-checker doesn't choke on
+    /// the chained-optional arithmetic (Release-config compile timeout).
+    private var messageRevisionToken: Int {
+        guard let vm else { return 0 }
+        let starred = vm.messages.reduce(0) { $0 + ($1.starredAt != nil ? 1 : 0) }
+        return vm.messages.count + vm.localPaths.count + starred
     }
 
     private func resolveMediaPath(_ id: String) -> String? {
@@ -154,38 +162,7 @@ struct ConversationView: View {
                 }
             }
             Spacer()
-            if let chat = session.chatList?.chats.first(where: { $0.jid == chatJID }) {
-                Menu {
-                    Button(chat.pinnedAt != nil ? "Unpin chat" : "Pin chat") {
-                        session.chatList?.pinChat(chat, pinned: chat.pinnedAt == nil)
-                    }
-                    Button(chat.archivedAt != nil ? "Unarchive" : "Archive") {
-                        session.chatList?.archiveChat(chat, archived: chat.archivedAt == nil)
-                    }
-                    if !chat.isGroup && !chat.isCommunityParent {
-                        Button(session.isSavedContact(chat.jid) ? "Edit name…" : "Add to contacts…") {
-                            contactEditing = chat
-                        }
-                        if session.isBlocked(chat.jid) {
-                            Button("Unblock") { session.setBlocked(chat.jid, blocked: false) }
-                        } else {
-                            Button("Block…") { pendingBlock = chat }
-                        }
-                    }
-                    Divider()
-                    Button("Delete chat…", role: .destructive) { pendingDelete = chat }
-                } label: {
-                    Image(systemName: "ellipsis")
-                        .font(.system(size: 15, weight: .regular))
-                        .foregroundStyle(Theme.textMuted)
-                        .padding(7)
-                        .contentShape(Rectangle())
-                }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .help("Chat actions")
-            }
+            chatActionsMenu
             Button {
                 showInfo.toggle()
             } label: {
@@ -210,6 +187,46 @@ struct ConversationView: View {
         // children (avatar tap, info button) win because they sit
         // above this in the ZStack-derived hit order.
         .background(WindowDragHandle())
+    }
+
+    /// The header `⋯` actions menu for the current chat. Extracted from
+    /// `headerBar` to keep that expression small enough for the Swift
+    /// type-checker under Release optimization.
+    @ViewBuilder
+    private var chatActionsMenu: some View {
+        if let chat = session.chatList?.chats.first(where: { $0.jid == chatJID }) {
+            let isDirect = !chat.isGroup && !chat.isCommunityParent
+            Menu {
+                Button(chat.pinnedAt != nil ? "Unpin chat" : "Pin chat") {
+                    session.chatList?.pinChat(chat, pinned: chat.pinnedAt == nil)
+                }
+                Button(chat.archivedAt != nil ? "Unarchive" : "Archive") {
+                    session.chatList?.archiveChat(chat, archived: chat.archivedAt == nil)
+                }
+                if isDirect {
+                    Button(session.isSavedContact(chat.jid) ? "Edit name…" : "Add to contacts…") {
+                        contactEditing = chat
+                    }
+                    if session.isBlocked(chat.jid) {
+                        Button("Unblock") { session.setBlocked(chat.jid, blocked: false) }
+                    } else {
+                        Button("Block…") { pendingBlock = chat }
+                    }
+                }
+                Divider()
+                Button("Delete chat…", role: .destructive) { pendingDelete = chat }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 15, weight: .regular))
+                    .foregroundStyle(Theme.textMuted)
+                    .padding(7)
+                    .contentShape(Rectangle())
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("Chat actions")
+        }
     }
 
     @ViewBuilder
@@ -299,7 +316,7 @@ struct ConversationView: View {
         }
     }
 
-    var body: some View {
+    private var coreView: some View {
         Group {
             if let vm {
                 VStack(spacing: 0) {
@@ -566,37 +583,41 @@ struct ConversationView: View {
                 }
             }
         }
-        .confirmationDialog(
-            "Delete chat with \(pendingDelete?.name ?? "")?",
-            isPresented: Binding(get: { pendingDelete != nil },
-                                 set: { if !$0 { pendingDelete = nil } }),
-            presenting: pendingDelete
-        ) { chat in
-            Button("Delete", role: .destructive) {
-                session.chatList?.deleteChat(chat); pendingDelete = nil
+    }
+
+    var body: some View {
+        coreView
+            .confirmationDialog(
+                "Delete chat with \(pendingDelete?.name ?? "")?",
+                isPresented: Binding(get: { pendingDelete != nil },
+                                     set: { if !$0 { pendingDelete = nil } }),
+                presenting: pendingDelete
+            ) { chat in
+                Button("Delete", role: .destructive) {
+                    session.chatList?.deleteChat(chat); pendingDelete = nil
+                }
+                Button("Cancel", role: .cancel) { pendingDelete = nil }
+            } message: { _ in
+                Text("This clears the conversation on all your devices.")
             }
-            Button("Cancel", role: .cancel) { pendingDelete = nil }
-        } message: { _ in
-            Text("This clears the conversation on all your devices.")
-        }
-        .confirmationDialog(
-            "Block \(pendingBlock?.name ?? "")?",
-            isPresented: Binding(get: { pendingBlock != nil },
-                                 set: { if !$0 { pendingBlock = nil } }),
-            presenting: pendingBlock
-        ) { chat in
-            Button("Block", role: .destructive) {
-                session.setBlocked(chat.jid, blocked: true); pendingBlock = nil
+            .confirmationDialog(
+                "Block \(pendingBlock?.name ?? "")?",
+                isPresented: Binding(get: { pendingBlock != nil },
+                                     set: { if !$0 { pendingBlock = nil } }),
+                presenting: pendingBlock
+            ) { chat in
+                Button("Block", role: .destructive) {
+                    session.setBlocked(chat.jid, blocked: true); pendingBlock = nil
+                }
+                Button("Cancel", role: .cancel) { pendingBlock = nil }
+            } message: { _ in
+                Text("They won't be able to message you or see when you're online.")
             }
-            Button("Cancel", role: .cancel) { pendingBlock = nil }
-        } message: { _ in
-            Text("They won't be able to message you or see when you're online.")
-        }
-        .sheet(item: $contactEditing) { chat in
-            ContactNameSheet(initialName: chat.name == chat.jid ? "" : chat.name) { full, first in
-                session.chatList?.addContact(chat, fullName: full, firstName: first)
+            .sheet(item: $contactEditing) { chat in
+                ContactNameSheet(initialName: chat.name == chat.jid ? "" : chat.name) { full, first in
+                    session.chatList?.addContact(chat, fullName: full, firstName: first)
+                }
             }
-        }
     }
 
     /// Receipt match that avoids a synchronous gomobile FFI call on every
