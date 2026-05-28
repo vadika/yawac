@@ -40,6 +40,9 @@ final class PersistedMessage {
     var starredAt: Date? = nil
     // In-chat pin (WhatsApp's pinInChat protocol). nil = unpinned.
     var pinnedAt: Date? = nil
+    // Set when the message carried ContextInfo.IsForwarded (inbound) or we
+    // sent it as a forward (outbound). Drives the "Forwarded" tag.
+    var isForwarded: Bool = false
 
     /// Set when one full download + MediaRetry cycle has already failed
     /// with a plaintext-SHA mismatch or unrecoverable 4xx. WhatsApp ages
@@ -67,7 +70,8 @@ final class PersistedMessage {
          revokedBy: String? = nil,
          locallyDeleted: Bool = false,
          starredAt: Date? = nil,
-         pinnedAt: Date? = nil) {
+         pinnedAt: Date? = nil,
+         isForwarded: Bool = false) {
         self.id = id
         self.chatJID = chatJID
         self.senderJID = senderJID
@@ -93,6 +97,7 @@ final class PersistedMessage {
         self.locallyDeleted = locallyDeleted
         self.starredAt = starredAt
         self.pinnedAt = pinnedAt
+        self.isForwarded = isForwarded
     }
 }
 

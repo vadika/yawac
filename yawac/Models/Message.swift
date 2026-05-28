@@ -18,6 +18,7 @@ struct UIMessage: Identifiable, Hashable {
     var locallyDeleted: Bool = false
     var starredAt: Date? = nil
     var pinnedAt: Date? = nil
+    var isForwarded: Bool = false
 
     enum Body: Hashable {
         case text(String)
@@ -69,5 +70,6 @@ extension UIMessage {
             self.quotedTextSnippet = q.snippet
             self.quotedKind = q.kind
         }
+        self.isForwarded = b.isForwarded ?? false
     }
 }
