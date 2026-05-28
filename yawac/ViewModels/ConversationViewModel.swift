@@ -3,6 +3,14 @@ import Observation
 import SwiftData
 import UniformTypeIdentifiers
 
+/// A file the user picked but hasn't sent yet — staged in the composer so a
+/// caption can be added and the set edited before sending.
+struct PendingAttachment: Identifiable, Equatable {
+    let id = UUID()
+    let url: URL
+    let kind: String   // image | video | audio | document
+}
+
 @Observable @MainActor
 final class ConversationViewModel {
     let chatJID: String
@@ -11,6 +19,8 @@ final class ConversationViewModel {
     var peerTyping: Bool = false
     var receiptStatus: [String: UIMessage.Status] = [:]
     var localPaths: [String: String] = [:]
+    /// Attachments staged in the composer, awaiting a caption / send.
+    var pendingAttachments: [PendingAttachment] = []
     // Per-message reactions: targetMessageID -> senderJID -> emoji.
     // Nested so removing/updating a sender's reaction is O(1).
     var reactionsBySender: [String: [String: String]] = [:]
@@ -1197,26 +1207,68 @@ final class ConversationViewModel {
         }
     }
 
-    func sendAttachment(at url: URL) async {
-        let caption = draft
+    /// Classifies a picked file into a send kind.
+    static func attachmentKind(_ url: URL) -> String {
         let type = (try? url.resourceValues(forKeys: [.contentTypeKey]))?.contentType
+        guard let type else { return "document" }
+        if type.conforms(to: .image) { return "image" }
+        if type.conforms(to: .movie) || type.conforms(to: .video) { return "video" }
+        if type.conforms(to: .audio) { return "audio" }
+        return "document"
+    }
+
+    /// Stage a picked file in the composer (does NOT send). The user can add
+    /// a caption, remove it, or add more before sending.
+    func stageAttachment(at url: URL) {
+        pendingAttachments.append(PendingAttachment(url: url, kind: Self.attachmentKind(url)))
+    }
+
+    func removePendingAttachment(_ id: PendingAttachment.ID) {
+        pendingAttachments.removeAll { $0.id == id }
+    }
+
+    /// Send all staged attachments, clearing the composer. The typed caption
+    /// rides on the first attachment only; the rest send caption-less.
+    func sendPendingAttachments() async {
+        let items = pendingAttachments
+        guard !items.isEmpty else { return }
+        let caption = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        pendingAttachments = []
+        draft = ""
+        for (i, item) in items.enumerated() {
+            await sendOneAttachment(url: item.url, kind: item.kind,
+                                    caption: i == 0 ? caption : "")
+        }
+    }
+
+    private func sendOneAttachment(url: URL, kind: String, caption: String) async {
         do {
             let res: BridgeSendResult
-            if let type {
-                if type.conforms(to: .image) {
-                    res = try client.sendImage(chatJID, path: url.path, caption: caption)
-                } else if type.conforms(to: .movie) || type.conforms(to: .video) {
-                    res = try client.sendVideo(chatJID, path: url.path, caption: caption)
-                } else if type.conforms(to: .audio) {
-                    res = try client.sendAudio(chatJID, path: url.path)
-                } else {
-                    res = try client.sendDocument(chatJID, path: url.path, caption: caption)
-                }
-            } else {
-                res = try client.sendDocument(chatJID, path: url.path, caption: caption)
+            switch kind {
+            case "image": res = try client.sendImage(chatJID, path: url.path, caption: caption)
+            case "video": res = try client.sendVideo(chatJID, path: url.path, caption: caption)
+            case "audio": res = try client.sendAudio(chatJID, path: url.path)
+            default:      res = try client.sendDocument(chatJID, path: url.path, caption: caption)
             }
+            // Own sent messages aren't echoed back by the server, so append the
+            // bubble optimistically (mirrors sendDraft / sendVoiceNote). Copy the
+            // picked file into the media cache so it keeps rendering after the
+            // security-scoped URL is released and across restarts.
+            let cached = cacheOutgoingMedia(url, messageID: res.messageID)
+            let m = UIMessage(
+                id: res.messageID,
+                chatJID: chatJID,
+                senderJID: "me",
+                fromMe: true,
+                timestamp: Date(timeIntervalSince1970: TimeInterval(res.timestamp)),
+                body: .media(kind: kind,
+                             caption: (kind == "audio" || caption.isEmpty) ? nil : caption,
+                             fileName: kind == "document" ? url.lastPathComponent : nil,
+                             localPath: cached))
+            messages.append(m)
+            localPaths[res.messageID] = cached
             receiptStatus[res.messageID] = .sent
-            draft = ""
+            persistOutgoingMedia(m, kind: kind, localPath: cached)
         } catch {
             messages.append(UIMessage(
                 id: UUID().uuidString,
@@ -1225,6 +1277,22 @@ final class ConversationViewModel {
                 fromMe: false,
                 timestamp: .now,
                 body: .system("send failed: \(error.localizedDescription)")))
+        }
+    }
+
+    /// Copies a just-sent attachment into the media cache under a per-message
+    /// filename so the optimistic bubble keeps resolving after the picked
+    /// (security-scoped) URL is released. Falls back to the source path.
+    private func cacheOutgoingMedia(_ src: URL, messageID: String) -> String {
+        guard let dir = try? AppPaths.mediaCacheURL() else { return src.path }
+        let ext = src.pathExtension.isEmpty ? "" : ".\(src.pathExtension)"
+        let dest = dir.appendingPathComponent("out-\(messageID)\(ext)")
+        try? FileManager.default.removeItem(at: dest)
+        do {
+            try FileManager.default.copyItem(at: src, to: dest)
+            return dest.path
+        } catch {
+            return src.path
         }
     }
 

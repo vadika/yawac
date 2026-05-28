@@ -503,7 +503,7 @@ struct ConversationView: View {
             for p in providers {
                 _ = p.loadObject(ofClass: URL.self) { url, _ in
                     if let url {
-                        Task { @MainActor in await vm.sendAttachment(at: url) }
+                        Task { @MainActor in vm.stageAttachment(at: url) }
                     }
                 }
             }

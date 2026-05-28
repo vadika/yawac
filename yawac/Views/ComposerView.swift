@@ -13,11 +13,13 @@ struct ComposerView: View {
         VStack(spacing: 8) {
             replyChip
             editChip
+            attachmentStrip
             if recorder.state == .recording {
                 RecordingBar(recorder: recorder, cancelHint: wantsCancel)
             }
             inputRow
         }
+        .animation(.easeOut(duration: 0.15), value: vm.pendingAttachments)
         .padding(.horizontal, 22)
         .padding(.vertical, 12)
         .background(Theme.bg)
@@ -37,7 +39,17 @@ struct ComposerView: View {
     }
 
     private var showMic: Bool {
-        draftIsEmpty && vm.editTarget == nil
+        draftIsEmpty && vm.editTarget == nil && vm.pendingAttachments.isEmpty
+    }
+
+    private func send() {
+        if !vm.pendingAttachments.isEmpty {
+            Task { await vm.sendPendingAttachments() }
+        } else if vm.editTarget != nil {
+            Task { await vm.saveEdit(vm.draft); vm.draft = "" }
+        } else {
+            Task { await vm.sendDraft() }
+        }
     }
 
     private var inputRow: some View {
@@ -53,7 +65,8 @@ struct ComposerView: View {
             .buttonStyle(.plain)
             .help("Attach file")
 
-            TextField("Message…", text: $vm.draft, axis: .vertical)
+            TextField(vm.pendingAttachments.isEmpty ? "Message…" : "Caption…",
+                      text: $vm.draft, axis: .vertical)
                 .lineLimit(1...6)
                 .textFieldStyle(.plain)
                 .font(Theme.ui(14))
@@ -64,13 +77,7 @@ struct ComposerView: View {
                 .onChange(of: vm.draft) { _, new in
                     vm.setTyping(!new.isEmpty)
                 }
-                .onSubmit {
-                    if vm.editTarget != nil {
-                        Task { await vm.saveEdit(vm.draft); vm.draft = "" }
-                    } else {
-                        Task { await vm.sendDraft() }
-                    }
-                }
+                .onSubmit { send() }
                 .onKeyPress(.escape) {
                     let wasEditing = (vm.editTarget != nil)
                     if vm.replyTarget != nil || vm.editTarget != nil {
@@ -105,11 +112,7 @@ struct ComposerView: View {
                 micButton
             } else {
                 Button {
-                    if vm.editTarget != nil {
-                        Task { await vm.saveEdit(vm.draft); vm.draft = "" }
-                    } else {
-                        Task { await vm.sendDraft() }
-                    }
+                    send()
                 } label: {
                     Image(systemName: vm.editTarget != nil ? "checkmark" : "paperplane.fill")
                         .font(.system(size: 13, weight: .semibold))
@@ -134,6 +137,7 @@ struct ComposerView: View {
     }
 
     private var canSend: Bool {
+        if !vm.pendingAttachments.isEmpty { return true }
         let body = vm.draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !body.isEmpty else { return false }
         if let m = vm.editTarget, case .text(let t) = m.body, body == t {
@@ -253,9 +257,72 @@ struct ComposerView: View {
         let panel = NSOpenPanel()
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
-        panel.allowsMultipleSelection = false
-        if panel.runModal() == .OK, let url = panel.url {
-            Task { await vm.sendAttachment(at: url) }
+        panel.allowsMultipleSelection = true
+        if panel.runModal() == .OK {
+            for url in panel.urls { vm.stageAttachment(at: url) }
+        }
+    }
+
+    // ─── Staged-attachment preview strip ─────────────────────────────
+    @ViewBuilder
+    private var attachmentStrip: some View {
+        if !vm.pendingAttachments.isEmpty {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(vm.pendingAttachments) { att in
+                        attachmentChip(att)
+                    }
+                }
+                .padding(.vertical, 2)
+            }
+            .transition(.move(edge: .bottom).combined(with: .opacity))
+        }
+    }
+
+    private func attachmentChip(_ att: PendingAttachment) -> some View {
+        ZStack(alignment: .topTrailing) {
+            Group {
+                if att.kind == "image", let img = NSImage(contentsOf: att.url) {
+                    Image(nsImage: img)
+                        .resizable().scaledToFill()
+                        .frame(width: 56, height: 56)
+                        .clipped()
+                } else {
+                    VStack(spacing: 4) {
+                        Image(systemName: chipIcon(att.kind))
+                            .font(.system(size: 18))
+                            .foregroundStyle(Theme.textMuted)
+                        Text(att.url.lastPathComponent)
+                            .font(Theme.ui(8))
+                            .foregroundStyle(Theme.textFaint)
+                            .lineLimit(1)
+                            .frame(width: 48)
+                    }
+                    .frame(width: 56, height: 56)
+                }
+            }
+            .background(Theme.surfaceAlt, in: RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.border, lineWidth: 1))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+
+            Button {
+                vm.removePendingAttachment(att.id)
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 14))
+                    .foregroundStyle(.white, .black.opacity(0.55))
+            }
+            .buttonStyle(.plain)
+            .padding(2)
+            .help("Remove")
+        }
+    }
+
+    private func chipIcon(_ kind: String) -> String {
+        switch kind {
+        case "video": return "film.fill"
+        case "audio": return "waveform"
+        default:      return "doc.fill"
         }
     }
 }
