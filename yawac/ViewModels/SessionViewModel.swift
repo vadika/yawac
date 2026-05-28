@@ -29,6 +29,9 @@ final class SessionViewModel {
     /// clear the detail selection if that chat was open. Consumed + cleared
     /// by ContentView via `.onChange`.
     var deletedChatJID: String?
+    /// JIDs (bare) the user has blocked. Seeded from the server via
+    /// `loadBlocklist()` on connect; updated by BlocklistChanged events.
+    private(set) var blockedJIDs: Set<String> = []
 
     enum Connection { case connecting, online, offline }
     /// Runtime socket health, independent of the pairing `state`.
@@ -108,6 +111,53 @@ final class SessionViewModel {
             return String(bare[..<at])
         }
         return bare
+    }
+
+    func isBlocked(_ jid: String) -> Bool {
+        blockedJIDs.contains(JIDNormalize.bare(jid))
+    }
+
+    /// Refetch the full blocklist from the server (off-main, since the
+    /// gomobile IQ blocks) and replace the local set.
+    func loadBlocklist() {
+        guard let client else { return }
+        Task { @MainActor [weak self] in
+            let jids = await Task.detached { try? client.listBlocked() }.value ?? []
+            self?.blockedJIDs = Set(jids.map { JIDNormalize.bare($0) })
+        }
+    }
+
+    /// Block/unblock a user. Updates the local set on success.
+    func setBlocked(_ jid: String, blocked: Bool) {
+        guard let client else { return }
+        let bare = JIDNormalize.bare(jid)
+        Task { @MainActor [weak self] in
+            do {
+                try await Task.detached { try client.setBlocked(jid: bare, blocked: blocked) }.value
+                if blocked { self?.blockedJIDs.insert(bare) }
+                else { self?.blockedJIDs.remove(bare) }
+            } catch {
+                NSLog("[yawac/blocklist] setBlocked failed jid=%@ err=%@",
+                      bare, String(describing: error))
+            }
+        }
+    }
+
+    /// Apply an inbound BlocklistChanged event. A "modify" action (or an
+    /// empty change list) means "re-sync everything".
+    func applyBlocklistChange(action: String, changes: [(jid: String, action: String)]) {
+        if action == "modify" || changes.isEmpty {
+            loadBlocklist()
+            return
+        }
+        for ch in changes {
+            let bare = JIDNormalize.bare(ch.jid)
+            switch ch.action {
+            case "block":   blockedJIDs.insert(bare)
+            case "unblock": blockedJIDs.remove(bare)
+            default:        break
+            }
+        }
     }
 
     private var eventTask: Task<Void, Never>?
