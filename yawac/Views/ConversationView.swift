@@ -33,6 +33,9 @@ struct ConversationView: View {
     @State private var showInfo = false
     @State private var atBottom = true
     @State private var showForwardPicker = false
+    @State private var pendingDelete: Chat?
+    @State private var pendingBlock: Chat?
+    @State private var contactEditing: Chat?
 
     @ViewBuilder
     private var inspectorPane: some View {
@@ -151,6 +154,36 @@ struct ConversationView: View {
                 }
             }
             Spacer()
+            if let chat = session.chatList?.chats.first(where: { $0.jid == chatJID }) {
+                Menu {
+                    Button(chat.pinnedAt != nil ? "Unpin chat" : "Pin chat") {
+                        session.chatList?.pinChat(chat, pinned: chat.pinnedAt == nil)
+                    }
+                    Button(chat.archivedAt != nil ? "Unarchive" : "Archive") {
+                        session.chatList?.archiveChat(chat, archived: chat.archivedAt == nil)
+                    }
+                    if !chat.isGroup && !chat.isCommunityParent {
+                        Button("Add to contacts…") { contactEditing = chat }
+                        if session.isBlocked(chat.jid) {
+                            Button("Unblock") { session.setBlocked(chat.jid, blocked: false) }
+                        } else {
+                            Button("Block…") { pendingBlock = chat }
+                        }
+                    }
+                    Divider()
+                    Button("Delete chat…", role: .destructive) { pendingDelete = chat }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 15, weight: .regular))
+                        .foregroundStyle(Theme.textMuted)
+                        .padding(7)
+                        .contentShape(Rectangle())
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help("Chat actions")
+            }
             Button {
                 showInfo.toggle()
             } label: {
@@ -222,6 +255,29 @@ struct ConversationView: View {
         }
     }
 
+    @ViewBuilder
+    private var blockedBanner: some View {
+        if session.isBlocked(chatJID) {
+            HStack(spacing: 10) {
+                Image(systemName: "nosign")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.textMuted)
+                Text("You blocked this contact")
+                    .font(Theme.ui(12.5))
+                    .foregroundStyle(Theme.text)
+                Spacer()
+                Button("Unblock") { session.setBlocked(chatJID, blocked: false) }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Theme.accent)
+            }
+            .padding(.horizontal, 16).padding(.vertical, 8)
+            .background(Theme.surfaceAlt)
+            .overlay(alignment: .bottom) {
+                Rectangle().fill(Theme.border).frame(height: 1)
+            }
+        }
+    }
+
     private static func pinSnippet(_ m: UIMessage) -> String {
         switch m.body {
         case .text(let t): return t
@@ -247,6 +303,7 @@ struct ConversationView: View {
                 VStack(spacing: 0) {
                     headerBar
                     pinnedBanner(vm)
+                    blockedBanner
                     ScrollViewReader { proxy in
                         ScrollView {
                             LazyVStack(spacing: 6) {
@@ -505,6 +562,37 @@ struct ConversationView: View {
                 default:
                     break
                 }
+            }
+        }
+        .confirmationDialog(
+            "Delete chat with \(pendingDelete?.name ?? "")?",
+            isPresented: Binding(get: { pendingDelete != nil },
+                                 set: { if !$0 { pendingDelete = nil } }),
+            presenting: pendingDelete
+        ) { chat in
+            Button("Delete", role: .destructive) {
+                session.chatList?.deleteChat(chat); pendingDelete = nil
+            }
+            Button("Cancel", role: .cancel) { pendingDelete = nil }
+        } message: { _ in
+            Text("This clears the conversation on all your devices.")
+        }
+        .confirmationDialog(
+            "Block \(pendingBlock?.name ?? "")?",
+            isPresented: Binding(get: { pendingBlock != nil },
+                                 set: { if !$0 { pendingBlock = nil } }),
+            presenting: pendingBlock
+        ) { chat in
+            Button("Block", role: .destructive) {
+                session.setBlocked(chat.jid, blocked: true); pendingBlock = nil
+            }
+            Button("Cancel", role: .cancel) { pendingBlock = nil }
+        } message: { _ in
+            Text("They won't be able to message you or see when you're online.")
+        }
+        .sheet(item: $contactEditing) { chat in
+            ContactNameSheet(initialName: chat.name == chat.jid ? "" : chat.name) { full, first in
+                session.chatList?.addContact(chat, fullName: full, firstName: first)
             }
         }
     }
