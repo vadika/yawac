@@ -1,8 +1,8 @@
 cask "yawac" do
-  version "0.1.0+0ee1c3c"
-  sha256 "d442396cc06ee72a419da7ed8ef15c1c7b9e212b8e58b1f2163f4f4278548e32"
+  version "0.1.0"
+  sha256 "b107c0de2e52bb588e1872c2313de5592819f7331c0e4ecfacd123f7c51b9ab2"
 
-  url "https://github.com/vadika/yawac/releases/download/#{version}/yawac-#{version}.zip"
+  url "https://github.com/vadika/yawac/releases/download/v#{version}/yawac-#{version}.zip"
   name "yawac"
   desc "Yet Another WhatsApp Client — native macOS SwiftUI"
   homepage "https://github.com/vadika/yawac"

@@ -1,14 +1,11 @@
 name: release
 on:
   push:
-    branches: [main]
-    paths-ignore:
-      - "Casks/**"
-      - "docs/**"
-      - "**/*.md"
+    tags:
+      - "v*"
   workflow_dispatch:
 concurrency:
-  group: release-main
+  group: release-${{ github.ref_name }}
   cancel-in-progress: true
 permissions:
   contents: write
@@ -35,10 +32,19 @@ jobs:
       - name: Compute version
         id: ver
         run: |
-          BASE=$(awk -F'"' '/CFBundleShortVersionString/{print $2; exit}' project.yml)
-          SHA=$(git rev-parse --short=7 HEAD)
-          echo "version=${BASE}+${SHA}" >> "$GITHUB_OUTPUT"
-          echo "sha=${SHA}" >> "$GITHUB_OUTPUT"
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            # Stable release: tag drives the version. Pushed tag is vX.Y.Z;
+            # the cask / asset / release title use the bare X.Y.Z.
+            VERSION="${GITHUB_REF_NAME#v}"
+            TAG="${GITHUB_REF_NAME}"
+          else
+            # Manual dispatch: a throwaway dev build, no GitHub release.
+            BASE=$(awk -F'"' '/CFBundleShortVersionString/{print $2; exit}' project.yml)
+            VERSION="${BASE}-dev+$(git rev-parse --short=7 HEAD)"
+            TAG="dev-$(git rev-parse --short=7 HEAD)"
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
       - name: Build + sign + zip
         env:
           VERSION: ${{ steps.ver.outputs.version }}
@@ -49,23 +55,25 @@ jobs:
           SUM=$(shasum -a 256 "build/dist/yawac-${{ steps.ver.outputs.version }}.zip" | awk '{print $1}')
           echo "sha256=${SUM}" >> "$GITHUB_OUTPUT"
       - name: Create GitHub Release
+        if: github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ steps.ver.outputs.version }}
+          TAG: ${{ steps.ver.outputs.tag }}
         run: |
-          gh release create "$VERSION" \
+          gh release create "$TAG" \
             "build/dist/yawac-${VERSION}.zip" \
             --title "$VERSION" \
-            --notes "Edge build from $(git rev-parse HEAD)"
-      - name: Bump cask
+            --notes "Release $VERSION"
+      - name: Bump + commit cask
+        if: github.ref_type == 'tag'
         env:
           VERSION: ${{ steps.ver.outputs.version }}
           SHA256: ${{ steps.sum.outputs.sha256 }}
-        run: ./scripts/bump-cask.sh
-      - name: Commit cask
-        env:
-          VERSION: ${{ steps.ver.outputs.version }}
         run: |
+          git fetch origin main
+          git checkout main
+          ./scripts/bump-cask.sh
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add Casks/yawac.rb

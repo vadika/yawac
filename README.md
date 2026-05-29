@@ -35,7 +35,8 @@ brew install --cask vadika/yawac/yawac
 ```
 
 Builds are ad-hoc signed; the cask strips the macOS quarantine flag
-automatically. Each push to `main` produces a new `0.1.0+<sha>` build.
+automatically. Releases are cut from `vX.Y.Z` git tags (e.g. `git tag v0.2.0
+&& git push origin v0.2.0`).
 
 Requires macOS 14 (Sonoma) or newer.
 
