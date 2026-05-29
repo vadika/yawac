@@ -17,7 +17,7 @@ struct AvatarView: View {
                 ZStack {
                     Circle().fill(.gray.opacity(0.3))
                     Text(initialFor(name))
-                        .font(Theme.ui(size * 0.4, weight: .bold))
+                        .scaledUI(size * 0.4, weight: .bold)
                 }
             }
         }

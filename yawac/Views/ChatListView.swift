@@ -165,11 +165,11 @@ struct ChatListView: View {
             // ─── Real search field. ⌘K focuses; empty query restores full list.
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass")
-                    .font(Theme.icon(11, weight: .medium))
+                    .scaledIcon(11, weight: .medium)
                     .foregroundStyle(Theme.textFaint)
                 TextField("Search", text: Bindable(search).query)
                     .textFieldStyle(.plain)
-                    .font(Theme.ui(12.5))
+                    .scaledUI(12.5)
                     .foregroundStyle(Theme.text)
                     .focused($searchFocused)
                     .onSubmit { searchFocused = false }
@@ -186,7 +186,7 @@ struct ChatListView: View {
                     .buttonStyle(.plain)
                 } else {
                     Text("⌘K")
-                        .font(Theme.mono(10.5))
+                        .scaledMono(10.5)
                         .foregroundStyle(Theme.textFaint)
                         .padding(.horizontal, 5).padding(.vertical, 1)
                         .overlay(
@@ -229,9 +229,9 @@ struct ChatListView: View {
                     } label: {
                         VStack(spacing: 3) {
                             Image(systemName: s.icon)
-                                .font(Theme.icon(14, weight: .regular))
+                                .scaledIcon(14, weight: .regular)
                             Text(s.label)
-                                .font(Theme.ui(10, weight: .medium))
+                                .scaledUI(10, weight: .medium)
                                 .opacity(0.85)
                         }
                         .foregroundStyle(scope == s ? Theme.accentText : Theme.textMuted)
@@ -314,14 +314,14 @@ struct ChatListView: View {
     private func sectionLabel(_ text: String, count: Int) -> some View {
         HStack(spacing: 8) {
             Text(text.uppercased())
-                .font(Theme.ui(11, weight: .semibold))
+                .scaledUI(11, weight: .semibold)
                 .tracking(0.4)
                 .foregroundStyle(Theme.textFaint)
             Rectangle()
                 .fill(Theme.hairline)
                 .frame(height: 1)
             Text("\(count)")
-                .font(Theme.mono(10.5))
+                .scaledMono(10.5)
                 .foregroundStyle(Theme.textFaint.opacity(0.85))
                 .monospacedDigit()
         }
@@ -335,18 +335,18 @@ struct ChatListView: View {
         Button { archivedExpanded.toggle() } label: {
             HStack(spacing: 8) {
                 Image(systemName: "archivebox")
-                    .font(Theme.icon(12))
+                    .scaledIcon(12)
                     .foregroundStyle(Theme.textFaint)
                 Text("Archived")
-                    .font(Theme.ui(13, weight: .medium))
+                    .scaledUI(13, weight: .medium)
                     .foregroundStyle(Theme.textMuted)
                 Spacer()
                 Text("\(count)")
-                    .font(Theme.mono(10.5))
+                    .scaledMono(10.5)
                     .foregroundStyle(Theme.textFaint)
                     .monospacedDigit()
                 Image(systemName: archivedExpanded ? "chevron.down" : "chevron.right")
-                    .font(Theme.icon(10, weight: .semibold))
+                    .scaledIcon(10, weight: .semibold)
                     .foregroundStyle(Theme.textFaint)
             }
             .padding(.horizontal, 10).padding(.vertical, 8)
@@ -394,17 +394,17 @@ struct ChatListView: View {
         } label: {
             HStack(spacing: 10) {
                 Image(systemName: "person.crop.circle.badge.plus")
-                    .font(Theme.icon(22))
+                    .scaledIcon(22)
                     .foregroundStyle(Theme.accentText)
                     .frame(width: 32, height: 32)
                     .background(Theme.accentSoft,
                                 in: RoundedRectangle(cornerRadius: 8))
                 VStack(alignment: .leading, spacing: 2) {
                     Text(s.displayPhone)
-                        .font(Theme.ui(13, weight: .medium))
+                        .scaledUI(13, weight: .medium)
                         .foregroundStyle(Theme.text)
                     Text("Start new chat")
-                        .font(Theme.ui(11))
+                        .scaledUI(11)
                         .foregroundStyle(Theme.textFaint)
                 }
                 Spacer()
@@ -426,39 +426,39 @@ struct ChatListView: View {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text(chat.name)
-                        .font(Theme.ui(14, weight: isSelected ? .semibold : .medium))
+                        .scaledUI(14, weight: isSelected ? .semibold : .medium)
                         .foregroundStyle(isSelected ? Theme.text : Theme.text)
                         .lineLimit(1)
                         .tracking(-0.1)
                     if session.isBlocked(chat.jid) {
                         Image(systemName: "nosign")
-                            .font(Theme.icon(10, weight: .semibold))
+                            .scaledIcon(10, weight: .semibold)
                             .foregroundStyle(Theme.textFaint)
                             .help("Blocked")
                     }
                     Spacer(minLength: 0)
                     if chat.pinnedAt != nil {
                         Image(systemName: "pin.fill")
-                            .font(Theme.icon(9, weight: .semibold))
+                            .scaledIcon(9, weight: .semibold)
                             .foregroundStyle(Theme.textFaint)
                             .rotationEffect(.degrees(35))
                             .help("Pinned")
                     }
                     Text(chat.lastTimestampShort)
-                        .font(Theme.mono(11))
+                        .scaledMono(11)
                         .foregroundStyle(isSelected ? Theme.accentText : Theme.textFaint)
                         .monospacedDigit()
                         .opacity(0.85)
                 }
                 HStack(alignment: .center, spacing: 6) {
                     Text(chat.lastMessage)
-                        .font(Theme.ui(13))
+                        .scaledUI(13)
                         .foregroundStyle(Theme.textMuted)
                         .lineLimit(1)
                     Spacer(minLength: 0)
                     if chat.unread > 0 {
                         Text("\(chat.unread)")
-                            .font(Theme.mono(10.5, weight: .semibold))
+                            .scaledMono(10.5, weight: .semibold)
                             .foregroundStyle(.white)
                             .monospacedDigit()
                             .padding(.horizontal, 6)

@@ -40,8 +40,8 @@ struct SettingsView: View {
                         step: 1
                     )
                     Text("Aa  The quick brown fox")
-                        .font(Theme.ui(14))
-                        .dynamicTypeSize(step.dynamicTypeSize)
+                        .scaledUI(14)
+                        .environment(\.uiScaleFactor, step.scaleFactor)
                         .foregroundStyle(.secondary)
                 }
             }

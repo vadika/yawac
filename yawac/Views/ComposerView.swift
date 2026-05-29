@@ -58,7 +58,7 @@ struct ComposerView: View {
                 attachFile()
             } label: {
                 Image(systemName: "paperclip")
-                    .font(Theme.icon(15, weight: .regular))
+                    .scaledIcon(15, weight: .regular)
                     .foregroundStyle(Theme.textMuted)
                     .padding(4)
             }
@@ -69,7 +69,7 @@ struct ComposerView: View {
                       text: $vm.draft, axis: .vertical)
                 .lineLimit(1...6)
                 .textFieldStyle(.plain)
-                .font(Theme.ui(14))
+                .scaledUI(14)
                 .foregroundStyle(Theme.text)
                 .padding(.vertical, 6)
                 .tint(Theme.accent)
@@ -101,7 +101,7 @@ struct ComposerView: View {
                 NSApp.orderFrontCharacterPalette(nil)
             } label: {
                 Image(systemName: "face.smiling")
-                    .font(Theme.icon(15, weight: .regular))
+                    .scaledIcon(15, weight: .regular)
                     .foregroundStyle(Theme.textMuted)
                     .padding(4)
             }
@@ -115,7 +115,7 @@ struct ComposerView: View {
                     send()
                 } label: {
                     Image(systemName: vm.editTarget != nil ? "checkmark" : "paperplane.fill")
-                        .font(Theme.icon(13, weight: .semibold))
+                        .scaledIcon(13, weight: .semibold)
                         .foregroundStyle(.white)
                         .frame(width: 32, height: 32)
                         .background(canSend ? Theme.accent : Theme.surfaceAlt,
@@ -167,7 +167,7 @@ struct ComposerView: View {
                 Image(systemName: "pencil")
                     .foregroundStyle(Theme.accent)
                 Text("Editing message")
-                    .font(Theme.ui(11))
+                    .scaledUI(11)
                     .foregroundStyle(Theme.text)
                 Spacer()
                 Button {
@@ -290,10 +290,10 @@ struct ComposerView: View {
                 } else {
                     VStack(spacing: 4) {
                         Image(systemName: chipIcon(att.kind))
-                            .font(Theme.icon(18))
+                            .scaledIcon(18)
                             .foregroundStyle(Theme.textMuted)
                         Text(att.url.lastPathComponent)
-                            .font(Theme.ui(8))
+                            .scaledUI(8)
                             .foregroundStyle(Theme.textFaint)
                             .lineLimit(1)
                             .frame(width: 48)
@@ -309,7 +309,7 @@ struct ComposerView: View {
                 vm.removePendingAttachment(att.id)
             } label: {
                 Image(systemName: "xmark.circle.fill")
-                    .font(Theme.icon(14))
+                    .scaledIcon(14)
                     .foregroundStyle(.white, .black.opacity(0.55))
             }
             .buttonStyle(.plain)

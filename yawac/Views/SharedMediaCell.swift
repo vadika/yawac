@@ -32,12 +32,12 @@ struct SharedMediaCell: View {
                             .clipped()
                     } else {
                         Image(systemName: placeholderIcon)
-                            .font(Theme.icon(18))
+                            .scaledIcon(18)
                             .foregroundStyle(Theme.textFaint)
                     }
                     if item.kind == "video", image != nil {
                         Image(systemName: "play.fill")
-                            .font(Theme.icon(18, weight: .bold))
+                            .scaledIcon(18, weight: .bold)
                             .foregroundStyle(.white)
                             .shadow(radius: 2)
                     }
@@ -114,30 +114,30 @@ struct SharedFileRow: View {
         Button(action: open) {
             HStack(spacing: 10) {
                 Image(systemName: "doc.fill")
-                    .font(Theme.icon(16))
+                    .scaledIcon(16)
                     .foregroundStyle(Theme.accent)
                     .frame(width: 24, alignment: .center)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(item.fileName)
-                        .font(Theme.ui(13, weight: .medium))
+                        .scaledUI(13, weight: .medium)
                         .foregroundStyle(Theme.text)
                         .lineLimit(1)
                         .truncationMode(.middle)
                     HStack(spacing: 6) {
                         if let size = formattedSize {
                             Text(size)
-                                .font(Theme.mono(10.5))
+                                .scaledMono(10.5)
                                 .foregroundStyle(Theme.textFaint)
                         }
                         Text(item.timestamp.formatted(date: .abbreviated, time: .omitted))
-                            .font(Theme.mono(10.5))
+                            .scaledMono(10.5)
                             .foregroundStyle(Theme.textFaint)
                     }
                 }
                 Spacer()
                 if item.path != nil {
                     Image(systemName: "arrow.up.right.square")
-                        .font(Theme.icon(11))
+                        .scaledIcon(11)
                         .foregroundStyle(Theme.textMuted)
                 }
             }

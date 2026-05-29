@@ -13,7 +13,7 @@ private struct DateSeparator: View {
         HStack(spacing: 12) {
             Rectangle().fill(Theme.hairline).frame(height: 1)
             Text(date, format: .dateTime.weekday(.abbreviated).day().month(.abbreviated).year())
-                .font(Theme.ui(11.5, weight: .medium))
+                .scaledUI(11.5, weight: .medium)
                 .tracking(0.4)
                 .textCase(.uppercase)
                 .foregroundStyle(Theme.textFaint)
@@ -122,7 +122,7 @@ struct ConversationView: View {
                 .foregroundStyle(Theme.textMuted)
             Spacer()
             Text("\(vm.forwardSelection.count) selected")
-                .font(Theme.ui(13))
+                .scaledUI(13)
                 .foregroundStyle(Theme.text)
             Spacer()
             Button("Forward") { showForwardPicker = true }
@@ -146,7 +146,7 @@ struct ConversationView: View {
             AvatarView(jid: chatJID, name: name, size: 36)
             VStack(alignment: .leading, spacing: 2) {
                 Text(name)
-                    .font(Theme.ui(16, weight: .semibold))
+                    .scaledUI(16, weight: .semibold)
                     .tracking(-0.2)
                     .foregroundStyle(Theme.titleColor)
                     .lineLimit(1)
@@ -156,7 +156,7 @@ struct ConversationView: View {
                             Circle().fill(dotColor).frame(width: 6, height: 6)
                         }
                         Text(label)
-                            .font(Theme.ui(12.5))
+                            .scaledUI(12.5)
                             .foregroundStyle(Theme.textMuted)
                     }
                 }
@@ -167,7 +167,7 @@ struct ConversationView: View {
                 showInfo.toggle()
             } label: {
                 Image(systemName: showInfo ? "info.circle.fill" : "info.circle")
-                    .font(Theme.icon(15, weight: .regular))
+                    .scaledIcon(15, weight: .regular)
                     .foregroundStyle(showInfo ? Theme.accent : Theme.textMuted)
                     .padding(7)
                     .background(showInfo ? Theme.accentSoft : Color.clear,
@@ -217,7 +217,7 @@ struct ConversationView: View {
                 Button("Delete chat…", role: .destructive) { pendingDelete = chat }
             } label: {
                 Image(systemName: "ellipsis")
-                    .font(Theme.icon(15, weight: .regular))
+                    .scaledIcon(15, weight: .regular)
                     .foregroundStyle(Theme.textMuted)
                     .padding(7)
                     .contentShape(Rectangle())
@@ -237,16 +237,16 @@ struct ConversationView: View {
             } label: {
                 HStack(spacing: 10) {
                     Image(systemName: "pin.fill")
-                        .font(Theme.icon(11, weight: .semibold))
+                        .scaledIcon(11, weight: .semibold)
                         .foregroundStyle(Theme.accent)
                         .rotationEffect(.degrees(35))
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Pinned message")
-                            .font(Theme.ui(10.5, weight: .semibold))
+                            .scaledUI(10.5, weight: .semibold)
                             .tracking(0.4)
                             .foregroundStyle(Theme.textFaint)
                         Text(Self.pinSnippet(m))
-                            .font(Theme.ui(12.5))
+                            .scaledUI(12.5)
                             .foregroundStyle(Theme.text)
                             .lineLimit(1)
                     }
@@ -255,7 +255,7 @@ struct ConversationView: View {
                         vm.pinMessage(m, pinned: false)
                     } label: {
                         Image(systemName: "xmark")
-                            .font(Theme.icon(10, weight: .semibold))
+                            .scaledIcon(10, weight: .semibold)
                             .foregroundStyle(Theme.textMuted)
                             .frame(width: 22, height: 22)
                             .contentShape(Rectangle())
@@ -279,10 +279,10 @@ struct ConversationView: View {
         if session.isBlocked(chatJID) {
             HStack(spacing: 10) {
                 Image(systemName: "nosign")
-                    .font(Theme.icon(12))
+                    .scaledIcon(12)
                     .foregroundStyle(Theme.textMuted)
                 Text("You blocked this contact")
-                    .font(Theme.ui(12.5))
+                    .scaledUI(12.5)
                     .foregroundStyle(Theme.text)
                 Spacer()
                 Button("Unblock") { session.setBlocked(chatJID, blocked: false) }
@@ -417,7 +417,7 @@ struct ConversationView: View {
                                     }
                                 } label: {
                                     Image(systemName: "chevron.down")
-                                        .font(Theme.icon(16, weight: .semibold))
+                                        .scaledIcon(16, weight: .semibold)
                                         .foregroundStyle(.primary)
                                         .frame(width: 36, height: 36)
                                         .background(.regularMaterial, in: Circle())
@@ -476,7 +476,7 @@ struct ConversationView: View {
                                     .stroke(Theme.otherBorder, lineWidth: 1)
                             )
                             Text("typing…")
-                                .font(Theme.ui(12))
+                                .scaledUI(12)
                                 .foregroundStyle(Theme.textFaint)
                             Spacer()
                         }

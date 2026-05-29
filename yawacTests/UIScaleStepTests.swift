@@ -4,16 +4,16 @@ import SwiftUI
 
 final class UIScaleStepTests: XCTestCase {
 
-    func testDefaultMapsToLarge() {
-        XCTAssertEqual(UIScaleStep.default.dynamicTypeSize, .large)
+    func testDefaultFactorIsOne() {
+        // Default step must be a no-op vs the pre-feature build.
+        XCTAssertEqual(UIScaleStep.default.scaleFactor, 1.0)
     }
 
-    func testAllStepsMap() {
-        XCTAssertEqual(UIScaleStep.small.dynamicTypeSize, .small)
-        XCTAssertEqual(UIScaleStep.compact.dynamicTypeSize, .medium)
-        XCTAssertEqual(UIScaleStep.default.dynamicTypeSize, .large)
-        XCTAssertEqual(UIScaleStep.large.dynamicTypeSize, .xLarge)
-        XCTAssertEqual(UIScaleStep.xLarge.dynamicTypeSize, .xxLarge)
+    func testFactorsAreMonotonic() {
+        let factors = UIScaleStep.allCases.map(\.scaleFactor)
+        XCTAssertEqual(factors, factors.sorted())
+        XCTAssertEqual(UIScaleStep.small.scaleFactor, 0.88)
+        XCTAssertEqual(UIScaleStep.xLarge.scaleFactor, 1.23)
     }
 
     func testFromClampsBelow() {

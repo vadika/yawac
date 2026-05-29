@@ -184,7 +184,7 @@ struct MessageRow: View {
         if selecting {
             HStack(spacing: 8) {
                 Image(systemName: selected ? "checkmark.circle.fill" : "circle")
-                    .font(Theme.icon(18))
+                    .scaledIcon(18)
                     .foregroundStyle(selected ? Theme.accent : Theme.textFaint)
                     .opacity(selectable ? 1 : 0.3)
                 rowContent
@@ -419,9 +419,9 @@ struct MessageRow: View {
                 if message.isForwarded {
                     HStack(spacing: 3) {
                         Image(systemName: "arrowshape.turn.up.right")
-                            .font(Theme.icon(10))
+                            .scaledIcon(10)
                         Text("Forwarded")
-                            .font(Theme.ui(11))
+                            .scaledUI(11)
                             .italic()
                     }
                     .foregroundStyle(Theme.textFaint)
@@ -452,7 +452,7 @@ struct MessageRow: View {
     private func tombstoneText(_ s: String) -> some View {
         Text(s)
             .italic()
-            .font(Theme.ui(12.5))
+            .scaledUI(12.5)
             .foregroundStyle(Theme.textMuted)
     }
 
@@ -469,10 +469,10 @@ struct MessageRow: View {
                     .frame(width: 3)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(quotedSenderDisplay)
-                        .font(Theme.ui(11, weight: .semibold))
+                        .scaledUI(11, weight: .semibold)
                         .foregroundStyle(Theme.text)
                     Text(message.quotedTextSnippet ?? "")
-                        .font(Theme.ui(11))
+                        .scaledUI(11)
                         .foregroundStyle(Theme.textMuted)
                         .lineLimit(2)
                 }
@@ -614,15 +614,15 @@ struct MessageRow: View {
                 Text(richText(from: displayed)).textSelection(.enabled)
             case .caption:
                 Text(displayed)
-                    .font(Theme.ui(12))
+                    .scaledUI(12)
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
             case .pollQuestion:
                 Text(displayed)
-                    .font(Theme.ui(13, weight: .semibold))
+                    .scaledUI(13, weight: .semibold)
             case .pollOption:
                 Text(displayed)
-                    .font(Theme.ui(12.5))
+                    .scaledUI(12.5)
             }
             if offer.offer || entry != nil {
                 Button {
@@ -636,7 +636,7 @@ struct MessageRow: View {
                     }
                 } label: {
                     Text(footerLabel(entry: entry, inFlight: inFlight))
-                        .font(Theme.ui(11))
+                        .scaledUI(11)
                         .foregroundStyle(Theme.accent)
                 }
                 .buttonStyle(.plain)
@@ -694,31 +694,31 @@ struct MessageRow: View {
     private var footerView: some View {
         HStack(spacing: 5) {
             Text(message.timestamp, format: .dateTime.hour(.twoDigits(amPM: .omitted)).minute())
-                .font(Theme.mono(10.5))
+                .scaledMono(10.5)
                 .monospacedDigit()
                 .foregroundStyle(Theme.textFaint)
             if message.editedAt != nil {
                 Text("· edited")
-                    .font(Theme.mono(10.5))
+                    .scaledMono(10.5)
                     .foregroundStyle(Theme.textFaint)
                     .help("Edited \(message.editedAt!.formatted(.relative(presentation: .named)))")
             }
             if message.starredAt != nil {
                 Image(systemName: "star.fill")
-                    .font(Theme.icon(10, weight: .medium))
+                    .scaledIcon(10, weight: .medium)
                     .foregroundStyle(.yellow)
                     .help("Starred")
             }
             if message.pinnedAt != nil {
                 Image(systemName: "pin.fill")
-                    .font(Theme.icon(9.5, weight: .semibold))
+                    .scaledIcon(9.5, weight: .semibold)
                     .foregroundStyle(Theme.accent)
                     .rotationEffect(.degrees(35))
                     .help("Pinned")
             }
             if message.fromMe, let status {
                 Image(systemName: statusIcon(status))
-                    .font(Theme.icon(11, weight: .medium))
+                    .scaledIcon(11, weight: .medium)
                     .foregroundStyle(statusColor(status))
             }
         }

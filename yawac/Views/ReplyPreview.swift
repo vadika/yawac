@@ -21,14 +21,14 @@ struct ReplyPreview: View {
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 6) {
                     Image(systemName: "arrowshape.turn.up.left")
-                        .font(Theme.icon(10, weight: .medium))
+                        .scaledIcon(10, weight: .medium)
                         .foregroundStyle(Theme.accentText)
                     Text("Replying to")
                         .foregroundStyle(Theme.accentText)
                     Text(author)
                         .foregroundStyle(Theme.text)
                 }
-                .font(Theme.ui(12, weight: .semibold))
+                .scaledUI(12, weight: .semibold)
                 .tracking(-0.1)
 
                 HStack(spacing: 6) {
@@ -36,7 +36,7 @@ struct ReplyPreview: View {
                         MediaBadge(kind: kind)
                     }
                     Text(displaySnippet)
-                        .font(Theme.ui(13))
+                        .scaledUI(13)
                         .foregroundStyle(Theme.textMuted)
                         .lineLimit(1)
                         .truncationMode(.tail)
@@ -104,7 +104,7 @@ private struct MediaBadge: View {
     var body: some View {
         HStack(spacing: 4) {
             Image(systemName: icon)
-                .font(Theme.icon(9))
+                .scaledIcon(9)
             Text(label)
                 .font(.system(size: 11, design: .monospaced))
         }
@@ -131,7 +131,7 @@ private struct ReplyThumb: View {
             }
             if kind == "video" {
                 Image(systemName: "play.fill")
-                    .font(Theme.icon(10, weight: .bold))
+                    .scaledIcon(10, weight: .bold)
                     .foregroundStyle(.white)
                     .shadow(radius: 1)
             }
@@ -157,7 +157,7 @@ private struct CancelButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: "xmark")
-                .font(Theme.icon(10, weight: .medium))
+                .scaledIcon(10, weight: .medium)
                 .foregroundStyle(hovering ? Theme.text : Theme.textFaint)
                 .frame(width: 24, height: 24)
                 .background(

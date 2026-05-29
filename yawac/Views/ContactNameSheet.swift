@@ -23,17 +23,17 @@ struct ContactNameSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Save contact")
-                .font(Theme.ui(15, weight: .semibold))
+                .scaledUI(15, weight: .semibold)
                 .foregroundStyle(Theme.text)
             VStack(alignment: .leading, spacing: 6) {
                 Text("Full name")
-                    .font(Theme.ui(11)).foregroundStyle(Theme.textFaint)
+                    .scaledUI(11).foregroundStyle(Theme.textFaint)
                 TextField("Full name", text: $fullName)
                     .textFieldStyle(.roundedBorder)
             }
             VStack(alignment: .leading, spacing: 6) {
                 Text("First name (optional)")
-                    .font(Theme.ui(11)).foregroundStyle(Theme.textFaint)
+                    .scaledUI(11).foregroundStyle(Theme.textFaint)
                 TextField("First name", text: $firstName)
                     .textFieldStyle(.roundedBorder)
             }

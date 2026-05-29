@@ -13,7 +13,7 @@ struct RecordingBar: View {
         HStack(spacing: 10) {
             PulsingDot()
             Text(format(recorder.elapsed))
-                .font(Theme.mono(12))
+                .scaledMono(12)
                 .foregroundStyle(Theme.text)
                 .frame(width: 44, alignment: .leading)
 
@@ -21,7 +21,7 @@ struct RecordingBar: View {
                 .frame(maxWidth: .infinity, maxHeight: 22)
 
             Text(cancelHint ? "Release to cancel" : "Slide up to cancel")
-                .font(Theme.ui(11))
+                .scaledUI(11)
                 .foregroundStyle(cancelHint ? Color.red.opacity(0.85) : Theme.textMuted)
                 .frame(minWidth: 110, alignment: .trailing)
         }

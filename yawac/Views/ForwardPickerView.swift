@@ -22,7 +22,7 @@ struct ForwardPickerView: View {
         VStack(spacing: 0) {
             HStack {
                 Text("Forward to…")
-                    .font(Theme.ui(15, weight: .semibold))
+                    .scaledUI(15, weight: .semibold)
                     .foregroundStyle(Theme.text)
                 Spacer()
                 Button("Cancel") { dismiss() }
@@ -36,7 +36,7 @@ struct ForwardPickerView: View {
                     .foregroundStyle(Theme.textFaint)
                 TextField("Search", text: $query)
                     .textFieldStyle(.plain)
-                    .font(Theme.ui(13))
+                    .scaledUI(13)
             }
             .padding(.horizontal, 10).padding(.vertical, 7)
             .background(Theme.surface, in: RoundedRectangle(cornerRadius: 8))
@@ -52,10 +52,10 @@ struct ForwardPickerView: View {
                             HStack(spacing: 11) {
                                 AvatarView(jid: chat.jid, name: chat.name, size: 34)
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(chat.name).font(Theme.ui(14, weight: .medium))
+                                    Text(chat.name).scaledUI(14, weight: .medium)
                                         .foregroundStyle(Theme.text).lineLimit(1)
                                     if !chat.lastMessage.isEmpty {
-                                        Text(chat.lastMessage).font(Theme.ui(12))
+                                        Text(chat.lastMessage).scaledUI(12)
                                             .foregroundStyle(Theme.textMuted).lineLimit(1)
                                     }
                                 }

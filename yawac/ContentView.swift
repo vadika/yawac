@@ -36,7 +36,7 @@ struct ContentView: View {
                 ConversationView(chatJID: id)
             } else {
                 Text("Select a chat")
-                    .font(Theme.ui(14))
+                    .scaledUI(14)
                     .foregroundStyle(Theme.textFaint)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Theme.bg)

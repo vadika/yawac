@@ -58,7 +58,7 @@ struct ChatInfoView: View {
                                 .frame(maxWidth: .infinity)
                         }
                         if let err = loadError {
-                            Text(err).font(Theme.ui(12))
+                            Text(err).scaledUI(12)
                                 .foregroundStyle(Color.red.opacity(0.85))
                         }
                         if let g = group { groupBody(g) }
@@ -125,7 +125,7 @@ struct ChatInfoView: View {
     private var eyebrow: some View {
         HStack {
             Text((isGroup ? "GROUP INFO" : "USER INFO"))
-                .font(Theme.ui(10, weight: .semibold))
+                .scaledUI(10, weight: .semibold)
                 .tracking(1.4)
                 .foregroundStyle(Theme.textFaint)
             Spacer()
@@ -133,7 +133,7 @@ struct ChatInfoView: View {
                 onClose?()
             } label: {
                 Image(systemName: "xmark")
-                    .font(Theme.icon(11, weight: .semibold))
+                    .scaledIcon(11, weight: .semibold)
                     .foregroundStyle(Theme.textMuted)
                     .frame(width: 22, height: 22)
                     .contentShape(Rectangle())
@@ -150,18 +150,18 @@ struct ChatInfoView: View {
             AvatarView(jid: chatJID, name: name, size: 92)
             VStack(spacing: 4) {
                 Text(name)
-                    .font(Theme.ui(20, weight: .semibold))
+                    .scaledUI(20, weight: .semibold)
                     .foregroundStyle(Theme.text)
                     .multilineTextAlignment(.center)
                 if isGroup, let g = group {
                     Text("GROUP · \(g.participants.count) MEMBERS")
-                        .font(Theme.ui(10.5, weight: .medium))
+                        .scaledUI(10.5, weight: .medium)
                         .tracking(1)
                         .foregroundStyle(Theme.textMuted)
                 } else if !isGroup {
                     if let about = userAbout, !about.isEmpty {
                         Text(about)
-                            .font(Theme.ui(12))
+                            .scaledUI(12)
                             .foregroundStyle(Theme.textMuted)
                             .multilineTextAlignment(.center)
                             .textSelection(.enabled)
@@ -183,16 +183,16 @@ struct ChatInfoView: View {
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: "number")
-                    .font(Theme.icon(11, weight: .medium))
+                    .scaledIcon(11, weight: .medium)
                     .foregroundStyle(Theme.textMuted)
                 Text(chatJID)
-                    .font(Theme.mono(11.5))
+                    .scaledMono(11.5)
                     .foregroundStyle(Theme.textMuted)
                     .lineLimit(1)
                     .truncationMode(.middle)
                 Spacer(minLength: 4)
                 Image(systemName: "doc.on.doc")
-                    .font(Theme.icon(11, weight: .regular))
+                    .scaledIcon(11, weight: .regular)
                     .foregroundStyle(Theme.textFaint)
             }
             .padding(.horizontal, 12).padding(.vertical, 10)
@@ -250,7 +250,7 @@ struct ChatInfoView: View {
         if !g.topic.isEmpty {
             sectionCard(label: "TOPIC") {
                 Text(g.topic)
-                    .font(Theme.ui(13))
+                    .scaledUI(13)
                     .foregroundStyle(Theme.text)
                     .textSelection(.enabled)
             }
@@ -373,11 +373,11 @@ struct ChatInfoView: View {
             ForEach(items.indices, id: \.self) { i in
                 VStack(alignment: .leading, spacing: 4) {
                     Text(items[i].label)
-                        .font(Theme.ui(9.5, weight: .semibold))
+                        .scaledUI(9.5, weight: .semibold)
                         .tracking(1)
                         .foregroundStyle(Theme.textFaint)
                     Text(items[i].value)
-                        .font(Theme.ui(14, weight: .medium))
+                        .scaledUI(14, weight: .medium)
                         .foregroundStyle(Theme.text)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -405,9 +405,9 @@ struct ChatInfoView: View {
                 Button { a.action?() } label: {
                     VStack(spacing: 6) {
                         Image(systemName: a.icon)
-                            .font(Theme.icon(14, weight: .regular))
+                            .scaledIcon(14, weight: .regular)
                         Text(a.label)
-                            .font(Theme.ui(11.5, weight: .medium))
+                            .scaledUI(11.5, weight: .medium)
                     }
                     .foregroundStyle(a.destructive ? Color.red.opacity(0.95) : Theme.text)
                     .frame(maxWidth: .infinity)
@@ -430,7 +430,7 @@ struct ChatInfoView: View {
                                       @ViewBuilder content: () -> C) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(label)
-                .font(Theme.ui(9.5, weight: .semibold))
+                .scaledUI(9.5, weight: .semibold)
                 .tracking(1)
                 .foregroundStyle(Theme.textFaint)
             content()
@@ -448,13 +448,13 @@ struct ChatInfoView: View {
     private func sectionLabel(_ text: String, trailing: String? = nil) -> some View {
         HStack(spacing: 8) {
             Text(text)
-                .font(Theme.ui(10, weight: .semibold))
+                .scaledUI(10, weight: .semibold)
                 .tracking(1.2)
                 .foregroundStyle(Theme.textFaint)
             Spacer()
             if let trailing {
                 Text(trailing)
-                    .font(Theme.mono(10.5))
+                    .scaledMono(10.5)
                     .foregroundStyle(Theme.textFaint)
                     .monospacedDigit()
             }
@@ -476,7 +476,7 @@ struct ChatInfoView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
                         Text(session.displayName(for: p.jid))
-                            .font(Theme.ui(13, weight: .medium))
+                            .scaledUI(13, weight: .medium)
                             .foregroundStyle(Theme.text)
                             .lineLimit(1)
                         if p.isSuper {
@@ -486,7 +486,7 @@ struct ChatInfoView: View {
                         }
                     }
                     Text(p.jid)
-                        .font(Theme.mono(10.5))
+                        .scaledMono(10.5)
                         .foregroundStyle(Theme.textFaint)
                         .lineLimit(1)
                         .truncationMode(.middle)
@@ -513,7 +513,7 @@ struct ChatInfoView: View {
     @ViewBuilder
     private func roleBadge(_ text: String, color: Color) -> some View {
         Text(text)
-            .font(Theme.ui(9, weight: .bold))
+            .scaledUI(9, weight: .bold)
             .tracking(0.8)
             .foregroundStyle(color)
             .padding(.horizontal, 5).padding(.vertical, 2)
@@ -535,18 +535,18 @@ struct ChatInfoView: View {
                     Text(sub.name.isEmpty
                          ? session.displayName(for: sub.jid)
                          : sub.name)
-                        .font(Theme.ui(13, weight: .medium))
+                        .scaledUI(13, weight: .medium)
                         .foregroundStyle(Theme.text)
                         .lineLimit(1)
                     Text(sub.jid)
-                        .font(Theme.mono(10.5))
+                        .scaledMono(10.5)
                         .foregroundStyle(Theme.textFaint)
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }
                 Spacer()
                 Image(systemName: "arrow.right")
-                    .font(Theme.icon(11, weight: .medium))
+                    .scaledIcon(11, weight: .medium)
                     .foregroundStyle(Theme.textMuted)
             }
             .padding(.vertical, 8)
@@ -575,23 +575,23 @@ struct ChatInfoView: View {
             Button(action: onTap) {
                 HStack(spacing: 10) {
                     Image(systemName: "star.fill")
-                        .font(Theme.icon(11, weight: .medium))
+                        .scaledIcon(11, weight: .medium)
                         .foregroundStyle(.yellow)
                         .frame(width: 16)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(item.snippet)
-                            .font(Theme.ui(12.5))
+                            .scaledUI(12.5)
                             .foregroundStyle(Theme.text)
                             .lineLimit(2)
                             .multilineTextAlignment(.leading)
                         HStack(spacing: 6) {
                             Image(systemName: icon)
-                                .font(Theme.icon(9.5))
+                                .scaledIcon(9.5)
                                 .foregroundStyle(Theme.textFaint)
                             Text(item.timestamp,
                                  format: .dateTime.day().month(.abbreviated)
                                     .hour(.twoDigits(amPM: .omitted)).minute())
-                                .font(Theme.mono(10.5))
+                                .scaledMono(10.5)
                                 .foregroundStyle(Theme.textFaint)
                         }
                     }

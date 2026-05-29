@@ -46,7 +46,7 @@ struct SyncBanner: View {
                 }
             }
             Text(label)
-                .font(Theme.mono(11, weight: .medium))
+                .scaledMono(11, weight: .medium)
                 .foregroundStyle(Theme.textMuted)
             if state != .offline {
                 AnimatedDots()
