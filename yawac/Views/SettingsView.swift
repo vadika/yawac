@@ -6,6 +6,7 @@ struct SettingsView: View {
 
     @AppStorage("yawac.translate.targetLang")
     private var targetLang: String = "en"
+    @AppStorage(UIScaleStep.storageKey) private var scaleStepRaw = UIScaleStep.default.rawValue
 
     private static let languages: [(code: String, name: String)] = [
         ("en", "English"), ("de", "German"), ("fi", "Finnish"),
@@ -22,6 +23,29 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
+            Section("Display") {
+                let step = UIScaleStep.from(scaleStepRaw)
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("Interface size")
+                        Spacer()
+                        Text(step.label).foregroundStyle(.secondary)
+                    }
+                    Slider(
+                        value: Binding(
+                            get: { Double(scaleStepRaw) },
+                            set: { scaleStepRaw = UIScaleStep.from(Int($0.rounded())).rawValue }
+                        ),
+                        in: 0...Double(UIScaleStep.allCases.count - 1),
+                        step: 1
+                    )
+                    Text("Aa  The quick brown fox")
+                        .font(Theme.ui(14))
+                        .dynamicTypeSize(step.dynamicTypeSize)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
             Section("Translation") {
                 Picker("Target language", selection: $targetLang) {
                     ForEach(Self.languages, id: \.code) { lang in

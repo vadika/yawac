@@ -23,6 +23,7 @@ struct YawacApp: App {
         return vm
     }()
     let container: ModelContainer
+    @AppStorage(UIScaleStep.storageKey) private var scaleStepRaw = UIScaleStep.default.rawValue
 
     init() {
         do {
@@ -45,6 +46,7 @@ struct YawacApp: App {
                 .environment(translation)
                 .modelContainer(container)
                 .frame(minWidth: 900, minHeight: 600)
+                .dynamicTypeSize(UIScaleStep.from(scaleStepRaw).dynamicTypeSize)
                 .preferredColorScheme(.dark)
                 .background(Theme.bg)
                 .graphiteWindow()
@@ -65,6 +67,7 @@ struct YawacApp: App {
             SettingsView()
                 .environment(translation)
                 .environment(session)
+                .dynamicTypeSize(UIScaleStep.from(scaleStepRaw).dynamicTypeSize)
         }
     }
 }
