@@ -32,12 +32,12 @@ struct SharedMediaCell: View {
                             .clipped()
                     } else {
                         Image(systemName: placeholderIcon)
-                            .font(.system(size: 18))
+                            .font(Theme.icon(18))
                             .foregroundStyle(Theme.textFaint)
                     }
                     if item.kind == "video", image != nil {
                         Image(systemName: "play.fill")
-                            .font(.system(size: 18, weight: .bold))
+                            .font(Theme.icon(18, weight: .bold))
                             .foregroundStyle(.white)
                             .shadow(radius: 2)
                     }
@@ -114,7 +114,7 @@ struct SharedFileRow: View {
         Button(action: open) {
             HStack(spacing: 10) {
                 Image(systemName: "doc.fill")
-                    .font(.system(size: 16))
+                    .font(Theme.icon(16))
                     .foregroundStyle(Theme.accent)
                     .frame(width: 24, alignment: .center)
                 VStack(alignment: .leading, spacing: 2) {
@@ -137,7 +137,7 @@ struct SharedFileRow: View {
                 Spacer()
                 if item.path != nil {
                     Image(systemName: "arrow.up.right.square")
-                        .font(.system(size: 11))
+                        .font(Theme.icon(11))
                         .foregroundStyle(Theme.textMuted)
                 }
             }

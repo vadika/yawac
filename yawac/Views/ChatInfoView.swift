@@ -133,7 +133,7 @@ struct ChatInfoView: View {
                 onClose?()
             } label: {
                 Image(systemName: "xmark")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(Theme.icon(11, weight: .semibold))
                     .foregroundStyle(Theme.textMuted)
                     .frame(width: 22, height: 22)
                     .contentShape(Rectangle())
@@ -183,7 +183,7 @@ struct ChatInfoView: View {
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: "number")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(Theme.icon(11, weight: .medium))
                     .foregroundStyle(Theme.textMuted)
                 Text(chatJID)
                     .font(Theme.mono(11.5))
@@ -192,7 +192,7 @@ struct ChatInfoView: View {
                     .truncationMode(.middle)
                 Spacer(minLength: 4)
                 Image(systemName: "doc.on.doc")
-                    .font(.system(size: 11, weight: .regular))
+                    .font(Theme.icon(11, weight: .regular))
                     .foregroundStyle(Theme.textFaint)
             }
             .padding(.horizontal, 12).padding(.vertical, 10)
@@ -405,7 +405,7 @@ struct ChatInfoView: View {
                 Button { a.action?() } label: {
                     VStack(spacing: 6) {
                         Image(systemName: a.icon)
-                            .font(.system(size: 14, weight: .regular))
+                            .font(Theme.icon(14, weight: .regular))
                         Text(a.label)
                             .font(Theme.ui(11.5, weight: .medium))
                     }
@@ -546,7 +546,7 @@ struct ChatInfoView: View {
                 }
                 Spacer()
                 Image(systemName: "arrow.right")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(Theme.icon(11, weight: .medium))
                     .foregroundStyle(Theme.textMuted)
             }
             .padding(.vertical, 8)
@@ -575,7 +575,7 @@ struct ChatInfoView: View {
             Button(action: onTap) {
                 HStack(spacing: 10) {
                     Image(systemName: "star.fill")
-                        .font(.system(size: 11, weight: .medium))
+                        .font(Theme.icon(11, weight: .medium))
                         .foregroundStyle(.yellow)
                         .frame(width: 16)
                     VStack(alignment: .leading, spacing: 2) {
@@ -586,7 +586,7 @@ struct ChatInfoView: View {
                             .multilineTextAlignment(.leading)
                         HStack(spacing: 6) {
                             Image(systemName: icon)
-                                .font(.system(size: 9.5))
+                                .font(Theme.icon(9.5))
                                 .foregroundStyle(Theme.textFaint)
                             Text(item.timestamp,
                                  format: .dateTime.day().month(.abbreviated)

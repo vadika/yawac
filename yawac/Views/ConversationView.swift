@@ -167,7 +167,7 @@ struct ConversationView: View {
                 showInfo.toggle()
             } label: {
                 Image(systemName: showInfo ? "info.circle.fill" : "info.circle")
-                    .font(.system(size: 15, weight: .regular))
+                    .font(Theme.icon(15, weight: .regular))
                     .foregroundStyle(showInfo ? Theme.accent : Theme.textMuted)
                     .padding(7)
                     .background(showInfo ? Theme.accentSoft : Color.clear,
@@ -217,7 +217,7 @@ struct ConversationView: View {
                 Button("Delete chat…", role: .destructive) { pendingDelete = chat }
             } label: {
                 Image(systemName: "ellipsis")
-                    .font(.system(size: 15, weight: .regular))
+                    .font(Theme.icon(15, weight: .regular))
                     .foregroundStyle(Theme.textMuted)
                     .padding(7)
                     .contentShape(Rectangle())
@@ -237,7 +237,7 @@ struct ConversationView: View {
             } label: {
                 HStack(spacing: 10) {
                     Image(systemName: "pin.fill")
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(Theme.icon(11, weight: .semibold))
                         .foregroundStyle(Theme.accent)
                         .rotationEffect(.degrees(35))
                     VStack(alignment: .leading, spacing: 2) {
@@ -255,7 +255,7 @@ struct ConversationView: View {
                         vm.pinMessage(m, pinned: false)
                     } label: {
                         Image(systemName: "xmark")
-                            .font(.system(size: 10, weight: .semibold))
+                            .font(Theme.icon(10, weight: .semibold))
                             .foregroundStyle(Theme.textMuted)
                             .frame(width: 22, height: 22)
                             .contentShape(Rectangle())
@@ -279,7 +279,7 @@ struct ConversationView: View {
         if session.isBlocked(chatJID) {
             HStack(spacing: 10) {
                 Image(systemName: "nosign")
-                    .font(.system(size: 12))
+                    .font(Theme.icon(12))
                     .foregroundStyle(Theme.textMuted)
                 Text("You blocked this contact")
                     .font(Theme.ui(12.5))
@@ -417,7 +417,7 @@ struct ConversationView: View {
                                     }
                                 } label: {
                                     Image(systemName: "chevron.down")
-                                        .font(.system(size: 16, weight: .semibold))
+                                        .font(Theme.icon(16, weight: .semibold))
                                         .foregroundStyle(.primary)
                                         .frame(width: 36, height: 36)
                                         .background(.regularMaterial, in: Circle())

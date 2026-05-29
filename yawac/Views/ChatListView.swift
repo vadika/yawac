@@ -165,7 +165,7 @@ struct ChatListView: View {
             // ─── Real search field. ⌘K focuses; empty query restores full list.
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(Theme.icon(11, weight: .medium))
                     .foregroundStyle(Theme.textFaint)
                 TextField("Search", text: Bindable(search).query)
                     .textFieldStyle(.plain)
@@ -229,7 +229,7 @@ struct ChatListView: View {
                     } label: {
                         VStack(spacing: 3) {
                             Image(systemName: s.icon)
-                                .font(.system(size: 14, weight: .regular))
+                                .font(Theme.icon(14, weight: .regular))
                             Text(s.label)
                                 .font(Theme.ui(10, weight: .medium))
                                 .opacity(0.85)
@@ -335,7 +335,7 @@ struct ChatListView: View {
         Button { archivedExpanded.toggle() } label: {
             HStack(spacing: 8) {
                 Image(systemName: "archivebox")
-                    .font(.system(size: 12))
+                    .font(Theme.icon(12))
                     .foregroundStyle(Theme.textFaint)
                 Text("Archived")
                     .font(Theme.ui(13, weight: .medium))
@@ -346,7 +346,7 @@ struct ChatListView: View {
                     .foregroundStyle(Theme.textFaint)
                     .monospacedDigit()
                 Image(systemName: archivedExpanded ? "chevron.down" : "chevron.right")
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(Theme.icon(10, weight: .semibold))
                     .foregroundStyle(Theme.textFaint)
             }
             .padding(.horizontal, 10).padding(.vertical, 8)
@@ -394,7 +394,7 @@ struct ChatListView: View {
         } label: {
             HStack(spacing: 10) {
                 Image(systemName: "person.crop.circle.badge.plus")
-                    .font(.system(size: 22))
+                    .font(Theme.icon(22))
                     .foregroundStyle(Theme.accentText)
                     .frame(width: 32, height: 32)
                     .background(Theme.accentSoft,
@@ -432,14 +432,14 @@ struct ChatListView: View {
                         .tracking(-0.1)
                     if session.isBlocked(chat.jid) {
                         Image(systemName: "nosign")
-                            .font(.system(size: 10, weight: .semibold))
+                            .font(Theme.icon(10, weight: .semibold))
                             .foregroundStyle(Theme.textFaint)
                             .help("Blocked")
                     }
                     Spacer(minLength: 0)
                     if chat.pinnedAt != nil {
                         Image(systemName: "pin.fill")
-                            .font(.system(size: 9, weight: .semibold))
+                            .font(Theme.icon(9, weight: .semibold))
                             .foregroundStyle(Theme.textFaint)
                             .rotationEffect(.degrees(35))
                             .help("Pinned")

@@ -172,10 +172,10 @@ private struct MenuRow: View {
         Button(action: action) {
             HStack(spacing: 10) {
                 Image(systemName: icon)
-                    .font(.system(size: 11, weight: .regular))
+                    .font(Theme.icon(11, weight: .regular))
                     .frame(width: 16, alignment: .center)
                 Text(label)
-                    .font(.system(size: 13.5))
+                    .font(Theme.ui(13.5))
                 Spacer(minLength: 4)
                 if let shortcut {
                     Text(shortcut)
@@ -210,7 +210,7 @@ private struct ReactionButton: View {
     var body: some View {
         Button(action: action) {
             Text(emoji)
-                .font(.system(size: 18))
+                .font(Theme.ui(18))
                 .frame(maxWidth: .infinity)
                 .frame(height: 30)
                 .background(

@@ -58,7 +58,7 @@ struct ComposerView: View {
                 attachFile()
             } label: {
                 Image(systemName: "paperclip")
-                    .font(.system(size: 15, weight: .regular))
+                    .font(Theme.icon(15, weight: .regular))
                     .foregroundStyle(Theme.textMuted)
                     .padding(4)
             }
@@ -101,7 +101,7 @@ struct ComposerView: View {
                 NSApp.orderFrontCharacterPalette(nil)
             } label: {
                 Image(systemName: "face.smiling")
-                    .font(.system(size: 15, weight: .regular))
+                    .font(Theme.icon(15, weight: .regular))
                     .foregroundStyle(Theme.textMuted)
                     .padding(4)
             }
@@ -115,7 +115,7 @@ struct ComposerView: View {
                     send()
                 } label: {
                     Image(systemName: vm.editTarget != nil ? "checkmark" : "paperplane.fill")
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(Theme.icon(13, weight: .semibold))
                         .foregroundStyle(.white)
                         .frame(width: 32, height: 32)
                         .background(canSend ? Theme.accent : Theme.surfaceAlt,
@@ -290,7 +290,7 @@ struct ComposerView: View {
                 } else {
                     VStack(spacing: 4) {
                         Image(systemName: chipIcon(att.kind))
-                            .font(.system(size: 18))
+                            .font(Theme.icon(18))
                             .foregroundStyle(Theme.textMuted)
                         Text(att.url.lastPathComponent)
                             .font(Theme.ui(8))
@@ -309,7 +309,7 @@ struct ComposerView: View {
                 vm.removePendingAttachment(att.id)
             } label: {
                 Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 14))
+                    .font(Theme.icon(14))
                     .foregroundStyle(.white, .black.opacity(0.55))
             }
             .buttonStyle(.plain)
