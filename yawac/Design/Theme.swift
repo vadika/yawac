@@ -58,17 +58,27 @@ enum Theme {
         static let serif   = "Instrument Serif" // reserved for Paper variant
     }
 
-    /// Inter Tight at the given size + weight. Weight axis is resolved by
-    /// the variable font; SwiftUI maps `.semibold` etc. to the closest axis
-    /// value internally.
+    /// Inter Tight at the given size + weight, scaling with Dynamic Type
+    /// (relative to `.body`). At the default Dynamic Type size the rendered
+    /// size equals `size`, so existing layouts are unchanged.
     static func ui(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
-        Font.custom(FontFamily.ui, size: size).weight(weight)
+        Font.custom(FontFamily.ui, size: size, relativeTo: .body).weight(weight)
     }
 
     /// JetBrains Mono — for timestamps, JIDs, keyboard shortcut hints,
-    /// vote counts, anything that benefits from tabular alignment.
+    /// vote counts, anything that benefits from tabular alignment. Scales
+    /// with Dynamic Type.
     static func mono(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
-        Font.custom(FontFamily.mono, size: size).weight(weight)
+        Font.custom(FontFamily.mono, size: size, relativeTo: .body).weight(weight)
+    }
+
+    /// Scalable font for SF Symbols / glyphs. SwiftUI sizes a symbol by its
+    /// resolved font's point size, and a `relativeTo:` custom font's point
+    /// size tracks Dynamic Type — so applying this to `Image(systemName:)`
+    /// scales the glyph in lockstep with `Theme.ui` text. (The font *family*
+    /// is irrelevant for symbols; only the point size matters.)
+    static func icon(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
+        Font.custom(FontFamily.ui, size: size, relativeTo: .body).weight(weight)
     }
 }
 
