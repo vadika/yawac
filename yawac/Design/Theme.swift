@@ -78,7 +78,8 @@ enum Theme {
     /// scales the glyph in lockstep with `Theme.ui` text. (The font *family*
     /// is irrelevant for symbols; only the point size matters.)
     static func icon(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
-        Font.custom(FontFamily.ui, size: size, relativeTo: .body).weight(weight)
+        // Symbols size by point size only; reuse the scalable ui() font.
+        ui(size, weight: weight)
     }
 }
 
