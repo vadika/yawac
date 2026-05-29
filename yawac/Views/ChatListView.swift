@@ -302,10 +302,10 @@ struct ChatListView: View {
                 vm.addContact(chat, fullName: full, firstName: first)
             }
         }
-        // Keep active search results in sync when the chat list shrinks
-        // (e.g. a delete from within search) — otherwise the stale snapshot
-        // keeps showing the removed chat until the query changes.
-        .onChange(of: vm.chats.count) { _, _ in
+        // Keep active search results in sync with any chat-list mutation —
+        // adds/removes (count), and in-place updates (e.g. lastMessage flip
+        // to a tombstone after a delete) which leave count unchanged.
+        .onChange(of: vm.chats) { _, _ in
             if !search.query.isEmpty { search.refresh() }
         }
     }

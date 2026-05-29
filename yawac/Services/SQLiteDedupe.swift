@@ -74,6 +74,8 @@ enum SQLiteDedupe {
         let timestampAppleEpoch: Double  // Apple epoch (1 Jan 2001)
         let text: String?
         let kind: String
+        let revoked: Bool
+        let locallyDeleted: Bool
     }
     static func latestMessagePerChat() -> [LatestPerChat] {
         let supportDir: URL
@@ -92,7 +94,8 @@ enum SQLiteDedupe {
 
         // For each chat, take the row with the max timestamp.
         let sql = """
-            SELECT m.ZCHATJID, m.ZTIMESTAMP, m.ZTEXT, m.ZKIND
+            SELECT m.ZCHATJID, m.ZTIMESTAMP, m.ZTEXT, m.ZKIND,
+                   m.ZREVOKEDAT, m.ZLOCALLYDELETED
             FROM ZPERSISTEDMESSAGE m
             JOIN (
                 SELECT ZCHATJID, MAX(ZTIMESTAMP) AS mx
@@ -111,11 +114,17 @@ enum SQLiteDedupe {
             let ts = sqlite3_column_double(stmt, 1)
             let text = sqlite3_column_text(stmt, 2).flatMap { String(cString: $0) }
             let kind = sqlite3_column_text(stmt, 3).flatMap { String(cString: $0) } ?? ""
+            // ZREVOKEDAT is a nullable TIMESTAMP column — treat any non-null
+            // value as "revoked". ZLOCALLYDELETED is an INTEGER 0/1 flag.
+            let revoked = sqlite3_column_type(stmt, 4) != SQLITE_NULL
+            let locallyDeleted = sqlite3_column_int(stmt, 5) != 0
             out.append(LatestPerChat(
                 chatJID: jid,
                 timestampAppleEpoch: ts,
                 text: text,
-                kind: kind))
+                kind: kind,
+                revoked: revoked,
+                locallyDeleted: locallyDeleted))
         }
         return out
     }

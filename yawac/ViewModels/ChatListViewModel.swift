@@ -157,8 +157,15 @@ final class ChatListViewModel {
         for row in SQLiteDedupe.latestMessagePerChat() {
             // SwiftData stores Date as Apple-epoch seconds; convert.
             let date = Date(timeIntervalSinceReferenceDate: row.timestampAppleEpoch)
+            // Mirror previewText(for:) for deletions — otherwise the raw text
+            // of a revoked / locally-deleted message resurfaces on every
+            // launch, overriding the correctly-tombstoned PersistedChat row.
             let preview: String
-            if let t = row.text, !t.isEmpty {
+            if row.revoked {
+                preview = "🚫 message deleted"
+            } else if row.locallyDeleted {
+                preview = "🚫 you deleted this"
+            } else if let t = row.text, !t.isEmpty {
                 preview = t
             } else {
                 switch row.kind {
