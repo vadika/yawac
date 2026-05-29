@@ -28,6 +28,12 @@ final class UIScaleStepTests: XCTestCase {
         XCTAssertEqual(UIScaleStep.from(2), .default)
     }
 
+    func testFromBoundaries() {
+        // Exact, non-clamped boundary indices — guard against off-by-one.
+        XCTAssertEqual(UIScaleStep.from(0), .small)
+        XCTAssertEqual(UIScaleStep.from(UIScaleStep.allCases.count - 1), .xLarge)
+    }
+
     func testLabels() {
         XCTAssertEqual(UIScaleStep.default.label, "Default")
         XCTAssertEqual(UIScaleStep.xLarge.label, "X-Large")

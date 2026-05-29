@@ -13,10 +13,11 @@ enum UIScaleStep: Int, CaseIterable {
     /// UserDefaults key for the persisted step (raw Int).
     static let storageKey = "yawac.uiScaleStep"
 
-    /// Clamp an arbitrary stored Int into a valid step.
+    /// Clamp an arbitrary stored Int into a valid step. Index-based so it
+    /// stays correct even if raw values are ever renumbered non-contiguously.
     static func from(_ raw: Int) -> UIScaleStep {
-        let clamped = min(max(raw, 0), allCases.count - 1)
-        return UIScaleStep(rawValue: clamped) ?? .default
+        let index = min(max(raw, 0), allCases.count - 1)
+        return allCases[index]
     }
 
     var dynamicTypeSize: DynamicTypeSize {
