@@ -188,13 +188,16 @@ final class ChatListViewModel {
                 let ts = max(
                     row.lastTimestamp.timeIntervalSince1970,
                     derived?.ts.timeIntervalSince1970 ?? -.infinity)
-                let preview: String = {
+                let rawPreview: String = {
                     if let d = derived,
                        d.ts.timeIntervalSince1970 >= row.lastTimestamp.timeIntervalSince1970 {
                         return d.text
                     }
                     return row.lastMessageText ?? ""
                 }()
+                let preview = resolveMentionsText(rawPreview) { [weak session] jid in
+                    session?.displayName(for: jid) ?? jid
+                }
                 return Chat(
                     jid: row.jid, name: row.name,
                     lastMessage: preview,
