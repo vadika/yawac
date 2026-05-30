@@ -66,6 +66,74 @@ final class ConversationViewModel {
     /// when the chat becomes active.
     weak var chatList: ChatListViewModel?
 
+    // MARK: - In-chat find bar
+    var messageIndex: MessageIndex = .shared
+    var findActive: Bool = false {
+        didSet {
+            if !findActive {
+                findQuery = ""
+                findHits = []
+                findCurrentIdx = 0
+            }
+        }
+    }
+    var findQuery: String = "" {
+        didSet { scheduleFind() }
+    }
+    var findHits: [MessageIndex.Hit] = []
+    var findCurrentIdx: Int = 0
+    var findHitIDs: Set<String> { Set(findHits.map(\.messageID)) }
+
+    private var findTask: Task<Void, Never>?
+    private let findDebounceMs: Int = 120
+
+    private func scheduleFind() {
+        findTask?.cancel()
+        let q = findQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        if q.isEmpty {
+            findHits = []
+            findCurrentIdx = 0
+            return
+        }
+        let jid = chatJID
+        let idx = messageIndex
+        findTask = Task { [weak self, findDebounceMs] in
+            try? await Task.sleep(for: .milliseconds(findDebounceMs))
+            guard let self, !Task.isCancelled else { return }
+            let hits = await Task.detached(priority: .userInitiated) {
+                idx.searchInChat(jid: jid, query: q)
+            }.value
+            guard !Task.isCancelled else { return }
+            self.findHits = hits
+            self.findCurrentIdx = 0
+            if let first = hits.first { self.pendingScrollToID = first.messageID }
+        }
+    }
+
+    /// Synchronous test seam — bypasses the debounce.
+    func runFindForTest() async {
+        let q = findQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        if q.isEmpty { findHits = []; findCurrentIdx = 0; return }
+        let idx = messageIndex; let jid = chatJID
+        let hits = await Task.detached(priority: .userInitiated) {
+            idx.searchInChat(jid: jid, query: q)
+        }.value
+        findHits = hits
+        findCurrentIdx = 0
+    }
+
+    func findNext() {
+        guard !findHits.isEmpty else { return }
+        findCurrentIdx = (findCurrentIdx + 1) % findHits.count
+        pendingScrollToID = findHits[findCurrentIdx].messageID
+    }
+
+    func findPrev() {
+        guard !findHits.isEmpty else { return }
+        findCurrentIdx = (findCurrentIdx - 1 + findHits.count) % findHits.count
+        pendingScrollToID = findHits[findCurrentIdx].messageID
+    }
+
     func jumpToQuoted(id: String) {
         if messages.contains(where: { $0.id == id }) {
             pendingScrollToID = id
