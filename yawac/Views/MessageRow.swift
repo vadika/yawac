@@ -86,6 +86,8 @@ struct MessageRow: View {
     let selected: Bool
     let selectable: Bool
     let onToggleSelect: (() -> Void)?
+    var isFindHit: Bool = false
+    var isFindCurrent: Bool = false
 
     @Environment(TranslationViewModel.self) private var translation
 
@@ -125,7 +127,9 @@ struct MessageRow: View {
          selecting: Bool = false,
          selected: Bool = false,
          selectable: Bool = true,
-         onToggleSelect: (() -> Void)? = nil) {
+         onToggleSelect: (() -> Void)? = nil,
+         isFindHit: Bool = false,
+         isFindCurrent: Bool = false) {
         self.message = message
         self.status = status
         self.senderName = senderName
@@ -155,6 +159,8 @@ struct MessageRow: View {
         self.selected = selected
         self.selectable = selectable
         self.onToggleSelect = onToggleSelect
+        self.isFindHit = isFindHit
+        self.isFindCurrent = isFindCurrent
     }
 
     /// Returns true when the bubble should render the sender header
@@ -181,21 +187,27 @@ struct MessageRow: View {
         // flexible HStack + .contentShape around the Spacer-padded row sent
         // SwiftUI into an infinite layout-sizing cycle. The selection
         // wrapper only exists while forwarding.
-        if selecting {
-            HStack(spacing: 8) {
-                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
-                    .scaledIcon(18)
-                    .foregroundStyle(selected ? Theme.accent : Theme.textFaint)
-                    .opacity(selectable ? 1 : 0.3)
+        let tint: Color = isFindCurrent ? Theme.findHighlightCurrent
+                         : isFindHit    ? Theme.findHighlight
+                         : .clear
+        return Group {
+            if selecting {
+                HStack(spacing: 8) {
+                    Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                        .scaledIcon(18)
+                        .foregroundStyle(selected ? Theme.accent : Theme.textFaint)
+                        .opacity(selectable ? 1 : 0.3)
+                    rowContent
+                        .opacity(selectable ? 1 : 0.4)
+                        .allowsHitTesting(false)
+                }
+                .contentShape(Rectangle())
+                .onTapGesture { if selectable { onToggleSelect?() } }
+            } else {
                 rowContent
-                    .opacity(selectable ? 1 : 0.4)
-                    .allowsHitTesting(false)
             }
-            .contentShape(Rectangle())
-            .onTapGesture { if selectable { onToggleSelect?() } }
-        } else {
-            rowContent
         }
+        .background(tint)
     }
 
     private var rowContent: some View {

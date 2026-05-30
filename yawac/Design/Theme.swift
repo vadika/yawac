@@ -19,6 +19,13 @@ enum Theme {
     static let textMuted     = Color(hex: 0x8a909c)
     static let textFaint     = Color(hex: 0x5b616c)
 
+    /// Background tint for messages matching the active in-chat find query.
+    static let findHighlight        = Color(red: 0.95, green: 0.84, blue: 0.27)
+                                          .opacity(0.28)
+    /// Stronger tint for the current find-bar selection (↑/↓ cursor).
+    static let findHighlightCurrent = Color(red: 0.95, green: 0.84, blue: 0.27)
+                                          .opacity(0.55)
+
     // ─── Accent (soft blue) ──────────────────────────────────────────
     static let accent        = Color(hex: 0x6b8aff)
     static let accentSoft    = Color(red: 107/255, green: 138/255, blue: 255/255, opacity: 0.14)

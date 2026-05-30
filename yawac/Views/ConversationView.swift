@@ -321,6 +321,10 @@ struct ConversationView: View {
             if let vm {
                 VStack(spacing: 0) {
                     headerBar
+                    if vm.findActive {
+                        ConversationFindBar(vm: vm)
+                            .transition(.move(edge: .top).combined(with: .opacity))
+                    }
                     pinnedBanner(vm)
                     blockedBanner
                     ScrollViewReader { proxy in
@@ -394,7 +398,10 @@ struct ConversationView: View {
                                             selecting: vm.forwardSelecting,
                                             selected: vm.forwardSelection.contains(msg.id),
                                             selectable: vm.canForward(msg),
-                                            onToggleSelect: { vm.toggleForward(msg.id) }
+                                            onToggleSelect: { vm.toggleForward(msg.id) },
+                                            isFindHit: vm.findHitIDs.contains(msg.id),
+                                            isFindCurrent: vm.findHits.indices.contains(vm.findCurrentIdx)
+                                                && vm.findHits[vm.findCurrentIdx].messageID == msg.id
                                         )
                                         .id(msg.id)
                                         .modifier(BottomVisibilityTracker(
@@ -488,6 +495,14 @@ struct ConversationView: View {
                         ComposerView(vm: vm)
                     }
                 }
+                .animation(.easeOut(duration: 0.15), value: vm.findActive)
+                .background(
+                    Button("") { vm.findActive.toggle() }
+                        .keyboardShortcut("f", modifiers: .command)
+                        .opacity(0)
+                        .frame(width: 0, height: 0)
+                        .accessibilityHidden(true)
+                )
                 .background(Theme.bg)
             } else {
                 ProgressView().tint(Theme.accent)
