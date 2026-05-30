@@ -47,6 +47,10 @@ final class SessionViewModel {
     /// Consumed and cleared by `ContentView` via `.onChange`.
     var pendingChatSelection: String?
 
+    /// Set together with `pendingChatSelection` to request a scroll-to
+    /// inside the freshly-opened chat. ConversationView consumes + clears.
+    var pendingJumpMessageID: String?
+
     /// Per-peer presence. `online == true` → currently connected.
     /// `lastSeen` is seconds-since-epoch when peer went offline; 0 means
     /// peer hasn't shared lastSeen privacy (the most common case).
@@ -78,6 +82,13 @@ final class SessionViewModel {
 
     func requestSelectChat(_ jid: String) {
         pendingChatSelection = JIDNormalize.canonical(jid, client: client)
+    }
+
+    /// Open `chatJID` and scroll to message `messageID` after the
+    /// chat's history is loaded.
+    func requestJumpToMessage(chatJID: String, messageID: String) {
+        pendingChatSelection = JIDNormalize.canonical(chatJID, client: client)
+        pendingJumpMessageID = messageID
     }
 
     func ingestContacts(_ cs: [BridgeContact]) {

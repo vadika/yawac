@@ -466,6 +466,13 @@ struct ConversationView: View {
                             vm.didFinishScroll(to: id)
                             vm.pendingScrollToID = nil
                         }
+                        .onChange(of: vm.messages.count) { _, _ in
+                            // Consume sidebar message-search jump once history is up.
+                            guard let jumpID = session.pendingJumpMessageID,
+                                  !vm.messages.isEmpty else { return }
+                            vm.jumpToQuoted(id: jumpID)
+                            session.pendingJumpMessageID = nil
+                        }
                     }
                     if vm.peerTyping {
                         HStack(spacing: 8) {

@@ -41,12 +41,16 @@ struct ChatListView: View {
         case chat(Chat, indent: CGFloat)
         case suggestion(PhoneSuggestion)
         case archivedHeader(count: Int)
+        case messageSection(count: Int)
+        case messageHit(hit: MessageIndex.Hit, chatName: String)
         var id: String {
             switch self {
             case .section(let id, _, _): return "sec:" + id
             case .chat(let c, let i):    return "row:\(c.jid)#\(Int(i))"
             case .suggestion(let s):     return "sug:" + s.jid
             case .archivedHeader:        return "sec:archived-header"
+            case .messageSection:        return "sec:messages"
+            case .messageHit(let h, _):  return "mhit:\(h.messageID)"
             }
         }
     }
@@ -149,6 +153,16 @@ struct ChatListView: View {
                                 count: directChats.count))
             for c in directChats {
                 out.append(.chat(c, indent: 0))
+            }
+        }
+
+        if !search.query.isEmpty && !search.messageHits.isEmpty {
+            out.append(.messageSection(count: search.messageHits.count))
+            let nameLookup = Dictionary(uniqueKeysWithValues:
+                vm.chats.map { ($0.jid, $0.name) })
+            for hit in search.messageHits {
+                let name = nameLookup[hit.chatJID] ?? hit.chatJID
+                out.append(.messageHit(hit: hit, chatName: name))
             }
         }
         return out
@@ -265,6 +279,10 @@ struct ChatListView: View {
                             suggestionRowButton(s)
                         case .archivedHeader(let count):
                             archivedHeaderRow(count: count)
+                        case .messageSection(let count):
+                            sectionLabel("Messages", count: count)
+                        case .messageHit(let hit, let chatName):
+                            messageHitRowButton(hit: hit, chatName: chatName)
                         }
                     }
                 }
@@ -417,6 +435,54 @@ struct ChatListView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private func messageHitRowButton(hit: MessageIndex.Hit, chatName: String) -> some View {
+        Button {
+            session.requestJumpToMessage(chatJID: hit.chatJID, messageID: hit.messageID)
+        } label: {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 4) {
+                    Text(chatName)
+                        .scaledUI(12, weight: .semibold)
+                        .foregroundStyle(Theme.text)
+                    if !hit.sender.isEmpty {
+                        Text("·").foregroundStyle(Theme.textFaint)
+                        Text(hit.sender)
+                            .scaledUI(12)
+                            .foregroundStyle(Theme.textMuted)
+                    }
+                    Spacer(minLength: 4)
+                    Text(formatHitDate(hit.timestamp))
+                        .scaledMono(10)
+                        .foregroundStyle(Theme.textFaint)
+                }
+                snippetText(hit.snippet)
+                    .lineLimit(2)
+                    .foregroundStyle(Theme.textMuted)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Strips `⟦…⟧` snippet markers for v1; bold-around-hit rendering
+    /// is deferred to a polish task.
+    private func snippetText(_ raw: String) -> some View {
+        let cleaned = raw.replacingOccurrences(of: "⟦", with: "")
+                         .replacingOccurrences(of: "⟧", with: "")
+        return Text(cleaned).scaledUI(11)
+    }
+
+    private func formatHitDate(_ ts: Int64) -> String {
+        // ZTIMESTAMP is Apple-epoch seconds.
+        let d = Date(timeIntervalSinceReferenceDate: TimeInterval(ts))
+        let f = DateFormatter()
+        f.dateFormat = "d MMM"
+        return f.string(from: d)
     }
 
     @ViewBuilder

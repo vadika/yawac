@@ -21,7 +21,7 @@ final class MessageIndex {
         let sender: String
     }
 
-    struct Hit: Equatable {
+    struct Hit: Equatable, Hashable {
         let messageID: String
         let chatJID: String
         let timestamp: Int64
