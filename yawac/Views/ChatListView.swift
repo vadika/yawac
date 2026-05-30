@@ -502,11 +502,10 @@ extension Chat {
             return Self.yesterdayFmt.localizedString(from: DateComponents(day: -1))
         }
         let f = DateFormatter()
-        if let days = cal.dateComponents([.day], from: date, to: Date()).day,
-           days < 7 {
+        let days = cal.dateComponents([.day], from: date, to: Date()).day ?? Int.max
+        if days < 7 {
             f.dateFormat = "EEE"
-        } else if let days = cal.dateComponents([.day], from: date, to: Date()).day,
-                  days < 180 {
+        } else if days < 180 {
             f.dateFormat = "d MMM"
         } else {
             f.dateFormat = "d MMM yy"
