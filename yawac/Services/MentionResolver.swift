@@ -5,10 +5,14 @@ import Foundation
 /// Falls back to the raw `@<digits>` when no name is known.
 ///
 /// `\d{5,}` matches WhatsApp's mention syntax — short enough to skip `@1`
-/// shorthands, long enough to catch real JID prefixes.
+/// shorthands, long enough to catch real JID prefixes. The optional
+/// `@<server>` suffix consumes the full-JID form that arrives from raw
+/// message bodies (e.g. `@200347…@s.whatsapp.net`) so the server tail
+/// doesn't leak into the rendered preview.
 func resolveMentionsText(_ text: String, resolver: (String) -> String) -> String {
     guard text.contains("@"),
-          let regex = try? NSRegularExpression(pattern: "@(\\d{5,})") else {
+          let regex = try? NSRegularExpression(
+            pattern: "@(\\d{5,})(?:@(?:s\\.whatsapp\\.net|lid))?") else {
         return text
     }
     var out = text
