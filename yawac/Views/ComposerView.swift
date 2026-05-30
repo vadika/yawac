@@ -5,6 +5,7 @@ import UniformTypeIdentifiers
 struct ComposerView: View {
     @Bindable var vm: ConversationViewModel
     @Environment(SessionViewModel.self) private var session
+    @Environment(\.uiScaleFactor) private var uiScale
     @FocusState private var focused: Bool
     @State private var recorder = VoiceRecorder()
     @State private var wantsCancel = false
@@ -231,6 +232,7 @@ struct ComposerView: View {
     /// when its host view re-renders during dispatch.
     private var micButton: some View {
         MicNSButton(
+            symbolPointSize: 14 * uiScale,
             isRecording: recorder.state == .recording,
             onDown: {
                 Task { @MainActor in
@@ -334,6 +336,7 @@ struct ComposerView: View {
 /// click — replacing the SwiftUI Image+overlay with a real NSView
 /// sidesteps that pipeline entirely.
 private struct MicNSButton: NSViewRepresentable {
+    let symbolPointSize: CGFloat
     let isRecording: Bool
     let onDown: () -> Void
     let onMove: (CGFloat) -> Void
@@ -341,6 +344,7 @@ private struct MicNSButton: NSViewRepresentable {
 
     func makeNSView(context: Context) -> MicView {
         let v = MicView()
+        v.symbolPointSize = symbolPointSize
         v.isRecording = isRecording
         v.onDown = onDown
         v.onMove = onMove
@@ -349,6 +353,7 @@ private struct MicNSButton: NSViewRepresentable {
     }
 
     func updateNSView(_ v: MicView, context: Context) {
+        v.symbolPointSize = symbolPointSize
         v.isRecording = isRecording
         v.onDown = onDown
         v.onMove = onMove
@@ -359,6 +364,12 @@ private struct MicNSButton: NSViewRepresentable {
         var onDown: (() -> Void)?
         var onMove: ((CGFloat) -> Void)?
         var onUp: (() -> Void)?
+        var symbolPointSize: CGFloat = 14 {
+            didSet {
+                guard symbolPointSize != oldValue else { return }
+                applySymbolConfiguration()
+            }
+        }
         var isRecording: Bool = false {
             didSet {
                 imageView.image = NSImage(systemSymbolName: isRecording ? "mic.fill" : "mic",
@@ -378,8 +389,7 @@ private struct MicNSButton: NSViewRepresentable {
 
             imageView.translatesAutoresizingMaskIntoConstraints = false
             imageView.image = NSImage(systemSymbolName: "mic", accessibilityDescription: nil)
-            imageView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 14,
-                                                                       weight: .semibold)
+            applySymbolConfiguration()
             imageView.contentTintColor = .white
             imageView.imageScaling = .scaleProportionallyDown
             addSubview(imageView)
@@ -406,6 +416,11 @@ private struct MicNSButton: NSViewRepresentable {
         }
         override func mouseUp(with event: NSEvent) {
             onUp?()
+        }
+
+        private func applySymbolConfiguration() {
+            imageView.symbolConfiguration = NSImage.SymbolConfiguration(
+                pointSize: symbolPointSize, weight: .semibold)
         }
     }
 }
