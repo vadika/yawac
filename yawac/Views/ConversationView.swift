@@ -503,13 +503,7 @@ struct ConversationView: View {
                     }
                 }
                 .animation(.easeOut(duration: 0.15), value: vm.findActive)
-                .background(
-                    Button("") { vm.findActive.toggle() }
-                        .keyboardShortcut("f", modifiers: .command)
-                        .opacity(0)
-                        .frame(width: 0, height: 0)
-                        .accessibilityHidden(true)
-                )
+                .focusedSceneValue(\.activeConversation, vm)
                 .background(Theme.bg)
             } else {
                 ProgressView().tint(Theme.accent)

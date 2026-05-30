@@ -63,6 +63,9 @@ struct YawacApp: App {
                 }
                 .keyboardShortcut("Q", modifiers: [.command, .shift])
             }
+            CommandMenu("Find") {
+                FindCommands()
+            }
         }
 
         Settings {
@@ -70,6 +73,18 @@ struct YawacApp: App {
                 .environment(translation)
                 .environment(session)
         }
+    }
+}
+
+private struct FindCommands: View {
+    @FocusedValue(\.activeConversation) private var conversation
+
+    var body: some View {
+        Button("Find…") {
+            conversation?.findActive.toggle()
+        }
+        .keyboardShortcut("f", modifiers: .command)
+        .disabled(conversation == nil)
     }
 }
 
