@@ -158,6 +158,131 @@ final class MessageIndex {
         }
     }
 
+    // MARK: - Bootstrap
+
+    /// Backfills MessageFTS from ZPERSISTEDMESSAGE. Safe to call on every
+    /// launch — exits early if the FTS row count is already at or above
+    /// the persisted-message count.
+    func bootstrapIfNeeded() async {
+        await Task.detached(priority: .utility) { [self] in
+            self.runBootstrap()
+        }.value
+    }
+
+    private func runBootstrap() {
+        queue.sync { ensureSchemaLocked() }
+
+        let total = scalarFromStore(
+            sql: "SELECT COUNT(*) FROM ZPERSISTEDMESSAGE;")
+        let already = countAll()
+        if already >= total || total == 0 {
+            queue.sync { self.progress = .done }
+            return
+        }
+
+        queue.sync {
+            self.progress = .running(indexed: already, total: total)
+        }
+
+        // Stream rows in 1000-row pages, ascending by Z_PK so resumption
+        // after a crash continues forward.
+        let pageSize = 1000
+        var offset = already
+        var indexed = already
+        while offset < total {
+            let page = readPage(offset: offset, limit: pageSize)
+            if page.isEmpty { break }
+            queue.sync {
+                ensureSchemaLocked()
+                sqlite3_exec(db, "BEGIN IMMEDIATE;", nil, nil, nil)
+                var ok = true
+                for f in page {
+                    if !execStep(sql: "DELETE FROM MessageFTS WHERE msgid = ?;",
+                                 binds: [.text(f.messageID)]) { ok = false; break }
+                    if !execStep(sql: """
+                        INSERT INTO MessageFTS(msgid, chatjid, ts, text, caption, quoted, sender)
+                        VALUES (?, ?, ?, ?, ?, ?, ?);
+                        """,
+                        binds: [
+                            .text(f.messageID), .text(f.chatJID), .int(f.timestamp),
+                            .text(f.text), .text(f.caption),
+                            .text(f.quoted), .text(f.sender),
+                        ]) { ok = false; break }
+                }
+                sqlite3_exec(db, ok ? "COMMIT;" : "ROLLBACK;", nil, nil, nil)
+            }
+            indexed += page.count
+            offset  += page.count
+            queue.sync {
+                self.progress = .running(indexed: indexed, total: total)
+            }
+        }
+
+        queue.sync { self.progress = .done }
+    }
+
+    /// Reads a paged slice of ZPERSISTEDMESSAGE via a fresh read-only
+    /// connection (avoids stepping on the main connection's transaction).
+    private func readPage(offset: Int, limit: Int) -> [MessageFields] {
+        var read: OpaquePointer?
+        guard sqlite3_open_v2(storeURL.path, &read,
+                              SQLITE_OPEN_READONLY, nil) == SQLITE_OK,
+              let read else { return [] }
+        defer { sqlite3_close(read) }
+        sqlite3_busy_timeout(read, 1000)
+
+        var stmt: OpaquePointer?
+        let sql = """
+            SELECT ZID, ZCHATJID, ZTIMESTAMP, ZTEXT, ZMEDIACAPTION,
+                   ZQUOTEDTEXTSNIPPET, ZSENDERPUSHNAME
+            FROM ZPERSISTEDMESSAGE
+            ORDER BY Z_PK ASC
+            LIMIT ? OFFSET ?;
+        """
+        guard sqlite3_prepare_v2(read, sql, -1, &stmt, nil) == SQLITE_OK else {
+            return []
+        }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_int64(stmt, 1, Int64(limit))
+        sqlite3_bind_int64(stmt, 2, Int64(offset))
+
+        var out: [MessageFields] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let id = stringFromStmt(stmt, 0)
+            guard !id.isEmpty else { continue }
+            let ts = Int64(sqlite3_column_double(stmt, 2))
+            out.append(MessageFields(
+                messageID: id,
+                chatJID:   stringFromStmt(stmt, 1),
+                timestamp: ts,
+                text:      stringFromStmt(stmt, 3),
+                caption:   stringFromStmt(stmt, 4),
+                quoted:    stringFromStmt(stmt, 5),
+                sender:    stringFromStmt(stmt, 6)))
+        }
+        return out
+    }
+
+    private func scalarFromStore(sql: String) -> Int {
+        var read: OpaquePointer?
+        guard sqlite3_open_v2(storeURL.path, &read,
+                              SQLITE_OPEN_READONLY, nil) == SQLITE_OK,
+              let read else { return 0 }
+        defer { sqlite3_close(read) }
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(read, sql, -1, &stmt, nil) == SQLITE_OK else {
+            return 0
+        }
+        defer { sqlite3_finalize(stmt) }
+        guard sqlite3_step(stmt) == SQLITE_ROW else { return 0 }
+        return Int(sqlite3_column_int64(stmt, 0))
+    }
+
+    private func stringFromStmt(_ stmt: OpaquePointer?, _ i: Int32) -> String {
+        guard let c = sqlite3_column_text(stmt, i) else { return "" }
+        return String(cString: c)
+    }
+
     // MARK: - Query construction
 
     private func makeMatch(_ raw: String) -> String? {

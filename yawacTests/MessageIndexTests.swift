@@ -123,4 +123,71 @@ final class MessageIndexTests: XCTestCase {
         XCTAssertEqual(idx.searchGlobal(query: "earlier", limit: 10).count, 1)
         XCTAssertEqual(idx.searchGlobal(query: "alice", limit: 10).count, 1)
     }
+
+    private func seedZPersistedMessage(_ url: URL,
+                                       _ rows: [(String, String, Int64, String, String, String, String)]) {
+        // rows: (ZID, ZCHATJID, ZTIMESTAMP, ZTEXT, ZMEDIACAPTION,
+        //        ZQUOTEDTEXTSNIPPET, ZSENDERPUSHNAME)
+        var db: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(url.path, &db), SQLITE_OK)
+        defer { sqlite3_close(db) }
+        sqlite3_exec(db, """
+            CREATE TABLE ZPERSISTEDMESSAGE (
+                Z_PK INTEGER PRIMARY KEY,
+                ZID TEXT,
+                ZCHATJID TEXT,
+                ZTIMESTAMP REAL,
+                ZTEXT TEXT,
+                ZMEDIACAPTION TEXT,
+                ZQUOTEDTEXTSNIPPET TEXT,
+                ZSENDERPUSHNAME TEXT
+            );
+        """, nil, nil, nil)
+        for (id, jid, ts, txt, cap, quo, sender) in rows {
+            var stmt: OpaquePointer?
+            sqlite3_prepare_v2(db, """
+                INSERT INTO ZPERSISTEDMESSAGE
+                (ZID, ZCHATJID, ZTIMESTAMP, ZTEXT, ZMEDIACAPTION,
+                 ZQUOTEDTEXTSNIPPET, ZSENDERPUSHNAME)
+                VALUES (?, ?, ?, ?, ?, ?, ?);
+                """, -1, &stmt, nil)
+            let TRANSIENT = unsafeBitCast(OpaquePointer(bitPattern: -1)!,
+                                          to: sqlite3_destructor_type.self)
+            sqlite3_bind_text(stmt, 1, id, -1, TRANSIENT)
+            sqlite3_bind_text(stmt, 2, jid, -1, TRANSIENT)
+            sqlite3_bind_double(stmt, 3, Double(ts))
+            sqlite3_bind_text(stmt, 4, txt, -1, TRANSIENT)
+            sqlite3_bind_text(stmt, 5, cap, -1, TRANSIENT)
+            sqlite3_bind_text(stmt, 6, quo, -1, TRANSIENT)
+            sqlite3_bind_text(stmt, 7, sender, -1, TRANSIENT)
+            sqlite3_step(stmt)
+            sqlite3_finalize(stmt)
+        }
+    }
+
+    func testBootstrapBackfillsFromZPersistedMessage() async {
+        seedZPersistedMessage(tmpDB, [
+            ("m1", "A@s.whatsapp.net", 100, "Hello Finland", "", "", "Alice"),
+            ("m2", "A@s.whatsapp.net", 110, "", "Lake photo",  "", "Alice"),
+            ("m3", "B@s.whatsapp.net", 120, "Goodbye", "", "earlier reply", "Bob"),
+        ])
+        let idx = MessageIndex(storeURL: tmpDB)
+        await idx.bootstrapIfNeeded()
+        XCTAssertEqual(idx.countAll(), 3)
+        XCTAssertEqual(idx.searchGlobal(query: "finland", limit: 10).count, 1)
+        XCTAssertEqual(idx.searchGlobal(query: "lake", limit: 10).count, 1)
+        XCTAssertEqual(idx.searchGlobal(query: "earlier", limit: 10).count, 1)
+        if case .done = idx.progress {} else { XCTFail("expected .done, got \(idx.progress)") }
+    }
+
+    func testBootstrapIsNoOpWhenAlreadyIndexed() async {
+        seedZPersistedMessage(tmpDB, [
+            ("m1", "A@s.whatsapp.net", 100, "Hello", "", "", "Alice"),
+        ])
+        let idx = MessageIndex(storeURL: tmpDB)
+        await idx.bootstrapIfNeeded()
+        XCTAssertEqual(idx.countAll(), 1)
+        await idx.bootstrapIfNeeded()
+        XCTAssertEqual(idx.countAll(), 1, "second run must not duplicate")
+    }
 }
