@@ -44,7 +44,7 @@ struct SharedMediaCell: View {
                     VStack {
                         HStack {
                             Text(badgeText)
-                                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                                .scaledMono(10, weight: .semibold)
                                 .tracking(0.4)
                                 .foregroundStyle(Theme.text)
                                 .padding(.horizontal, 5)

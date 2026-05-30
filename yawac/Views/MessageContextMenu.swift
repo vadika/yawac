@@ -179,7 +179,7 @@ private struct MenuRow: View {
                 Spacer(minLength: 4)
                 if let shortcut {
                     Text(shortcut)
-                        .font(.system(size: 10.5, design: .monospaced))
+                        .scaledMono(10.5)
                         .foregroundStyle(shortcutColor)
                 }
             }

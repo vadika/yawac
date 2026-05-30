@@ -106,7 +106,7 @@ private struct MediaBadge: View {
             Image(systemName: icon)
                 .scaledIcon(9)
             Text(label)
-                .font(.system(size: 11, design: .monospaced))
+                .scaledMono(11)
         }
         .padding(.horizontal, 5)
         .padding(.vertical, 1)
