@@ -63,13 +63,15 @@ relevant context lingers).
 
 ## Cleanup gaps (smaller)
 
-- ☐ **AppKit mic glyph + 3 `design:.monospaced` labels don't scale** with
-  Interface size — known minor when introducing the multiplier; would close
-  the consistency gap.
-- ☐ **`vm.chats` Equatable refresh** — currently re-filters the active
-  search on any mutation; could debounce / track a version int.
-- ☐ **Date / time-zone display polish** — relative-date strings, header
-  formats, locale.
+- ✅ **AppKit mic glyph + 3 `design:.monospaced` labels don't scale** —
+  shipped in v0.2.1 (commits `a412997`, `5ce07c7`, `c99361e`).
+- ⊘ **`vm.chats` Equatable refresh** — dropped. Current `.onChange(of:
+  vm.chats)` is required for delete → tombstone to reach active-search
+  results; sub-key would regress the fix in `761c746`. See
+  `docs/superpowers/specs/2026-05-30-cleanup-scale-and-date-design.md`.
+- ✅ **Date / time-zone display polish** — shipped in v0.2.1 (commit
+  `46c6b55`): localized "Yesterday", year on dates ≥ 180 days, locale-aware
+  12/24h time.
 
 ## Out of scope (will not do)
 
