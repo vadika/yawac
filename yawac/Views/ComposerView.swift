@@ -374,6 +374,7 @@ private struct MicNSButton: NSViewRepresentable {
             didSet {
                 imageView.image = NSImage(systemSymbolName: isRecording ? "mic.fill" : "mic",
                                           accessibilityDescription: nil)
+                applySymbolConfiguration()
                 layer?.backgroundColor = (isRecording ? NSColor.systemRed
                                                        : NSColor.controlAccentColor).cgColor
             }
