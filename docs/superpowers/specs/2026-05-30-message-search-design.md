@@ -76,14 +76,21 @@ Integration points:
 
 ```sql
 CREATE VIRTUAL TABLE IF NOT EXISTS MessageFTS USING fts5(
+  msgid UNINDEXED, chatjid UNINDEXED, ts UNINDEXED,
   text, caption, quoted, sender,
   tokenize = 'unicode61'
 );
 ```
 
-Rowid is `ZPERSISTEDMESSAGE.Z_PK` (Int64, stable across SwiftData
-lightweight migrations). Tokenizer is the FTS5 default — case-folding yes,
+`msgid` is the existing `PersistedMessage.id` (string, WhatsApp message id;
+unique via SwiftData `@Attribute(.unique)`). Stored UNINDEXED so it
+round-trips with hits but isn't tokenized. `chatjid` + `ts` likewise
+UNINDEXED so in-chat queries filter + sort without joining
+`ZPERSISTEDMESSAGE`. Tokenizer is the FTS5 default — case-folding yes,
 diacritic-folding no.
+
+Sidebar hits navigate via the existing `ConversationViewModel.jumpToQuoted(id:)`
+which keys on the same `id`, so no Z_PK plumbing is needed.
 
 ### Write-through
 
@@ -91,7 +98,9 @@ diacritic-folding no.
 
 ```swift
 struct MessageFields {
-    let zpk: Int64
+    let messageID: String
+    let chatJID: String
+    let timestamp: Int64    // Apple epoch seconds (matches ZTIMESTAMP)
     let text: String
     let caption: String
     let quoted: String
@@ -99,19 +108,20 @@ struct MessageFields {
 }
 ```
 
-`upsert`:
+`upsert(_ fields: MessageFields)` runs in a transaction:
 
 ```sql
-INSERT OR REPLACE INTO MessageFTS(rowid, text, caption, quoted, sender)
-VALUES (?, ?, ?, ?, ?);
+DELETE FROM MessageFTS WHERE msgid = ?;
+INSERT INTO MessageFTS(msgid, chatjid, ts, text, caption, quoted, sender)
+VALUES (?, ?, ?, ?, ?, ?, ?);
 ```
 
 Empty / nil source fields persist as empty strings (FTS5 tolerates them).
 
-`delete`:
+`delete(messageID: String)`:
 
 ```sql
-DELETE FROM MessageFTS WHERE rowid = ?;
+DELETE FROM MessageFTS WHERE msgid = ?;
 ```
 
 ### Query
@@ -123,13 +133,11 @@ with space (implicit AND). Empty result → short-circuit to `[]`.
 **In-chat:**
 
 ```sql
-SELECT m.Z_PK, m.ZTIMESTAMP,
+SELECT msgid, ts,
        snippet(MessageFTS, -1, '⟦', '⟧', '…', 12)
-FROM MessageFTS f
-JOIN ZPERSISTEDMESSAGE m ON m.Z_PK = f.rowid
-WHERE MessageFTS MATCH ?
-  AND m.ZCHATJID = ?
-ORDER BY m.ZTIMESTAMP ASC
+FROM MessageFTS
+WHERE chatjid = ? AND MessageFTS MATCH ?
+ORDER BY ts ASC
 LIMIT ?;
 ```
 
@@ -140,13 +148,12 @@ chat in conversation order. `LIMIT` defaults to 500 (matches existing
 **Global:**
 
 ```sql
-SELECT m.Z_PK, m.ZCHATJID, m.ZTIMESTAMP, m.ZSENDERPUSHNAME,
+SELECT msgid, chatjid, ts, sender,
        snippet(MessageFTS, -1, '⟦', '⟧', '…', 12),
        bm25(MessageFTS) AS rank
-FROM MessageFTS f
-JOIN ZPERSISTEDMESSAGE m ON m.Z_PK = f.rowid
+FROM MessageFTS
 WHERE MessageFTS MATCH ?
-ORDER BY rank ASC, m.ZTIMESTAMP DESC
+ORDER BY rank ASC, ts DESC
 LIMIT ?;
 ```
 
@@ -156,7 +163,7 @@ Global limit defaults to 200; UI exposes "Show 50 more" for paging.
 
 ```swift
 struct Hit {
-    let zpk: Int64
+    let messageID: String
     let chatJID: String
     let timestamp: Int64
     let sender: String
@@ -184,10 +191,10 @@ low-priority task:
    `SELECT COUNT(*) FROM ZPERSISTEDMESSAGE`.
 3. If FTS count ≥ persisted count, exit immediately. (Reconcile pass: same
    check on every launch.)
-4. If FTS is short, stream `Z_PK, ZTEXT, ZMEDIACAPTION,
-   ZQUOTEDTEXTSNIPPET, ZSENDERPUSHNAME` from ZPERSISTEDMESSAGE ordered by
-   `Z_PK ASC`, in batches of 1000. INSERT each batch inside a single
-   transaction. After each transaction, update
+4. If FTS is short, stream `ZID, ZCHATJID, ZTIMESTAMP, ZTEXT,
+   ZMEDIACAPTION, ZQUOTEDTEXTSNIPPET, ZSENDERPUSHNAME` from
+   `ZPERSISTEDMESSAGE` ordered by `Z_PK ASC`, in batches of 1000. INSERT
+   each batch inside a single transaction. After each transaction, update
    `progress = .running(indexed: N, total: M)`.
 5. On completion, set `progress = .done`.
 
@@ -236,7 +243,7 @@ When `findActive` is true but query is empty: counter hidden, ↑/↓ disabled.
 @Published var findQuery: String = ""
 @Published var findHits: [MessageIndex.Hit] = []
 @Published var findCurrentIdx: Int = 0   // index into findHits
-var findHitIDs: Set<Int64> { Set(findHits.map(\.zpk)) }
+var findHitIDs: Set<String> { Set(findHits.map(\.messageID)) }
 ```
 
 A debounced async pipeline (Combine debounce 120 ms on `findQuery`) calls
@@ -249,7 +256,8 @@ results back. `findCurrentIdx` resets to 0 on each new query.
   `@FocusState`). On close, clear query + hits + restore scroll position
   (`scrollAnchor` snapshot before opening).
 - ↓ or ⌘G → `findCurrentIdx = (findCurrentIdx + 1) % findHits.count`,
-  then `scrollProxy.scrollTo(hit.zpk, anchor: .center)`.
+  then `pendingScrollToID = hit.messageID` (the existing `ScrollViewReader`
+  pipeline in `ConversationView` picks it up).
 - ↑ or ⇧⌘G → previous, wraps via `(idx - 1 + count) % count`.
 - Esc inside the find field → closes the bar.
 
@@ -305,14 +313,12 @@ bold runs around `⟦…⟧` ranges). Two-line clipping on the snippet.
 
 Tap a message hit:
 1. Call `ChatListViewModel.selectChat(jid: hit.chatJID)` (existing API).
-2. Once `ConversationViewModel` for that chat is up, call a new
-   `conversationVM.jumpToMessage(zpk: hit.zpk, flash: true)` method.
-   Implementation delegates to the existing private window-loading helper
-   used by `jumpToQuoted(_:)` (extract the shared "load older history
-   until Z_PK is in the window, then scroll" routine to a private
-   `scrollToMessage(zpk:flash:)` and have both `jumpToQuoted` and
-   `jumpToMessage` call it). `flash: true` triggers a 1.2-second brief
-   background pulse via a published transient highlight ID.
+2. Once `ConversationViewModel` for that chat is up, call the existing
+   `conversationVM.jumpToQuoted(id: hit.messageID)` method. That method
+   already loads the message from SwiftData if it's outside the current
+   window, inserts it into `messages` by timestamp, and triggers the
+   1.2-second highlight pulse via `didFinishScroll` → `highlightedID`. No
+   API extension needed.
 
 ### Cancellation
 
@@ -392,8 +398,8 @@ query (it's not displayed there).
 
 **Modified files:**
 - `yawac/ViewModels/ConversationViewModel.swift` — add find-bar state
-  group; integrate `MessageIndex.searchInChat`; extend `jumpToQuoted` to
-  accept an arbitrary Z_PK + `flash:` flag.
+  group; integrate `MessageIndex.searchInChat`. `jumpToQuoted(id:)` is
+  reused as-is — no API change.
 - `yawac/ViewModels/ChatSearchViewModel.swift` — add `messageHits` +
   `refreshMessages(query:)` debounced.
 - `yawac/Views/ConversationView.swift` — slot `ConversationFindBar` above
@@ -415,9 +421,9 @@ query (it's not displayed there).
 - **SwiftData wipes the SQLite file** under store-failure rebuild
   (rare). Our `CREATE VIRTUAL TABLE IF NOT EXISTS` + count-check
   bootstrap handles this transparently — next launch reindexes.
-- **Z_PK reuse after `DELETE` cascade** — SwiftData doesn't reuse PKs in
-  practice. If it ever does, `INSERT OR REPLACE INTO MessageFTS(rowid,
-  ...)` handles it.
+- **Message ID stability** — `PersistedMessage.id` is unique
+  (`@Attribute(.unique)`) and never rewritten by edits / revokes; the
+  upsert path (`DELETE WHERE msgid = ?; INSERT`) is idempotent.
 - **Write-through call-site coverage** — if a persist path forgets to
   call `MessageIndex.upsert`, that message is invisible in search until
   reconcile. Mitigation: the launch-time count-check + reconcile pass
