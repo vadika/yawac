@@ -317,6 +317,7 @@ final class ConversationViewModel {
                                    mediaRefJSON: refJSON, isForwarded: true)
         context.insert(row)
         try? context.save()
+        MessageIndex.shared.upsert(row.indexFields)
     }
 
     /// Reads the persisted media ref JSON for a message id, if any.
@@ -1355,6 +1356,7 @@ final class ConversationViewModel {
             isForwarded: m.isForwarded ?? false)
         context.insert(row)
         try? context.save()
+        MessageIndex.shared.upsert(row.indexFields)
     }
 
     private func persistOutgoing(_ m: UIMessage, kind: String, text: String?) {
@@ -1369,6 +1371,7 @@ final class ConversationViewModel {
             quotedKind: m.quotedKind)
         context.insert(row)
         try? context.save()
+        MessageIndex.shared.upsert(row.indexFields)
     }
 
     /// Outbound-media persistence. Carries the local file path so the
@@ -1387,6 +1390,7 @@ final class ConversationViewModel {
             quotedKind: m.quotedKind)
         context.insert(row)
         try? context.save()
+        MessageIndex.shared.upsert(row.indexFields)
     }
 
     func saveEdit(_ newBody: String) async {
@@ -1530,6 +1534,7 @@ final class ConversationViewModel {
             row.revokedAt = revokedAt
             row.revokedBy = revokedBy
             try? context.save()
+            MessageIndex.shared.upsert(row.indexFields)
         }
     }
 
@@ -1540,6 +1545,7 @@ final class ConversationViewModel {
         if let row = try? context.fetch(descriptor).first {
             row.locallyDeleted = value
             try? context.save()
+            MessageIndex.shared.upsert(row.indexFields)
         }
     }
 

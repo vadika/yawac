@@ -384,6 +384,7 @@ final class ChatListViewModel {
             quotedKind: m.quoted?.kind)
         context.insert(row)
         try? context.save()
+        MessageIndex.shared.upsert(row.indexFields)
     }
 
     func markRead(_ jid: String) {

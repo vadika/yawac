@@ -36,6 +36,10 @@ struct YawacApp: App {
         }
         Task { await NotificationService.requestAuthorization() }
         UNUserNotificationCenter.current().delegate = NotificationRouter.shared
+
+        Task.detached(priority: .utility) {
+            await MessageIndex.shared.bootstrapIfNeeded()
+        }
     }
 
     var body: some Scene {

@@ -186,3 +186,18 @@ final class PersistedChat {
         self.archivedAt = archivedAt
     }
 }
+
+extension PersistedMessage {
+    /// View of the row in the shape `MessageIndex` expects. Empty strings
+    /// where the SwiftData column is nil — FTS5 tolerates them.
+    var indexFields: MessageIndex.MessageFields {
+        MessageIndex.MessageFields(
+            messageID: id,
+            chatJID:   chatJID,
+            timestamp: Int64(timestamp.timeIntervalSinceReferenceDate),
+            text:      text ?? "",
+            caption:   mediaCaption ?? "",
+            quoted:    quotedTextSnippet ?? "",
+            sender:    senderPushName ?? "")
+    }
+}
