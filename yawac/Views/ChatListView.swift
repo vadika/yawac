@@ -162,6 +162,9 @@ struct ChatListView: View {
             WindowDragHandle()
                 .frame(height: 64)
 
+            IndexingChip()
+                .padding(.bottom, 2)
+
             // ─── Real search field. ⌘K focuses; empty query restores full list.
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass")
