@@ -26,7 +26,11 @@ func resolveMentionsText(_ text: String, resolver: (String) -> String) -> String
         var replacement = "@\(phone)"
         for jid in ["\(phone)@s.whatsapp.net", "\(phone)@lid"] {
             let name = resolver(jid)
-            if name != phone, !name.isEmpty {
+            // Reject fallbacks where the resolver echoed back the JID itself
+            // (containing `@`) — that happens when the contact map isn't
+            // populated yet and would otherwise leak the server suffix
+            // back into the rendered preview.
+            if name != phone, !name.isEmpty, !name.contains("@") {
                 replacement = "@\(name)"
                 break
             }
