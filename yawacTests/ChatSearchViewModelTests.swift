@@ -343,6 +343,57 @@ final class ChatSearchViewModelTests: XCTestCase {
         XCTAssertEqual(vm.chats.first?.name, "Alice", "should NOT overwrite real name")
         XCTAssertEqual(vm.chats.first?.lastMessage, "hi")
     }
+
+    func testGlobalMessageSearchPopulatesHits() async throws {
+        // Warm up the structured-concurrency timer subsystem (cold-start
+        // ~400ms on this hardware otherwise swamps the debounce window).
+        try await Task.sleep(for: .milliseconds(1))
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("yawac-sbs-\(UUID().uuidString).sqlite")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let idx = MessageIndex(storeURL: tmp)
+        idx.ensureSchema()
+        idx.upsert(.init(messageID: "m1", chatJID: "A@s.whatsapp.net",
+                         timestamp: 10, text: "Hello Finland",
+                         caption: "", quoted: "", sender: "Alice"))
+        idx.upsert(.init(messageID: "m2", chatJID: "B@s.whatsapp.net",
+                         timestamp: 20, text: "Goodbye Finland",
+                         caption: "", quoted: "", sender: "Bob"))
+
+        let list = makeListVM(chats: [])
+        let vm = ChatSearchViewModel(listVM: list,
+                                     validator: FakeValidator(),
+                                     messageIndex: idx)
+        vm.debounceMs = 20
+        vm.query = "finland"
+        try await Task.sleep(for: .milliseconds(200))
+        XCTAssertEqual(vm.messageHits.count, 2)
+    }
+
+    func testGlobalSearchCancellation() async throws {
+        try await Task.sleep(for: .milliseconds(1))
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("yawac-sbs-\(UUID().uuidString).sqlite")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let idx = MessageIndex(storeURL: tmp)
+        idx.ensureSchema()
+        idx.upsert(.init(messageID: "m1", chatJID: "A@s.whatsapp.net",
+                         timestamp: 10, text: "Finland",
+                         caption: "", quoted: "", sender: ""))
+        idx.upsert(.init(messageID: "m2", chatJID: "A@s.whatsapp.net",
+                         timestamp: 20, text: "Sweden",
+                         caption: "", quoted: "", sender: ""))
+
+        let list = makeListVM(chats: [])
+        let vm = ChatSearchViewModel(listVM: list,
+                                     validator: FakeValidator(),
+                                     messageIndex: idx)
+        vm.debounceMs = 20
+        vm.query = "fin"
+        vm.query = "swe"
+        try await Task.sleep(for: .milliseconds(200))
+        XCTAssertEqual(vm.messageHits.map(\.messageID), ["m2"])
+    }
 }
 
 @MainActor

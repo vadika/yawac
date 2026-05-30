@@ -13,23 +13,31 @@ final class ChatSearchViewModel {
     private weak var listVM: ChatListViewModel?
     private let validator: PhoneValidating
     private var debounceTask: Task<Void, Never>? = nil
+    private(set) var messageHits: [MessageIndex.Hit] = []
+    private let messageIndex: MessageIndex
+    private var messageTask: Task<Void, Never>? = nil
 
     /// Debounce interval before running the filter / firing bridge validation.
     /// Exposed for tests so they don't have to sleep 500ms.
     var debounceMs: Int = 500
 
-    init(listVM: ChatListViewModel, validator: PhoneValidating) {
+    init(listVM: ChatListViewModel,
+         validator: PhoneValidating,
+         messageIndex: MessageIndex = .shared) {
         self.listVM = listVM
         self.validator = validator
+        self.messageIndex = messageIndex
         self.filteredChats = listVM.chats
     }
 
     func clear() {
         debounceTask?.cancel()
+        messageTask?.cancel()
         query = ""
         suggestion = nil
         validating = false
         filteredChats = listVM?.chats ?? []
+        messageHits = []
     }
 
     private func onQueryChanged() {
@@ -46,6 +54,7 @@ final class ChatSearchViewModel {
             guard let self, !Task.isCancelled else { return }
             await self.runFilter(q)
             await self.maybeValidate(q)
+            await self.refreshMessages(q)
         }
     }
 
@@ -122,6 +131,24 @@ final class ChatSearchViewModel {
 
     private func runFilter(_ q: String) async {
         filteredChats = matches(for: q)
+    }
+
+    private func refreshMessages(_ q: String) async {
+        messageTask?.cancel()
+        let trimmed = q.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.count < 2 {
+            messageHits = []
+            return
+        }
+        let idx = messageIndex
+        messageTask = Task { [weak self] in
+            let hits = await Task.detached(priority: .userInitiated) {
+                idx.searchGlobal(query: trimmed)
+            }.value
+            guard let self, !Task.isCancelled else { return }
+            self.messageHits = hits
+        }
+        await messageTask?.value
     }
 
     /// Re-run the current text filter against the latest `listVM.chats`.
