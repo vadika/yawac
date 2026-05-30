@@ -486,24 +486,38 @@ struct ChatListView: View {
     }
 }
 
-private extension Chat {
-    /// Compact "HH:mm" / "Mon" / "12 May" style string for the row's
-    /// right-aligned mono timestamp. Mirrors WhatsApp/iMessage behavior.
+extension Chat {
+    /// Compact "HH:mm" or locale-equivalent / "Mon" / "12 May" / "12 May 24"
+    /// style string for the row's right-aligned mono timestamp. Mirrors
+    /// WhatsApp/iMessage behavior; honors the system 12/24-hour preference
+    /// and current locale.
     var lastTimestampShort: String {
         let date = Date(timeIntervalSince1970: TimeInterval(lastTimestamp))
         guard lastTimestamp > 0 else { return "" }
         let cal = Calendar.current
-        let f = DateFormatter()
         if cal.isDateInToday(date) {
-            f.dateFormat = "HH:mm"
-        } else if cal.isDateInYesterday(date) {
-            return "Yest"
-        } else if let days = cal.dateComponents([.day], from: date, to: Date()).day,
-                  days < 7 {
+            return date.formatted(date: .omitted, time: .shortened)
+        }
+        if cal.isDateInYesterday(date) {
+            return Self.yesterdayFmt.localizedString(from: DateComponents(day: -1))
+        }
+        let f = DateFormatter()
+        if let days = cal.dateComponents([.day], from: date, to: Date()).day,
+           days < 7 {
             f.dateFormat = "EEE"
-        } else {
+        } else if let days = cal.dateComponents([.day], from: date, to: Date()).day,
+                  days < 180 {
             f.dateFormat = "d MMM"
+        } else {
+            f.dateFormat = "d MMM yy"
         }
         return f.string(from: date)
     }
+
+    fileprivate static let yesterdayFmt: RelativeDateTimeFormatter = {
+        let f = RelativeDateTimeFormatter()
+        f.unitsStyle = .full
+        f.dateTimeStyle = .named
+        return f
+    }()
 }
