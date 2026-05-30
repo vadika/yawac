@@ -93,18 +93,20 @@ final class MessageIndex {
     private func upsertLocked(_ f: MessageFields) {
         ensureSchemaLocked()
         sqlite3_exec(db, "BEGIN IMMEDIATE;", nil, nil, nil)
-        defer { sqlite3_exec(db, "COMMIT;", nil, nil, nil) }
-        execStep(sql: "DELETE FROM MessageFTS WHERE msgid = ?;",
-                 binds: [.text(f.messageID)])
-        execStep(sql: """
-            INSERT INTO MessageFTS(msgid, chatjid, ts, text, caption, quoted, sender)
-            VALUES (?, ?, ?, ?, ?, ?, ?);
-            """,
-            binds: [
-                .text(f.messageID), .text(f.chatJID), .int(f.timestamp),
-                .text(f.text), .text(f.caption),
-                .text(f.quoted), .text(f.sender),
-            ])
+        var ok = execStep(sql: "DELETE FROM MessageFTS WHERE msgid = ?;",
+                          binds: [.text(f.messageID)])
+        if ok {
+            ok = execStep(sql: """
+                INSERT INTO MessageFTS(msgid, chatjid, ts, text, caption, quoted, sender)
+                VALUES (?, ?, ?, ?, ?, ?, ?);
+                """,
+                binds: [
+                    .text(f.messageID), .text(f.chatJID), .int(f.timestamp),
+                    .text(f.text), .text(f.caption),
+                    .text(f.quoted), .text(f.sender),
+                ])
+        }
+        sqlite3_exec(db, ok ? "COMMIT;" : "ROLLBACK;", nil, nil, nil)
     }
 
     func delete(messageID: String) {
@@ -234,5 +236,9 @@ final class MessageIndex {
     private func stringCol(_ stmt: OpaquePointer?, _ i: Int32) -> String {
         guard let c = sqlite3_column_text(stmt, i) else { return "" }
         return String(cString: c)
+    }
+
+    deinit {
+        if let db { sqlite3_close(db) }
     }
 }
