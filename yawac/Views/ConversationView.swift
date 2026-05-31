@@ -203,6 +203,21 @@ struct ConversationView: View {
                 Button(chat.archivedAt != nil ? "Unarchive" : "Archive") {
                     session.chatList?.archiveChat(chat, archived: chat.archivedAt == nil)
                 }
+                if let until = chat.mutedUntil, until > Date() {
+                    Button("Unmute") { session.chatList?.muteChat(chat, until: nil) }
+                } else {
+                    Menu("Mute") {
+                        Button("Mute for 8 hours") {
+                            session.chatList?.muteChat(chat, until: Date().addingTimeInterval(8 * 3600))
+                        }
+                        Button("Mute for 1 week") {
+                            session.chatList?.muteChat(chat, until: Date().addingTimeInterval(7 * 86400))
+                        }
+                        Button("Mute always") {
+                            session.chatList?.muteChat(chat, until: ChatListViewModel.muteForever)
+                        }
+                    }
+                }
                 if isDirect {
                     Button(session.isSavedContact(chat.jid) ? "Edit name…" : "Add to contacts…") {
                         contactEditing = chat
