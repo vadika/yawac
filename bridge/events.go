@@ -68,6 +68,8 @@ func (c *Client) handleWAEvent(evt any) {
 		c.dispatchPin(v)
 	case *events.Archive:
 		c.dispatchArchive(v)
+	case *events.Mute:
+		c.dispatchMute(v)
 	case *events.DeleteChat:
 		c.dispatchDeleteChat(v)
 	case *events.Contact:
@@ -189,6 +191,33 @@ func (c *Client) dispatchArchive(evt *events.Archive) {
 		Timestamp: evt.Timestamp.Unix(),
 	})
 	c.dispatch("ChatArchived", string(b))
+}
+
+// dispatchMute surfaces app-state mute/unmute events (a chat
+// (un)muted from the phone or another companion device). MutedUntil
+// is normalized to Unix milliseconds; 0 means the event was an
+// unmute.
+func (c *Client) dispatchMute(evt *events.Mute) {
+	muted := false
+	var untilMs int64
+	if a := evt.Action; a != nil {
+		muted = a.GetMuted()
+		if mu := a.GetMuteEndTimestamp(); mu != 0 {
+			untilMs = mu
+		}
+	}
+	if !muted {
+		untilMs = 0
+	}
+	fmt.Fprintf(os.Stderr,
+		"[yawac/mute] dispatch jid=%s muted=%v until_ms=%d fullSync=%v\n",
+		evt.JID.String(), muted, untilMs, evt.FromFullSync)
+	b, _ := json.Marshal(JChatMuted{
+		ChatJID:      evt.JID.String(),
+		MutedUntilMs: untilMs,
+		Timestamp:    evt.Timestamp.Unix(),
+	})
+	c.dispatch("ChatMuted", string(b))
 }
 
 // dispatchDeleteChat surfaces app-state delete-chat events (a conversation

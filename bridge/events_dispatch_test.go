@@ -55,6 +55,60 @@ func TestArchiveJSON(t *testing.T) {
 	}
 }
 
+func TestMuteJSON(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/mu.db")
+	defer c.Close()
+	sink := newRecSink()
+	c.SetEventSink(sink)
+	jid, _ := types.ParseJID("1234567890@s.whatsapp.net")
+	c.dispatchMute(&events.Mute{
+		JID:       jid,
+		Timestamp: time.Unix(1700000000, 0),
+		Action: &waSyncAction.MuteAction{
+			Muted:            proto.Bool(true),
+			MuteEndTimestamp: proto.Int64(1700000000000),
+		},
+	})
+	e := sink.wait(t, "ChatMuted", time.Second)
+	var j JChatMuted
+	if err := json.Unmarshal([]byte(e.payload), &j); err != nil {
+		t.Fatal(err)
+	}
+	if j.ChatJID != "1234567890@s.whatsapp.net" {
+		t.Errorf("ChatJID=%s", j.ChatJID)
+	}
+	if j.MutedUntilMs != 1700000000000 {
+		t.Errorf("MutedUntilMs=%d", j.MutedUntilMs)
+	}
+	if j.Timestamp != 1700000000 {
+		t.Errorf("Timestamp=%d", j.Timestamp)
+	}
+}
+
+func TestMuteUnmuteJSON(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/mu2.db")
+	defer c.Close()
+	sink := newRecSink()
+	c.SetEventSink(sink)
+	jid, _ := types.ParseJID("1234567890@s.whatsapp.net")
+	c.dispatchMute(&events.Mute{
+		JID:       jid,
+		Timestamp: time.Unix(1700000000, 0),
+		Action: &waSyncAction.MuteAction{
+			Muted:            proto.Bool(false),
+			MuteEndTimestamp: proto.Int64(1700000000000),
+		},
+	})
+	e := sink.wait(t, "ChatMuted", time.Second)
+	var j JChatMuted
+	if err := json.Unmarshal([]byte(e.payload), &j); err != nil {
+		t.Fatal(err)
+	}
+	if j.MutedUntilMs != 0 {
+		t.Errorf("unmute should zero MutedUntilMs, got %d", j.MutedUntilMs)
+	}
+}
+
 func TestDeleteChatJSON(t *testing.T) {
 	c, _ := NewClient(t.TempDir() + "/dc.db")
 	defer c.Close()
