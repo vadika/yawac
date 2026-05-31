@@ -22,7 +22,11 @@ final class ChatListViewModel {
     }
 
     private func pushUnreadToSession() {
-        let total = chats.reduce(0) { $0 + $1.unread }
+        let now = Date()
+        let total = chats.reduce(0) { acc, c in
+            let muted = (c.mutedUntil.map { $0 > now }) ?? false
+            return muted ? acc : acc + c.unread
+        }
         session?.totalUnread = total
     }
 
@@ -337,12 +341,16 @@ final class ChatListViewModel {
                 }
                 return nil
             }()
-            NotificationService.notify(
-                title: title,
-                body: preview,
-                chatJID: chatJID,
-                subtitle: subtitle,
-                resolveMentions: { [weak session] jid in session?.displayName(for: jid) ?? jid })
+            if isMutedForNotification(chatJID: chatJID, message: message) {
+                // Suppressed by mute (unless mention pierces).
+            } else {
+                NotificationService.notify(
+                    title: title,
+                    body: preview,
+                    chatJID: chatJID,
+                    subtitle: subtitle,
+                    resolveMentions: { [weak session] jid in session?.displayName(for: jid) ?? jid })
+            }
         }
     }
 
@@ -474,12 +482,16 @@ final class ChatListViewModel {
             let s = session?.displayName(for: r.senderJID) ?? ""
             return s.isEmpty ? nil : s
         }()
-        NotificationService.notify(
-            title: chatName,
-            body: "\(r.emoji) reacted to your message",
-            chatJID: canonChat,
-            subtitle: reactSubtitle,
-            resolveMentions: { [weak session] jid in session?.displayName(for: jid) ?? jid })
+        if isMuted(canonChat, now: Date()) {
+            // Reaction notifications suppressed for muted chats.
+        } else {
+            NotificationService.notify(
+                title: chatName,
+                body: "\(r.emoji) reacted to your message",
+                chatJID: canonChat,
+                subtitle: reactSubtitle,
+                resolveMentions: { [weak session] jid in session?.displayName(for: jid) ?? jid })
+        }
     }
 
     func mergeGroups(_ gs: [BridgeGroupModel]) {

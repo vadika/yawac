@@ -133,6 +133,7 @@ struct ContentView: View {
                     // were dark. The offline message queue is redelivered
                     // by the server as normal .message events.
                     vm.reconcilePinsWithStore()
+                    vm.reconcileMutedWithStore()
                     vm.reconcileLIDDuplicates()
                     session.loadBlocklist()
                 case .historySync:
@@ -141,6 +142,7 @@ struct ContentView: View {
                     vm.mergeContacts(cs)
                     session.ingestContacts(cs)
                     vm.reconcilePinsWithStore()
+                    vm.reconcileMutedWithStore()
                     vm.reconcileLIDDuplicates()
                     session.loadBlocklist()
                 case .messageEdited(let chatJID, let messageID, let newText, let ts):
@@ -175,6 +177,15 @@ struct ContentView: View {
                     let canonical = JIDNormalize.canonical(chatJID, client: client)
                     vm.applyIncomingChatPin(chatJID: canonical,
                                             pinned: pinned, at: when)
+                case .chatMuted(let chatJID, let mutedUntilMs, let ts):
+                    let canonical = JIDNormalize.canonical(chatJID, client: client)
+                    let mutedUntil: Date? = mutedUntilMs == 0
+                        ? nil
+                        : Date(timeIntervalSince1970: TimeInterval(mutedUntilMs) / 1000)
+                    let when = Date(timeIntervalSince1970: TimeInterval(ts))
+                    vm.applyIncomingMute(chatJID: canonical,
+                                         mutedUntil: mutedUntil,
+                                         at: when)
                 case .messagePinned(let chatJID, let targetID, _, let pinned, let ts):
                     let when = Date(timeIntervalSince1970: TimeInterval(ts))
                     let canonical = JIDNormalize.canonical(chatJID, client: client)
