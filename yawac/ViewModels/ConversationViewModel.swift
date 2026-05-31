@@ -1107,11 +1107,17 @@ final class ConversationViewModel {
     }
 
     func sendDraft() async {
-        let body = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !body.isEmpty else { return }
+        let raw = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !raw.isEmpty else { return }
         draft = ""
 
-        // Snapshot the reply target locally so we can clear state early.
+        let mentionsSnapshot = activeMentions
+        activeMentions = []
+
+        let allP = (groupParticipants ?? []).map(\.jid)
+        let (body, mentionedJIDs) = Self.encodeMentions(
+            body: raw, mentions: mentionsSnapshot, allParticipants: allP)
+
         let replyTo = replyTarget
         replyTarget = nil
 
@@ -1124,9 +1130,11 @@ final class ConversationViewModel {
                     quotedSenderJID: q.senderJID,
                     quotedFromMe: q.fromMe,
                     quotedKind: Self.quotedKind(of: q),
-                    quotedSnippet: Self.quotedSnippet(of: q))
+                    quotedSnippet: Self.quotedSnippet(of: q),
+                    mentionedJIDs: mentionedJIDs)
             } else {
-                res = try client.sendText(chatJID, body)
+                res = try client.sendText(chatJID, body,
+                                          mentionedJIDs: mentionedJIDs)
             }
             var m = UIMessage(
                 id: res.messageID,
@@ -1146,9 +1154,9 @@ final class ConversationViewModel {
             receiptStatus[m.id] = .sent
             persistOutgoing(m, kind: "text", text: body)
         } catch {
-            // Restore the reply target so the user can retry.
             replyTarget = replyTo
-            draft = body
+            draft = raw
+            activeMentions = mentionsSnapshot
             transientError = "Couldn't send: \(error.localizedDescription)"
         }
     }
@@ -1472,11 +1480,18 @@ final class ConversationViewModel {
             cancelCompose()
             return
         }
+        let mentionsSnapshot = activeMentions
+        activeMentions = []
+        let allP = (groupParticipants ?? []).map(\.jid)
+        let (body, mentionedJIDs) = Self.encodeMentions(
+            body: trimmed, mentions: mentionsSnapshot, allParticipants: allP)
         do {
-            _ = try client.editText(chatJID, m.id, trimmed)
-            applyLocalEdit(messageID: m.id, newText: trimmed, at: Date())
+            _ = try client.editText(chatJID, m.id, body,
+                                    mentionedJIDs: mentionedJIDs)
+            applyLocalEdit(messageID: m.id, newText: body, at: Date())
             editTarget = nil
         } catch {
+            activeMentions = mentionsSnapshot
             transientError = "Edit not accepted: \(error.localizedDescription)"
         }
     }
@@ -1978,6 +1993,80 @@ final class ConversationViewModel {
         case .delivered: return 1
         case .played:    return 2
         case .read:      return 3
+        }
+    }
+
+    // MARK: - Mentions
+
+    nonisolated struct ActiveMention: Equatable {
+        let displayName: String
+        let jid: String   // MentionPickerViewModel.everyoneSentinelJID for @everyone
+    }
+
+    /// Live picker state shared with ComposerView.
+    var picker = MentionPickerViewModel()
+
+    /// Captures every successful pick during the current draft session;
+    /// cleared on a successful send / edit.
+    var activeMentions: [ActiveMention] = []
+
+    /// Cached group participants for this chat. Lazily fetched on first
+    /// composer `@` keystroke. nil = not yet fetched; [] = fetched empty
+    /// or non-group.
+    var groupParticipants: [BridgeParticipantModel]?
+
+    /// Pure helper — testable without spinning up a CVM. Walks `mentions`
+    /// in order, swapping each `@<displayName>` in `body` for `@<phone>`
+    /// (or expanding `@everyone` to every participant) and returning a
+    /// de-duplicated `mentionedJIDs` list.
+    nonisolated static func encodeMentions(
+        body: String,
+        mentions: [ActiveMention],
+        allParticipants: [String]
+    ) -> (String, [String]) {
+        var out = body
+        var jids: [String] = []
+        for m in mentions {
+            let needle = "@\(m.displayName)"
+            if m.jid == MentionPickerViewModel.everyoneSentinelJID {
+                if out.contains(needle) {
+                    jids.append(contentsOf: allParticipants)
+                }
+            } else {
+                let replacement = "@" + Self.phoneDigits(jid: m.jid)
+                if let r = out.range(of: needle) {
+                    out.replaceSubrange(r, with: replacement)
+                    jids.append(m.jid)
+                }
+            }
+        }
+        var seen = Set<String>()
+        let deduped = jids.filter { seen.insert($0).inserted }
+        return (out, deduped)
+    }
+
+    /// Substring before the first `@` of a JID — the phone or LID number
+    /// WhatsApp wants in the body text. Returns the full string if `@`
+    /// not present (defensive).
+    nonisolated private static func phoneDigits(jid: String) -> String {
+        guard let at = jid.firstIndex(of: "@") else { return jid }
+        return String(jid[..<at])
+    }
+
+    /// Lazily fetches group participants for this chat. No-op for 1:1
+    /// chats. Caller awaits before opening the mention picker; UI shows
+    /// a "Loading…" row in the strip while in-flight.
+    func loadGroupParticipantsIfNeeded() async {
+        if groupParticipants != nil { return }
+        guard chatJID.hasSuffix("@g.us") else {
+            groupParticipants = []
+            return
+        }
+        do {
+            let info = try client.getGroupInfo(jid: chatJID)
+            self.groupParticipants = info.participants
+        } catch {
+            self.groupParticipants = []
         }
     }
 }
