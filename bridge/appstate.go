@@ -99,6 +99,74 @@ func (c *Client) PinChat(chatJID string, pinned bool) error {
 	return c.wa.SendAppState(context.Background(), patch)
 }
 
+// MuteChat mutes or unmutes a chat. mutedUntilUnixMs is the absolute
+// Unix-millisecond timestamp when the mute expires; pass the
+// year-9999 UTC sentinel for "Always", 0 for unmute. The patch
+// propagates via WhatsApp app-state to peer devices.
+func (c *Client) MuteChat(chatJID string, mute bool, mutedUntilUnixMs int64) error {
+	if c.wa == nil {
+		return errors.New("client closed")
+	}
+	chat, err := types.ParseJID(chatJID)
+	if err != nil {
+		return fmt.Errorf("parse chat: %w", err)
+	}
+	var ts *int64
+	if mute && mutedUntilUnixMs != 0 {
+		ts = &mutedUntilUnixMs
+	}
+	patch := appstate.BuildMuteAbs(chat, mute, ts)
+	return c.wa.SendAppState(context.Background(), patch)
+}
+
+// ListMutedChats walks the input JID list and returns the subset that
+// whatsmeow's local appstate store currently considers muted, with
+// each entry's MutedUntil expressed as Unix milliseconds. Used by
+// Swift on cold-start to reconcile sidebar state with the server
+// snapshot, since whatsmeow doesn't re-emit events.Mute for
+// already-synced patches on reconnect.
+//
+// `jidsJSON` is a JSON array of chat JID strings; the return value is
+// a JSON array of {chat_jid, muted_until_ms} entries.
+func (c *Client) ListMutedChats(jidsJSON string) (string, error) {
+	if c.wa == nil {
+		return "", errors.New("client closed")
+	}
+	if c.wa.Store == nil || c.wa.Store.ChatSettings == nil {
+		return "[]", nil
+	}
+	var jids []string
+	if err := json.Unmarshal([]byte(jidsJSON), &jids); err != nil {
+		return "", fmt.Errorf("parse jids: %w", err)
+	}
+	type entry struct {
+		ChatJID      string `json:"chat_jid"`
+		MutedUntilMs int64  `json:"muted_until_ms"`
+	}
+	out := make([]entry, 0, 8)
+	now := time.Now()
+	for _, raw := range jids {
+		jid, err := types.ParseJID(raw)
+		if err != nil {
+			continue
+		}
+		settings, err := c.wa.Store.ChatSettings.GetChatSettings(context.Background(), jid)
+		if err != nil || !settings.Found {
+			continue
+		}
+		mu := settings.MutedUntil
+		if mu.IsZero() || !mu.After(now) {
+			continue
+		}
+		out = append(out, entry{
+			ChatJID:      raw,
+			MutedUntilMs: mu.UnixMilli(),
+		})
+	}
+	b, _ := json.Marshal(out)
+	return string(b), nil
+}
+
 // messageKeyOrNil builds a *waCommon.MessageKey for archive/delete message
 // ranges, or nil when no last-message id is known. whatsmeow's
 // newMessageRange is zero-safe and substitutes time.Now() for a zero

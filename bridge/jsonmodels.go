@@ -127,6 +127,12 @@ type JChatArchived struct {
 	Timestamp int64  `json:"timestamp"`
 }
 
+type JChatMuted struct {
+	ChatJID      string `json:"chat_jid"`
+	MutedUntilMs int64  `json:"muted_until_ms"`
+	Timestamp    int64  `json:"timestamp"`
+}
+
 type JChatDeleted struct {
 	ChatJID   string `json:"chat_jid"`
 	Timestamp int64  `json:"timestamp"`
