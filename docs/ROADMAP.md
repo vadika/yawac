@@ -37,7 +37,9 @@ relevant context lingers).
   add/remove/promote/demote, edit name/topic/icon.
 - ☐ **Invite link / QR** — generate.
 - ☐ **Group description**.
-- ☐ **Mention autocomplete** when typing `@`.
+- ✅ **Mention autocomplete** — strip above composer with participants +
+  `@everyone`; ↑↓/Tab/Enter/Esc; encodes `ContextInfo.MentionedJID`
+  on send + edit. Shipped in v0.3.0.
 
 ## Channels / Communities
 
