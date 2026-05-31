@@ -100,9 +100,23 @@ final class WAClient: PhoneValidating {
     func connect() throws { try go.connect() }
     func logout() throws { try go.logout() }
 
-    func sendText(_ chatJID: String, _ body: String) throws -> BridgeSendResult {
+    /// Encode @-mention JIDs as a JSON-string param for the Go bridge.
+    /// gomobile silently drops methods whose signatures contain `[]string`,
+    /// so the bridge accepts a JSON array string instead. Returns "" for
+    /// empty input — the Go side treats "" as "no mentions".
+    private func encodeMentionsJSON(_ mentionedJIDs: [String]) -> String {
+        guard !mentionedJIDs.isEmpty else { return "" }
+        // JSONEncoder on [String] cannot fail in practice; on the off-chance,
+        // fall through to empty so the bridge takes the no-mentions branch.
+        return (try? String(data: JSONEncoder().encode(mentionedJIDs), encoding: .utf8)) ?? ""
+    }
+
+    func sendText(_ chatJID: String, _ body: String,
+                  mentionedJIDs: [String] = []) throws -> BridgeSendResult {
         var err: NSError?
-        let json = go.sendText(chatJID, body: body, error: &err)
+        let json = go.sendText(chatJID, body: body,
+                               mentionedJIDsJSON: encodeMentionsJSON(mentionedJIDs),
+                               error: &err)
         if let err { throw err }
         return try JSONDecoder().decode(BridgeSendResult.self, from: Data(json.utf8))
     }
@@ -169,13 +183,15 @@ final class WAClient: PhoneValidating {
     func sendTextReply(_ chatJID: String, _ body: String,
                        quotedID: String, quotedSenderJID: String,
                        quotedFromMe: Bool, quotedKind: String,
-                       quotedSnippet: String) throws -> BridgeSendResult {
+                       quotedSnippet: String,
+                       mentionedJIDs: [String] = []) throws -> BridgeSendResult {
         var err: NSError?
         let json = go.sendTextReply(
             chatJID, body: body,
             quotedID: quotedID, quotedSenderJID: quotedSenderJID,
             quotedFromMe: quotedFromMe, quotedKind: quotedKind,
-            quotedSnippet: quotedSnippet, error: &err)
+            quotedSnippet: quotedSnippet,
+            mentionedJIDsJSON: encodeMentionsJSON(mentionedJIDs), error: &err)
         if let err { throw err }
         return try JSONDecoder().decode(BridgeSendResult.self, from: Data(json.utf8))
     }
@@ -196,9 +212,12 @@ final class WAClient: PhoneValidating {
         return try JSONDecoder().decode(BridgeSendResult.self, from: Data(json.utf8))
     }
 
-    func editText(_ chatJID: String, _ msgID: String, _ newBody: String) throws -> BridgeSendResult {
+    func editText(_ chatJID: String, _ msgID: String, _ newBody: String,
+                  mentionedJIDs: [String] = []) throws -> BridgeSendResult {
         var err: NSError?
-        let json = go.editText(chatJID, msgID: msgID, newBody: newBody, error: &err)
+        let json = go.editText(chatJID, msgID: msgID, newBody: newBody,
+                               mentionedJIDsJSON: encodeMentionsJSON(mentionedJIDs),
+                               error: &err)
         if let err { throw err }
         return try JSONDecoder().decode(BridgeSendResult.self, from: Data(json.utf8))
     }
