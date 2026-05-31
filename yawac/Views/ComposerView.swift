@@ -15,12 +15,14 @@ struct ComposerView: View {
             replyChip
             editChip
             attachmentStrip
+            MentionStrip(picker: vm.picker, onCommit: commitMention)
             if recorder.state == .recording {
                 RecordingBar(recorder: recorder, cancelHint: wantsCancel)
             }
             inputRow
         }
         .animation(.easeOut(duration: 0.15), value: vm.pendingAttachments)
+        .animation(.easeOut(duration: 0.12), value: vm.picker.isActive)
         .padding(.horizontal, 22)
         .padding(.vertical, 12)
         .background(Theme.bg)
@@ -53,6 +55,23 @@ struct ComposerView: View {
         }
     }
 
+    private func commitMention(_ cand: MentionPickerViewModel.Candidate) {
+        let r = vm.picker.triggerRange ?? findCurrentTriggerRange()
+        guard let r else { return }
+        let insertion = "@\(cand.label) "
+        vm.draft.replaceSubrange(r, with: insertion)
+        vm.activeMentions.append(.init(displayName: cand.label, jid: cand.jid))
+        vm.picker.cancel()
+    }
+
+    /// `picker.cancel()` clears triggerRange before this closure may run
+    /// (e.g. tab while only one candidate); recompute by finding the
+    /// last '@' in the current draft as a fallback.
+    private func findCurrentTriggerRange() -> Range<String.Index>? {
+        guard let at = vm.draft.lastIndex(of: "@") else { return nil }
+        return at..<vm.draft.endIndex
+    }
+
     private var inputRow: some View {
         HStack(spacing: 8) {
             Button {
@@ -77,9 +96,60 @@ struct ComposerView: View {
                 .focused($focused)
                 .onChange(of: vm.draft) { _, new in
                     vm.setTyping(!new.isEmpty)
+                    Task { await vm.loadGroupParticipantsIfNeeded() }
+                    let candidates: [MentionPickerViewModel.Candidate] = {
+                        if let parts = vm.groupParticipants, !parts.isEmpty {
+                            return parts.map { .participant(
+                                jid: $0.jid,
+                                displayName: session.displayName(for: $0.jid)) }
+                        }
+                        if !vm.chatJID.hasSuffix("@g.us") {
+                            return [.participant(
+                                jid: vm.chatJID,
+                                displayName: session.displayName(for: vm.chatJID))]
+                        }
+                        return []
+                    }()
+                    vm.picker.setCandidates(candidates,
+                                            includeEveryone: vm.chatJID.hasSuffix("@g.us"))
+                    vm.picker.update(text: new)
                 }
                 .onSubmit { send() }
+                .onKeyPress(.tab) {
+                    guard vm.picker.isActive else { return .ignored }
+                    if let pick = vm.picker.commitSelected() {
+                        commitMention(pick)
+                    }
+                    return .handled
+                }
+                .onKeyPress(.return) {
+                    guard vm.picker.isActive else { return .ignored }
+                    if let pick = vm.picker.commitSelected() {
+                        commitMention(pick)
+                    }
+                    return .handled
+                }
+                .onKeyPress(.downArrow) {
+                    guard vm.picker.isActive else { return .ignored }
+                    vm.picker.move(by: 1)
+                    return .handled
+                }
+                .onKeyPress(.upArrow) {
+                    if vm.picker.isActive {
+                        vm.picker.move(by: -1)
+                        return .handled
+                    }
+                    guard vm.editTarget == nil, vm.replyTarget == nil,
+                          vm.draft.isEmpty
+                    else { return .ignored }
+                    vm.editLastOwnMessage()
+                    return vm.editTarget == nil ? .ignored : .handled
+                }
                 .onKeyPress(.escape) {
+                    if vm.picker.isActive {
+                        vm.picker.cancel()
+                        return .handled
+                    }
                     let wasEditing = (vm.editTarget != nil)
                     if vm.replyTarget != nil || vm.editTarget != nil {
                         vm.cancelCompose()
@@ -87,15 +157,6 @@ struct ComposerView: View {
                         return .handled
                     }
                     return .ignored
-                }
-                .onKeyPress(.upArrow) {
-                    // Empty-draft ↑ recalls the last editable own
-                    // message — Slack / iMessage / Telegram convention.
-                    guard vm.editTarget == nil, vm.replyTarget == nil,
-                          vm.draft.isEmpty
-                    else { return .ignored }
-                    vm.editLastOwnMessage()
-                    return vm.editTarget == nil ? .ignored : .handled
                 }
 
             Button {
