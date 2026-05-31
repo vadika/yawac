@@ -26,8 +26,10 @@ relevant context lingers).
 
 ## Search
 
-- ☐ **In-chat message search** (search inside the current conversation).
-- ☐ **Global message search** (full-text across all chats).
+- ✅ **In-chat message search** — ⌘F find bar with ↑/↓ navigation,
+  highlights, locale-aware tokenizer (FTS5).
+- ✅ **Global message search** — sidebar `⌘K` Messages section, tap-to-jump
+  with brief flash highlight.
 
 ## Groups
 
