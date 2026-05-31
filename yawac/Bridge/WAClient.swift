@@ -43,6 +43,7 @@ final class WAClient: PhoneValidating {
         case messageLocallyDeleted(chatJID: String, messageID: String, timestamp: Int64)
         case messageStarred(chatJID: String, messageID: String, senderJID: String, fromMe: Bool, starred: Bool, timestamp: Int64)
         case chatPinned(chatJID: String, pinned: Bool, timestamp: Int64)
+        case chatMuted(chatJID: String, mutedUntilMs: Int64, timestamp: Int64)
         case messagePinned(chatJID: String, targetMessageID: String, senderJID: String, pinned: Bool, timestamp: Int64)
         case chatArchived(chatJID: String, archived: Bool, timestamp: Int64)
         case chatDeleted(chatJID: String, timestamp: Int64)
@@ -248,6 +249,10 @@ final class WAClient: PhoneValidating {
         try go.pinChat(chatJID, pinned: pinned)
     }
 
+    func muteChat(chatJID: String, mute: Bool, mutedUntilMs: Int64) throws {
+        try go.muteChat(chatJID, mute: mute, mutedUntilUnixMs: mutedUntilMs)
+    }
+
     func pinMessageInChat(chatJID: String,
                           targetMsgID: String,
                           targetSenderJID: String,
@@ -300,6 +305,29 @@ final class WAClient: PhoneValidating {
         let json = go.listPinnedChats(jidsJSON, error: &err)
         if let err { throw err }
         return (try? JSONDecoder().decode([String].self, from: Data(json.utf8))) ?? []
+    }
+
+    /// Returns each input JID that whatsmeow's local appstate store
+    /// currently considers muted (only future-dated mutes — already-
+    /// expired entries are skipped server-side). Used to reconcile
+    /// the sidebar at startup since events.Mute isn't re-emitted on
+    /// reconnect.
+    func listMutedChats(jids: [String]) throws -> [(jid: String, mutedUntilMs: Int64)] {
+        let jidsJSON = (try? JSONEncoder().encode(jids))
+            .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+        var err: NSError?
+        let json = go.listMutedChats(jidsJSON, error: &err)
+        if let err { throw err }
+        struct E: Codable {
+            let chatJID: String
+            let mutedUntilMs: Int64
+            enum CodingKeys: String, CodingKey {
+                case chatJID = "chat_jid"
+                case mutedUntilMs = "muted_until_ms"
+            }
+        }
+        let decoded = (try? JSONDecoder().decode([E].self, from: Data(json.utf8))) ?? []
+        return decoded.map { ($0.chatJID, $0.mutedUntilMs) }
     }
 
     func sendPollVote(chatJID: String,
@@ -627,6 +655,22 @@ final class WAClient: PhoneValidating {
             }
             if let p = try? dec.decode(P.self, from: data) {
                 return .chatPinned(chatJID: p.chatJID, pinned: p.pinned, timestamp: p.timestamp)
+            }
+        case "ChatMuted":
+            struct M: Codable {
+                let chatJID: String
+                let mutedUntilMs: Int64
+                let timestamp: Int64
+                enum CodingKeys: String, CodingKey {
+                    case chatJID = "chat_jid"
+                    case mutedUntilMs = "muted_until_ms"
+                    case timestamp
+                }
+            }
+            if let m = try? dec.decode(M.self, from: data) {
+                return .chatMuted(chatJID: m.chatJID,
+                                  mutedUntilMs: m.mutedUntilMs,
+                                  timestamp: m.timestamp)
             }
         case "MessagePinned":
             struct MP: Codable {
