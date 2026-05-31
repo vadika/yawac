@@ -207,7 +207,8 @@ final class ChatListViewModel {
                     communityParentJID: row.communityParentJID,
                     isDefaultSubGroup: row.isDefaultSubGroup,
                     pinnedAt: row.pinnedAt,
-                    archivedAt: row.archivedAt)
+                    archivedAt: row.archivedAt,
+                    mutedUntil: row.mutedUntil)
             }
             .filter { !isTombstoned($0.jid) }
             .sorted(by: Self.chatOrder)
@@ -674,6 +675,7 @@ final class ChatListViewModel {
             existing.isDefaultSubGroup = c.isDefaultSubGroup
             existing.pinnedAt = c.pinnedAt
             existing.archivedAt = c.archivedAt
+            existing.mutedUntil = c.mutedUntil
             if let preview { existing.lastMessageText = preview }
         } else {
             let row = PersistedChat(
@@ -686,7 +688,8 @@ final class ChatListViewModel {
                 isCommunityParent: c.isCommunityParent,
                 isDefaultSubGroup: c.isDefaultSubGroup,
                 pinnedAt: c.pinnedAt,
-                archivedAt: c.archivedAt)
+                archivedAt: c.archivedAt,
+                mutedUntil: c.mutedUntil)
             context.insert(row)
         }
         try? context.save()
@@ -796,6 +799,119 @@ final class ChatListViewModel {
             }
         }
         sortChats()
+    }
+
+    // MARK: - Mute
+
+    /// Sentinel "Always" mute end. Matches whatsmeow's MutedForever
+    /// (year 9999, UTC) to the second; treat any `mutedUntil > now + 100y`
+    /// as "Always" in the UI label.
+    static let muteForever = Date(timeIntervalSinceReferenceDate: 253_402_300_799)
+
+    /// True when `chatJID`'s `mutedUntil` is in the future relative to `now`.
+    /// `now` injectable for deterministic tests.
+    func isMuted(_ chatJID: String, now: Date = Date()) -> Bool {
+        guard let c = chats.first(where: { $0.jid == chatJID }),
+              let until = c.mutedUntil else { return false }
+        return until > now
+    }
+
+    /// Notification-gate predicate. Returns true when an inbound event
+    /// should NOT trigger a banner.
+    ///
+    /// Suppression rules:
+    /// - Not muted → false.
+    /// - Muted, not in a group → true.
+    /// - Muted, in a group, message body contains `@<ownPhoneDigits>` →
+    ///   false (direct mention pierces mute).
+    /// - Muted, in a group, otherwise → true.
+    func isMutedForNotification(
+        chatJID: String,
+        message: BridgeMessage,
+        ownPhoneDigits: String? = nil
+    ) -> Bool {
+        guard isMuted(chatJID, now: Date()) else { return false }
+        let isGroup = chatJID.hasSuffix("@g.us")
+        guard isGroup else { return true }
+        let digits = ownPhoneDigits ?? session?.ownPhoneDigits ?? ""
+        guard !digits.isEmpty else { return true }
+        let body = message.text ?? ""
+        return !body.contains("@\(digits)")
+    }
+
+    /// Local optimistic apply for a mute toggle initiated by this device.
+    /// `mutedUntil == nil` = unmute.
+    func applyLocalMute(chatJID: String, mutedUntil: Date?) {
+        if let idx = chats.firstIndex(where: { $0.jid == chatJID }) {
+            chats[idx].mutedUntil = mutedUntil
+            upsertPersisted(chats[idx])
+        } else if let context {
+            let descriptor = FetchDescriptor<PersistedChat>(
+                predicate: #Predicate { $0.jid == chatJID })
+            if let row = try? context.fetch(descriptor).first {
+                row.mutedUntil = mutedUntil
+                try? context.save()
+            }
+        }
+        sortChats()
+    }
+
+    /// Apply a mute change that arrived via `events.Mute`.
+    /// LWW: ignore when our local `mutedUntil` is newer than `at`.
+    func applyIncomingMute(chatJID: String, mutedUntil: Date?, at: Date) {
+        if let existing = chats.first(where: { $0.jid == chatJID })?.mutedUntil,
+           existing > at {
+            return
+        }
+        applyLocalMute(chatJID: chatJID, mutedUntil: mutedUntil)
+    }
+
+    /// Issues the bridge mute call + optimistic local apply.
+    /// `until == nil` unmutes.
+    func muteChat(_ chat: Chat, until: Date?) {
+        guard let client else { return }
+        let muteMs: Int64 = until.map { Int64($0.timeIntervalSince1970 * 1000) } ?? 0
+        Task { @MainActor in
+            do {
+                try client.muteChat(chatJID: chat.jid,
+                                    mute: until != nil,
+                                    mutedUntilMs: muteMs)
+                self.applyLocalMute(chatJID: chat.jid, mutedUntil: until)
+            } catch {
+                NSLog("[yawac/muteChat] failed jid=%@ err=%@",
+                      chat.jid, String(describing: error))
+            }
+        }
+    }
+
+    /// Cold-start reconcile: pull whatsmeow's local muted-chats list
+    /// and align our rows. whatsmeow doesn't re-emit events.Mute for
+    /// already-synced patches on reconnect.
+    func reconcileMutedWithStore() {
+        guard let client else { return }
+        let jids = chats.map(\.jid)
+        let entries: [(jid: String, mutedUntilMs: Int64)]
+        do {
+            entries = try client.listMutedChats(jids: jids)
+        } catch {
+            NSLog("[yawac/mute-reconcile] failed: %@",
+                  String(describing: error))
+            return
+        }
+        let byJID = Dictionary(uniqueKeysWithValues:
+            entries.map { ($0.jid, $0.mutedUntilMs) })
+        var changed = false
+        for i in chats.indices {
+            let serverMs = byJID[chats[i].jid] ?? 0
+            let serverUntil: Date? = serverMs == 0
+                ? nil
+                : Date(timeIntervalSince1970: TimeInterval(serverMs) / 1000)
+            if chats[i].mutedUntil == serverUntil { continue }
+            chats[i].mutedUntil = serverUntil
+            upsertPersisted(chats[i])
+            changed = true
+        }
+        if changed { sortChats() }
     }
 
     // MARK: - Archive / delete / contact

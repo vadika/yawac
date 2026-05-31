@@ -33,6 +33,12 @@ final class SessionViewModel {
     /// `loadBlocklist()` on connect; updated by BlocklistChanged events.
     private(set) var blockedJIDs: Set<String> = []
 
+    /// Temporary stub for the mute notification gate (T6). T7 replaces
+    /// this with a derived value from the paired account's bare JID
+    /// (`ownJID` user-part). Until then, returns nil and group mutes
+    /// suppress notifications unconditionally.
+    var ownPhoneDigits: String? { nil }
+
     enum Connection { case connecting, online, offline }
     /// Runtime socket health, independent of the pairing `state`.
     /// Drives the sync banner alongside `state`.
