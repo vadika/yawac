@@ -33,11 +33,16 @@ final class SessionViewModel {
     /// `loadBlocklist()` on connect; updated by BlocklistChanged events.
     private(set) var blockedJIDs: Set<String> = []
 
-    /// Temporary stub for the mute notification gate (T6). T7 replaces
-    /// this with a derived value from the paired account's bare JID
-    /// (`ownJID` user-part). Until then, returns nil and group mutes
-    /// suppress notifications unconditionally.
-    var ownPhoneDigits: String? { nil }
+    /// Bare phone-digit prefix of the paired account's JID
+    /// (e.g. `"5550100"` for `"5550100@s.whatsapp.net"`). Empty string
+    /// when not signed in. Used by the mute notification gate so an
+    /// `@<digits>` mention in a muted group still pierces the mute.
+    var ownPhoneDigits: String {
+        guard let jid = client?.ownJID, let at = jid.firstIndex(of: "@") else {
+            return ""
+        }
+        return String(jid[..<at])
+    }
 
     enum Connection { case connecting, online, offline }
     /// Runtime socket health, independent of the pairing `state`.
