@@ -4,21 +4,21 @@ import "testing"
 
 func TestEditTextClosedClient(t *testing.T) {
 	c := &Client{}
-	if _, err := c.EditText("12@s.whatsapp.net", "ABC", "new"); err == nil {
+	if _, err := c.EditText("12@s.whatsapp.net", "ABC", "new", ""); err == nil {
 		t.Fatal("expected error")
 	}
 }
 
 func TestEditTextRejectsBadJID(t *testing.T) {
 	c := &Client{}
-	if _, err := c.EditText("not-a-jid", "ABC", "new"); err == nil {
+	if _, err := c.EditText("not-a-jid", "ABC", "new", ""); err == nil {
 		t.Fatal("expected error")
 	}
 }
 
 func TestEditTextRejectsEmptyBody(t *testing.T) {
 	c := &Client{}
-	if _, err := c.EditText("12@s.whatsapp.net", "ABC", ""); err == nil {
+	if _, err := c.EditText("12@s.whatsapp.net", "ABC", "", ""); err == nil {
 		t.Fatal("expected error for empty body")
 	}
 }

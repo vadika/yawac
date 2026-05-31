@@ -16,7 +16,7 @@ import (
 // menu item past 15 min and the server rejects late edits. Returns
 // JSON of JSendResult carrying the edit envelope id (UI keeps the
 // original msgID for display).
-func (c *Client) EditText(chatJID, msgID, newBody string) (string, error) {
+func (c *Client) EditText(chatJID, msgID, newBody string, mentionedJIDsJSON string) (string, error) {
 	if c.wa == nil {
 		return "", errors.New("client closed")
 	}
@@ -30,7 +30,21 @@ func (c *Client) EditText(chatJID, msgID, newBody string) (string, error) {
 	if chat.User == "" || chat.Server == "" {
 		return "", fmt.Errorf("parse chat: %q is not a valid jid", chatJID)
 	}
-	newMsg := &waE2E.Message{Conversation: proto.String(newBody)}
+	var mentionedJIDs []string
+	if mentionedJIDsJSON != "" {
+		if err := json.Unmarshal([]byte(mentionedJIDsJSON), &mentionedJIDs); err != nil {
+			return "", fmt.Errorf("parse mentionedJIDs: %w", err)
+		}
+	}
+	var newMsg *waE2E.Message
+	if len(mentionedJIDs) == 0 {
+		newMsg = &waE2E.Message{Conversation: proto.String(newBody)}
+	} else {
+		newMsg = &waE2E.Message{ExtendedTextMessage: &waE2E.ExtendedTextMessage{
+			Text:        proto.String(newBody),
+			ContextInfo: &waE2E.ContextInfo{MentionedJID: mentionedJIDs},
+		}}
+	}
 	edit := c.wa.BuildEdit(chat, types.MessageID(msgID), newMsg)
 	resp, err := c.wa.SendMessage(context.Background(), chat, edit)
 	if err != nil {

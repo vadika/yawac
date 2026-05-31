@@ -149,8 +149,13 @@ func (c *Client) MarkRead(chatJID, senderJID, msgIDsJSON string) error {
 	return c.wa.MarkRead(context.Background(), ids, time.Now(), chat, sender)
 }
 
-// SendText sends a plain-text message. Returns JSON of JSendResult.
-func (c *Client) SendText(chatJID, body string) (string, error) {
+// SendText sends a plain-text message. When mentionedJIDsJSON decodes to
+// a non-empty array, the message is sent as an ExtendedTextMessage with a
+// ContextInfo whose MentionedJID array carries the pinged JIDs (matches
+// WhatsApp's wire format for @mentions). The JSON-string param shape is
+// required because gomobile silently drops methods with []string params.
+// Pass "" (or "[]") when there are no mentions. Returns JSON of JSendResult.
+func (c *Client) SendText(chatJID, body string, mentionedJIDsJSON string) (string, error) {
 	if c.wa == nil {
 		return "", errors.New("client closed")
 	}
@@ -161,7 +166,21 @@ func (c *Client) SendText(chatJID, body string) (string, error) {
 	if jid.User == "" || jid.Server == "" {
 		return "", fmt.Errorf("parse jid: %q is not a valid jid", chatJID)
 	}
-	msg := &waE2E.Message{Conversation: proto.String(body)}
+	var mentionedJIDs []string
+	if mentionedJIDsJSON != "" {
+		if err := json.Unmarshal([]byte(mentionedJIDsJSON), &mentionedJIDs); err != nil {
+			return "", fmt.Errorf("parse mentionedJIDs: %w", err)
+		}
+	}
+	var msg *waE2E.Message
+	if len(mentionedJIDs) == 0 {
+		msg = &waE2E.Message{Conversation: proto.String(body)}
+	} else {
+		msg = &waE2E.Message{ExtendedTextMessage: &waE2E.ExtendedTextMessage{
+			Text:        proto.String(body),
+			ContextInfo: &waE2E.ContextInfo{MentionedJID: mentionedJIDs},
+		}}
+	}
 	resp, err := c.wa.SendMessage(context.Background(), jid, msg)
 	if err != nil {
 		return "", fmt.Errorf("send: %w", err)
@@ -708,10 +727,9 @@ func mediaFromSticker(m *waE2E.StickerMessage) *JMedia {
 // quotedSnippet is what other clients will render if they cannot
 // resolve the stanza-id back to the original.
 func (c *Client) SendTextReply(
-	chatJID, body string,
-	quotedID, quotedSenderJID string,
-	quotedFromMe bool,
-	quotedKind, quotedSnippet string,
+	chatJID, body, quotedID, quotedSenderJID string,
+	quotedFromMe bool, quotedKind, quotedSnippet string,
+	mentionedJIDsJSON string,
 ) (string, error) {
 	if c.wa == nil {
 		return "", errors.New("client closed")
@@ -733,10 +751,17 @@ func (c *Client) SendTextReply(
 			return "", fmt.Errorf("parse quoted sender: %w", err)
 		}
 	}
+	var mentionedJIDs []string
+	if mentionedJIDsJSON != "" {
+		if err := json.Unmarshal([]byte(mentionedJIDsJSON), &mentionedJIDs); err != nil {
+			return "", fmt.Errorf("parse mentionedJIDs: %w", err)
+		}
+	}
 	ctx := &waE2E.ContextInfo{
 		StanzaID:      proto.String(quotedID),
 		Participant:   proto.String(senderForCtx),
 		QuotedMessage: stubQuoted(quotedKind, quotedSnippet),
+		MentionedJID:  mentionedJIDs,
 	}
 	msg := &waE2E.Message{
 		ExtendedTextMessage: &waE2E.ExtendedTextMessage{
