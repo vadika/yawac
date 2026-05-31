@@ -388,6 +388,21 @@ struct ChatListView: View {
             Button(chat.pinnedAt != nil ? "Unpin chat" : "Pin chat") {
                 vm.pinChat(chat, pinned: chat.pinnedAt == nil)
             }
+            if let until = chat.mutedUntil, until > Date() {
+                Button("Unmute") { vm.muteChat(chat, until: nil) }
+            } else {
+                Menu("Mute") {
+                    Button("Mute for 8 hours") {
+                        vm.muteChat(chat, until: Date().addingTimeInterval(8 * 3600))
+                    }
+                    Button("Mute for 1 week") {
+                        vm.muteChat(chat, until: Date().addingTimeInterval(7 * 86400))
+                    }
+                    Button("Mute always") {
+                        vm.muteChat(chat, until: ChatListViewModel.muteForever)
+                    }
+                }
+            }
             Button(chat.archivedAt != nil ? "Unarchive" : "Archive") {
                 vm.archiveChat(chat, archived: chat.archivedAt == nil)
             }
@@ -513,6 +528,12 @@ struct ChatListView: View {
                             .rotationEffect(.degrees(35))
                             .help("Pinned")
                     }
+                    if let until = chat.mutedUntil, until > Date() {
+                        Image(systemName: "bell.slash.fill")
+                            .scaledIcon(10)
+                            .foregroundStyle(Theme.textFaint)
+                            .help("Muted")
+                    }
                     Text(chat.lastTimestampShort)
                         .scaledMono(11)
                         .foregroundStyle(isSelected ? Theme.accentText : Theme.textFaint)
@@ -526,13 +547,15 @@ struct ChatListView: View {
                         .lineLimit(1)
                     Spacer(minLength: 0)
                     if chat.unread > 0 {
+                        let muted = (chat.mutedUntil.map { $0 > Date() }) ?? false
                         Text("\(chat.unread)")
                             .scaledMono(10.5, weight: .semibold)
-                            .foregroundStyle(.white)
+                            .foregroundStyle(muted ? Theme.textMuted : Color.white)
                             .monospacedDigit()
                             .padding(.horizontal, 6)
                             .frame(minWidth: 18, minHeight: 18)
-                            .background(Theme.accent, in: Capsule())
+                            .background(muted ? Theme.surfaceAlt : Theme.accent,
+                                        in: Capsule())
                     }
                 }
             }
