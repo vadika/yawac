@@ -162,3 +162,31 @@ func (c *Client) LeaveGroup(jidStr string) error {
 	}
 	return c.wa.LeaveGroup(context.Background(), jid)
 }
+
+// SetGroupName changes the displayed group name (WhatsApp "subject").
+// The server fans the change out as an events.GroupInfo to every
+// participant, including this client.
+func (c *Client) SetGroupName(chatJID, name string) error {
+	if c.wa == nil {
+		return errors.New("client closed")
+	}
+	jid, err := types.ParseJID(chatJID)
+	if err != nil {
+		return fmt.Errorf("parse jid: %w", err)
+	}
+	return c.wa.SetGroupName(context.Background(), jid, name)
+}
+
+// SetGroupDescription changes the group description (WhatsApp "topic").
+// Empty `description` clears it. The server fans the change out as an
+// events.GroupInfo with a populated Topic field.
+func (c *Client) SetGroupDescription(chatJID, description string) error {
+	if c.wa == nil {
+		return errors.New("client closed")
+	}
+	jid, err := types.ParseJID(chatJID)
+	if err != nil {
+		return fmt.Errorf("parse jid: %w", err)
+	}
+	return c.wa.SetGroupDescription(context.Background(), jid, description)
+}
