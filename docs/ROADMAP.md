@@ -49,8 +49,10 @@ relevant context lingers).
 
 - ☐ **Newsletter / Channels** — upstream blocker: `Platform == MACOS`
   triggers `argo decoding is currently broken` (whatsmeow patch needed).
-- ◐ **Communities** — parent / sub-group display done; admin actions
-  missing.
+- ◐ **Communities** — parent / sub-group display done; sub-group
+  directory + best-effort join (via invite link, surfaces
+  approval-pending state) shipped. Missing: admin actions
+  (link/unlink sub-groups, approve member requests).
 
 ## Productivity / macOS
 
