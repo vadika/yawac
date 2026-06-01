@@ -2,6 +2,27 @@ import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
+extension ComposerView {
+    /// Writes an NSImage's PNG representation to a unique file under
+    /// the system temp dir so it can be staged through the same
+    /// path as a Finder-attached image.
+    fileprivate static func saveImageToTemp(_ image: NSImage) -> URL? {
+        guard let tiff = image.tiffRepresentation,
+              let rep = NSBitmapImageRep(data: tiff),
+              let png = rep.representation(using: .png, properties: [:]) else {
+            return nil
+        }
+        let dir = FileManager.default.temporaryDirectory
+        let url = dir.appendingPathComponent("yawac-paste-\(UUID().uuidString).png")
+        do {
+            try png.write(to: url)
+            return url
+        } catch {
+            return nil
+        }
+    }
+}
+
 struct ComposerView: View {
     @Bindable var vm: ConversationViewModel
     @Environment(SessionViewModel.self) private var session
@@ -115,6 +136,9 @@ struct ComposerView: View {
                     vm.picker.update(text: new)
                 }
                 .onSubmit { send() }
+                .onPasteCommand(of: [UTType.fileURL, UTType.image]) { providers in
+                    handlePasted(providers)
+                }
                 .onKeyPress(.tab) {
                     guard vm.picker.isActive else { return .ignored }
                     if let pick = vm.picker.commitSelected() {
@@ -122,7 +146,13 @@ struct ComposerView: View {
                     }
                     return .handled
                 }
-                .onKeyPress(.return) {
+                .onKeyPress(keys: [.return], phases: .down) { keyPress in
+                    // ⇧Return → newline. Plain Return falls through to
+                    // onSubmit (which sends) or to the picker commit.
+                    if keyPress.modifiers.contains(.shift) {
+                        vm.draft += "\n"
+                        return .handled
+                    }
                     guard vm.picker.isActive else { return .ignored }
                     if let pick = vm.picker.commitSelected() {
                         commitMention(pick)
@@ -323,6 +353,26 @@ struct ComposerView: View {
         panel.allowsMultipleSelection = true
         if panel.runModal() == .OK {
             for url in panel.urls { vm.stageAttachment(at: url) }
+        }
+    }
+
+    /// `.onPasteCommand` handler: stages file URLs / image bitmaps from
+    /// the pasteboard as composer attachments. NSItemProvider loaders are
+    /// async; staging hops to the main actor on completion.
+    private func handlePasted(_ providers: [NSItemProvider]) {
+        for provider in providers {
+            if provider.canLoadObject(ofClass: URL.self) {
+                _ = provider.loadObject(ofClass: URL.self) { url, _ in
+                    guard let url else { return }
+                    Task { @MainActor in vm.stageAttachment(at: url) }
+                }
+            } else if provider.canLoadObject(ofClass: NSImage.self) {
+                _ = provider.loadObject(ofClass: NSImage.self) { obj, _ in
+                    guard let img = obj as? NSImage,
+                          let url = ComposerView.saveImageToTemp(img) else { return }
+                    Task { @MainActor in vm.stageAttachment(at: url) }
+                }
+            }
         }
     }
 
