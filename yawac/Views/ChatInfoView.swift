@@ -721,10 +721,14 @@ struct ChatInfoView: View {
         joiningSubJID = sub.jid
         defer { joiningSubJID = nil }
         do {
-            _ = try client.joinSubGroup(subJID: sub.jid)
-            // Existing JoinedGroup ingest path will add the chat to
-            // session.chatList?.chats; the row's `joined` derives
-            // from that and flips automatically.
+            let joinedJID = try client.joinSubGroup(subJID: sub.jid)
+            // No events.JoinedGroup handler yet — fetch the group
+            // record explicitly and feed it through the same merge
+            // path the cold-start groups dump uses. Flips the row's
+            // "Joined" badge + makes it appear in the sidebar.
+            if let info = try? client.getGroupInfo(jid: joinedJID) {
+                session.chatList?.mergeGroups([info])
+            }
         } catch {
             loadError = "Couldn't join \(sub.name): \(error.localizedDescription)"
         }
