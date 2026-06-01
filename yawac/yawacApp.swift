@@ -7,6 +7,7 @@ import UserNotifications
 struct YawacApp: App {
     @State private var session = SessionViewModel()
     @State private var menuBar = MenuBarController()
+    @State private var showShortcuts = false
     @State private var translation: TranslationViewModel = {
         let store = TranslationStore()
         let mgr = TranslationModelManager()
@@ -53,6 +54,9 @@ struct YawacApp: App {
                 .background(Theme.bg)
                 .graphiteWindow()
                 .onAppear { menuBar.install(session: session) }
+                .sheet(isPresented: $showShortcuts) {
+                    KeyboardShortcutsView()
+                }
         }
         .windowStyle(.hiddenTitleBar)
         .commands {
@@ -65,6 +69,12 @@ struct YawacApp: App {
             }
             CommandMenu("Find") {
                 FindCommands()
+            }
+            CommandGroup(replacing: .help) {
+                Button("Keyboard Shortcuts…") {
+                    showShortcuts = true
+                }
+                .keyboardShortcut("?", modifiers: .command)
             }
         }
 
