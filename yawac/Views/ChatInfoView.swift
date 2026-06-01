@@ -303,19 +303,19 @@ struct ChatInfoView: View {
                         }
                         .buttonStyle(.borderedProminent)
                         .disabled(nameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                                  || nameDraft == g.name)
+                                  || nameDraft == chat.name)
                     }
                 }
             } else {
                 HStack(alignment: .top) {
-                    Text(g.name)
+                    Text(chat.name)
                         .scaledUI(13)
                         .foregroundStyle(Theme.text)
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     if admin {
                         Button {
-                            nameDraft = g.name
+                            nameDraft = chat.name
                             editingName = true
                         } label: {
                             Image(systemName: "pencil")

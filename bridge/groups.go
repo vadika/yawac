@@ -178,7 +178,11 @@ func (c *Client) SetGroupName(chatJID, name string) error {
 }
 
 // SetGroupDescription changes the group description (WhatsApp "topic").
-// Empty `description` clears it. The server fans the change out as an
+// Empty `description` clears it. Uses whatsmeow's SetGroupTopic, which
+// auto-fetches the prior description ID and generates a new one — the
+// id/prev versioning attrs WhatsApp requires for description updates.
+// The simpler SetGroupDescription helper omits these and the server
+// silently drops the IQ. Server fans the change out as an
 // events.GroupInfo with a populated Topic field.
 func (c *Client) SetGroupDescription(chatJID, description string) error {
 	if c.wa == nil {
@@ -188,5 +192,5 @@ func (c *Client) SetGroupDescription(chatJID, description string) error {
 	if err != nil {
 		return fmt.Errorf("parse jid: %w", err)
 	}
-	return c.wa.SetGroupDescription(context.Background(), jid, description)
+	return c.wa.SetGroupTopic(context.Background(), jid, "", "", description)
 }
