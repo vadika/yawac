@@ -250,10 +250,20 @@ struct ChatInfoView: View {
 
     // ─── Group body ──────────────────────────────────────────────────
     private func isCurrentUserAdmin(_ g: BridgeGroupModel) -> Bool {
-        let ownJID = JIDNormalize.bare(session.client?.ownJID ?? "")
-        guard !ownJID.isEmpty else { return false }
+        let client = session.client
+        let rawOwn = client?.ownJID ?? ""
+        guard !rawOwn.isEmpty else { return false }
+        // Match across both LID and PN forms: the participant entry may
+        // carry an @lid JID while ownJID is the @s.whatsapp.net form (or
+        // vice versa) for the same physical person.
+        let ownBare = JIDNormalize.bare(rawOwn)
+        let ownCanon = JIDNormalize.canonical(rawOwn, client: client)
         return g.participants.contains { p in
-            JIDNormalize.bare(p.jid) == ownJID && (p.isAdmin || p.isSuper)
+            guard p.isAdmin || p.isSuper else { return false }
+            let pBare = JIDNormalize.bare(p.jid)
+            if pBare == ownBare || pBare == ownCanon { return true }
+            let pCanon = JIDNormalize.canonical(p.jid, client: client)
+            return pCanon == ownBare || pCanon == ownCanon
         }
     }
 
