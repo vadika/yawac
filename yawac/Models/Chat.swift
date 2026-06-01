@@ -16,6 +16,7 @@ struct Chat: Identifiable, Hashable {
     /// Server-synced archive (WhatsApp app-state). nil = not archived.
     var archivedAt: Date? = nil
     var mutedUntil: Date? = nil
+    var groupDescription: String? = nil
     var id: String { jid }
 }
 
