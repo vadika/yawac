@@ -128,6 +128,15 @@ struct ChatListView: View {
                                 count: pinnedVisible.count))
             for p in pinnedVisible {
                 out.append(.chat(p, indent: 0))
+                // A pinned community parent should still expose its
+                // joined sub-groups under it — otherwise users lose
+                // every channel in the community the moment they pin
+                // the parent.
+                if p.isCommunityParent {
+                    for sub in subsByParent[p.jid] ?? [] {
+                        out.append(.chat(sub, indent: 16))
+                    }
+                }
             }
         }
 
