@@ -990,6 +990,13 @@ final class ChatListViewModel {
                 try? context.save()
             }
         }
+        // Keep the session-level contactNames in sync so every surface
+        // that reads names via `session.displayName(for:)` — chat header,
+        // notifications, mention chips — sees the new name without a
+        // separate reconcile.
+        if let n = name, !n.isEmpty {
+            session?.setContactNameOverride(jid: chatJID, name: n)
+        }
     }
 
     /// Event-path equivalent. Last-event-wins (state values, not

@@ -131,6 +131,14 @@ final class SessionViewModel {
         for g in gs where !g.name.isEmpty { contactNames[g.jid] = g.name }
     }
 
+    /// Overwrites the recorded display name for `jid` (group rename
+    /// from inspector / phone). Stronger than `ingestPushName` —
+    /// unconditional replacement.
+    func setContactNameOverride(jid: String, name: String) {
+        guard !name.isEmpty else { return }
+        contactNames[JIDNormalize.bare(jid)] = name
+    }
+
     /// Records a sender's push-name (the name they set on their phone)
     /// against their JID. Lower priority than explicit contact names —
     /// only inserted when no other name is known.
