@@ -44,6 +44,7 @@ final class WAClient: PhoneValidating {
         case messageStarred(chatJID: String, messageID: String, senderJID: String, fromMe: Bool, starred: Bool, timestamp: Int64)
         case chatPinned(chatJID: String, pinned: Bool, timestamp: Int64)
         case chatMuted(chatJID: String, mutedUntilMs: Int64, timestamp: Int64)
+        case groupInfoChanged(chatJID: String, name: String, description: String, timestamp: Int64)
         case messagePinned(chatJID: String, targetMessageID: String, senderJID: String, pinned: Bool, timestamp: Int64)
         case chatArchived(chatJID: String, archived: Bool, timestamp: Int64)
         case chatDeleted(chatJID: String, timestamp: Int64)
@@ -273,6 +274,14 @@ final class WAClient: PhoneValidating {
                      lastTS: Int64, lastMsgID: String, fromMe: Bool) throws {
         try go.archiveChat(chatJID, archived: archived,
                            lastTS: lastTS, lastMsgID: lastMsgID, fromMe: fromMe)
+    }
+
+    func setGroupName(chatJID: String, name: String) throws {
+        try go.setGroupName(chatJID, name: name)
+    }
+
+    func setGroupDescription(chatJID: String, description: String) throws {
+        try go.setGroupDescription(chatJID, description: description)
     }
 
     func deleteChat(chatJID: String, lastTS: Int64,
@@ -671,6 +680,23 @@ final class WAClient: PhoneValidating {
                 return .chatMuted(chatJID: m.chatJID,
                                   mutedUntilMs: m.mutedUntilMs,
                                   timestamp: m.timestamp)
+            }
+        case "GroupInfoChanged":
+            struct G: Codable {
+                let chatJID: String
+                let name: String
+                let description: String
+                let timestamp: Int64
+                enum CodingKeys: String, CodingKey {
+                    case chatJID = "chat_jid"
+                    case name, description, timestamp
+                }
+            }
+            if let g = try? dec.decode(G.self, from: data) {
+                return .groupInfoChanged(chatJID: g.chatJID,
+                                         name: g.name,
+                                         description: g.description,
+                                         timestamp: g.timestamp)
             }
         case "MessagePinned":
             struct MP: Codable {
