@@ -767,6 +767,14 @@ struct ChatInfoView: View {
         do {
             let g = try client.getGroupInfo(jid: chatJID)
             self.group = g
+            // Reconcile chat-list row with the freshly-fetched group
+            // metadata. Phone-side renames + description edits arrive
+            // only via events.GroupInfo for live changes; cold-opens of
+            // the inspector are our other reliable sync point.
+            session.chatList?.applyLocalGroupInfo(
+                chatJID: chatJID,
+                name: g.name.isEmpty ? nil : g.name,
+                description: g.topic.isEmpty ? "" : g.topic)
             if g.isParent {
                 if let all = try? client.listGroups() {
                     self.linkedGroups = all.filter { $0.linkedParentJID == chatJID }
