@@ -22,7 +22,10 @@ relevant context lingers).
   `EphemeralMessage`; yawac must wrap explicitly).
 - ☐ **View-once** — enforce "viewed" state (whatsmeow returns full payload).
 - ☐ **GIF picker** (tenor / giphy).
-- ☐ **Mute chat** — `appstate.BuildMute` available, not wired in the UI.
+- ✅ **Mute chat** — 8h/1w/Always submenu in sidebar + header context
+  menus; bell-slash badge + dimmed unread chip; banner/dock/reaction
+  suppression; @-mention pierce; cross-device sync via events.Mute +
+  cold-start reconcile. Shipped post-v0.3.0.
 
 ## Search
 
