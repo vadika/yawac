@@ -36,8 +36,9 @@ relevant context lingers).
 
 ## Groups
 
-- ◐ **Group management** — create exists; missing: live participant
-  add/remove/promote/demote, edit name/topic/icon.
+- ◐ **Group management** — create + edit name + edit description
+  (admin-only) shipped in v0.4.0. Missing: live participant
+  add/remove/promote/demote, edit avatar.
 - ☐ **Invite link / QR** — generate.
 - ☐ **Group description**.
 - ✅ **Mention autocomplete** — strip above composer with participants +
@@ -59,7 +60,8 @@ relevant context lingers).
 - ☐ **Per-chat mute + notification customization**.
 - ☐ **Theme picker** (light / dark / auto; today: dark only).
 - ☐ **Per-chat wallpaper**.
-- ☐ **Keyboard-shortcut help sheet**.
+- ✅ **Keyboard-shortcut help sheet** — ⌘? opens a sheet listing
+  shortcuts in Compose / Find / Messages / App sections.
 - ☐ **Drafts saved per chat across restart**.
 
 ## Account / Privacy
