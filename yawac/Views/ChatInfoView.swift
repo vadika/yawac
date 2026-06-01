@@ -33,6 +33,10 @@ struct ChatInfoView: View {
     @State private var mediaVM: ChatMediaViewModel?
     @State private var confirmBlock = false
     @State private var confirmLeave = false
+    @State private var editingName: Bool = false
+    @State private var editingDescription: Bool = false
+    @State private var nameDraft: String = ""
+    @State private var descriptionDraft: String = ""
 
     private var isGroup: Bool { chatJID.hasSuffix("@g.us") }
     private var name: String { session.displayName(for: chatJID) }
@@ -245,14 +249,143 @@ struct ChatInfoView: View {
     }
 
     // ─── Group body ──────────────────────────────────────────────────
+    private func isCurrentUserAdmin(_ g: BridgeGroupModel) -> Bool {
+        let ownJID = JIDNormalize.bare(session.client?.ownJID ?? "")
+        guard !ownJID.isEmpty else { return false }
+        return g.participants.contains { p in
+            JIDNormalize.bare(p.jid) == ownJID && (p.isAdmin || p.isSuper)
+        }
+    }
+
     @ViewBuilder
     private func groupBody(_ g: BridgeGroupModel) -> some View {
-        if !g.topic.isEmpty {
-            sectionCard(label: "TOPIC") {
-                Text(g.topic)
-                    .scaledUI(13)
-                    .foregroundStyle(Theme.text)
-                    .textSelection(.enabled)
+        let admin = isCurrentUserAdmin(g)
+        let chat = session.chatList?.chats.first(where: { $0.jid == g.jid })
+            ?? Chat(jid: g.jid, name: g.name,
+                    lastMessage: "", lastTimestamp: 0, unread: 0)
+
+        // NAME
+        sectionCard(label: "NAME") {
+            if editingName {
+                VStack(alignment: .leading, spacing: 6) {
+                    TextField("Group name", text: $nameDraft)
+                        .textFieldStyle(.plain)
+                        .scaledUI(13)
+                        .foregroundStyle(Theme.text)
+                        .onChange(of: nameDraft) { _, new in
+                            if new.count > 100 {
+                                nameDraft = String(new.prefix(100))
+                            }
+                        }
+                    HStack {
+                        Text("\(nameDraft.count)/100")
+                            .scaledMono(10)
+                            .foregroundStyle(Theme.textFaint)
+                        Spacer()
+                        Button("Cancel") {
+                            editingName = false
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(Theme.textMuted)
+                        Button("Save") {
+                            session.chatList?.setGroupName(chat, to: nameDraft)
+                            editingName = false
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(nameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                  || nameDraft == g.name)
+                    }
+                }
+            } else {
+                HStack(alignment: .top) {
+                    Text(g.name)
+                        .scaledUI(13)
+                        .foregroundStyle(Theme.text)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    if admin {
+                        Button {
+                            nameDraft = g.name
+                            editingName = true
+                        } label: {
+                            Image(systemName: "pencil")
+                                .scaledIcon(11, weight: .semibold)
+                                .foregroundStyle(Theme.textMuted)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Edit name")
+                    }
+                }
+            }
+        }
+
+        // DESCRIPTION
+        sectionCard(label: "DESCRIPTION") {
+            if editingDescription {
+                VStack(alignment: .leading, spacing: 6) {
+                    TextField("Add a description",
+                              text: $descriptionDraft,
+                              axis: .vertical)
+                        .lineLimit(3...10)
+                        .textFieldStyle(.plain)
+                        .scaledUI(13)
+                        .foregroundStyle(Theme.text)
+                        .onChange(of: descriptionDraft) { _, new in
+                            if new.count > 512 {
+                                descriptionDraft = String(new.prefix(512))
+                            }
+                        }
+                    HStack {
+                        Text("\(descriptionDraft.count)/512")
+                            .scaledMono(10)
+                            .foregroundStyle(Theme.textFaint)
+                        Spacer()
+                        Button("Cancel") {
+                            editingDescription = false
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(Theme.textMuted)
+                        Button("Save") {
+                            session.chatList?.setGroupDescription(chat,
+                                to: descriptionDraft)
+                            editingDescription = false
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(descriptionDraft == (chat.groupDescription ?? ""))
+                    }
+                }
+            } else {
+                HStack(alignment: .top) {
+                    let desc = (chat.groupDescription ?? "").isEmpty
+                        ? nil
+                        : chat.groupDescription
+                    Group {
+                        if let d = desc {
+                            Text(Linkify.attributed(d))
+                                .scaledUI(13)
+                                .foregroundStyle(Theme.text)
+                                .textSelection(.enabled)
+                        } else {
+                            Text("No description")
+                                .scaledUI(13)
+                                .foregroundStyle(Theme.textFaint)
+                                .italic()
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    if admin {
+                        Button {
+                            descriptionDraft = chat.groupDescription ?? ""
+                            editingDescription = true
+                        } label: {
+                            Image(systemName: "pencil")
+                                .scaledIcon(11, weight: .semibold)
+                                .foregroundStyle(Theme.textMuted)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Edit description")
+                    }
+                }
             }
         }
 
