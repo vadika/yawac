@@ -25,6 +25,8 @@ A native macOS SwiftUI client backed by [tulir/whatsmeow](https://github.com/tul
 - Chat inspector: contact About text, starred messages, shared media grid, files list — click any item to jump to its message
 - **Message search** — in-chat ⌘F find bar with highlight + ↑/↓ nav, plus sectioned global search in the sidebar (`⌘K`) — Messages section shows ranked snippets, tap to jump
 - **@-mention autocomplete** — type `@` in any chat to pick a participant (or `@everyone` in groups); recipients see proper highlighted mentions + ping notifications
+- **Mute chats** — 8h / 1 week / Always submenu; bell-slash badge + dimmed unread; suppresses banner + dock badge + reaction notifications; @-mentions pierce mute; cross-device sync
+- **Edit group name + description** — admin-only inline-pencil edit from the chat inspector; URLs auto-linked; phone-side edits land via `events.GroupInfo`
 - **Interface size** — Small/Compact/Default/Large/X-Large multiplier in Settings (point-size scaling, since macOS skips Dynamic Type for custom fonts)
 - Locale-aware sidebar dates ("Yesterday", year on old dates, 12/24h per system)
 - Read receipts, typing indicators, presence
@@ -39,8 +41,8 @@ brew install --cask vadika/yawac/yawac
 ```
 
 Builds are ad-hoc signed; the cask strips the macOS quarantine flag
-automatically. Releases are cut from `vX.Y.Z` git tags (e.g. `git tag v0.3.0
-&& git push origin v0.3.0`).
+automatically. Releases are cut from `vX.Y.Z` git tags (e.g. `git tag v0.4.0
+&& git push origin v0.4.0`).
 
 Requires macOS 14 (Sonoma) or newer.
 
