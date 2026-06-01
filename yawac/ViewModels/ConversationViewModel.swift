@@ -2065,6 +2065,13 @@ final class ConversationViewModel {
         do {
             let info = try client.getGroupInfo(jid: chatJID)
             self.groupParticipants = info.participants
+            // Side-effect: keep chat-list's groupDescription in sync
+            // with the freshly-fetched group topic.
+            if !info.topic.isEmpty {
+                chatList?.applyLocalGroupInfo(chatJID: chatJID,
+                                              name: nil,
+                                              description: info.topic)
+            }
         } catch {
             self.groupParticipants = []
         }

@@ -212,7 +212,8 @@ final class ChatListViewModel {
                     isDefaultSubGroup: row.isDefaultSubGroup,
                     pinnedAt: row.pinnedAt,
                     archivedAt: row.archivedAt,
-                    mutedUntil: row.mutedUntil)
+                    mutedUntil: row.mutedUntil,
+                    groupDescription: row.groupDescription)
             }
             .filter { !isTombstoned($0.jid) }
             .sorted(by: Self.chatOrder)
@@ -688,6 +689,7 @@ final class ChatListViewModel {
             existing.pinnedAt = c.pinnedAt
             existing.archivedAt = c.archivedAt
             existing.mutedUntil = c.mutedUntil
+            existing.groupDescription = c.groupDescription
             if let preview { existing.lastMessageText = preview }
         } else {
             let row = PersistedChat(
@@ -701,7 +703,8 @@ final class ChatListViewModel {
                 isDefaultSubGroup: c.isDefaultSubGroup,
                 pinnedAt: c.pinnedAt,
                 archivedAt: c.archivedAt,
-                mutedUntil: c.mutedUntil)
+                mutedUntil: c.mutedUntil,
+                groupDescription: c.groupDescription)
             context.insert(row)
         }
         try? context.save()
@@ -921,6 +924,82 @@ final class ChatListViewModel {
             changed = true
         }
         if changed { sortChats() }
+    }
+
+    // MARK: - Group info (name + description)
+
+    /// Issues `SetGroupName` to the bridge + optimistic local apply.
+    func setGroupName(_ chat: Chat, to name: String) {
+        guard let client else { return }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        Task { @MainActor in
+            do {
+                try client.setGroupName(chatJID: chat.jid, name: trimmed)
+                self.applyLocalGroupInfo(chatJID: chat.jid,
+                                        name: trimmed,
+                                        description: nil)
+            } catch {
+                NSLog("[yawac/setGroupName] failed jid=%@ err=%@",
+                      chat.jid, String(describing: error))
+            }
+        }
+    }
+
+    /// Issues `SetGroupDescription` to the bridge + optimistic local apply.
+    /// Empty string clears the description on the server and stores nil
+    /// locally.
+    func setGroupDescription(_ chat: Chat, to description: String) {
+        guard let client else { return }
+        let trimmed = description.trimmingCharacters(in: .whitespacesAndNewlines)
+        Task { @MainActor in
+            do {
+                try client.setGroupDescription(chatJID: chat.jid,
+                                               description: trimmed)
+                self.applyLocalGroupInfo(chatJID: chat.jid,
+                                        name: nil,
+                                        description: trimmed)
+            } catch {
+                NSLog("[yawac/setGroupDescription] failed jid=%@ err=%@",
+                      chat.jid, String(describing: error))
+            }
+        }
+    }
+
+    /// Updates the `chats[]` entry and persists. `name == nil` leaves
+    /// name untouched. `description == nil` leaves description
+    /// untouched. Empty `description` ("" from an explicit clear) stores
+    /// `nil` locally so the placeholder renders.
+    func applyLocalGroupInfo(chatJID: String, name: String?, description: String?) {
+        if let idx = chats.firstIndex(where: { $0.jid == chatJID }) {
+            if let n = name, !n.isEmpty {
+                chats[idx].name = n
+            }
+            if let d = description {
+                chats[idx].groupDescription = d.isEmpty ? nil : d
+            }
+            upsertPersisted(chats[idx])
+        } else if let context {
+            let descriptor = FetchDescriptor<PersistedChat>(
+                predicate: #Predicate { $0.jid == chatJID })
+            if let row = try? context.fetch(descriptor).first {
+                if let n = name, !n.isEmpty { row.name = n }
+                if let d = description {
+                    row.groupDescription = d.isEmpty ? nil : d
+                }
+                try? context.save()
+            }
+        }
+    }
+
+    /// Event-path equivalent. Last-event-wins (state values, not
+    /// operation timestamps — same pattern as mute).
+    func applyIncomingGroupInfo(chatJID: String,
+                                name: String?,
+                                description: String?,
+                                at _: Date) {
+        applyLocalGroupInfo(chatJID: chatJID,
+                            name: name, description: description)
     }
 
     // MARK: - Archive / delete / contact
