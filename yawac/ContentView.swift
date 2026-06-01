@@ -186,6 +186,14 @@ struct ContentView: View {
                     vm.applyIncomingMute(chatJID: canonical,
                                          mutedUntil: mutedUntil,
                                          at: when)
+                case .groupInfoChanged(let chatJID, let name, let description, let ts):
+                    let canonical = JIDNormalize.canonical(chatJID, client: client)
+                    let when = Date(timeIntervalSince1970: TimeInterval(ts))
+                    vm.applyIncomingGroupInfo(
+                        chatJID: canonical,
+                        name:        name.isEmpty        ? nil : name,
+                        description: description.isEmpty ? nil : description,
+                        at: when)
                 case .messagePinned(let chatJID, let targetID, _, let pinned, let ts):
                     let when = Date(timeIntervalSince1970: TimeInterval(ts))
                     let canonical = JIDNormalize.canonical(chatJID, client: client)
