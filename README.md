@@ -27,6 +27,10 @@ A native macOS SwiftUI client backed by [tulir/whatsmeow](https://github.com/tul
 - **@-mention autocomplete** — type `@` in any chat to pick a participant (or `@everyone` in groups); recipients see proper highlighted mentions + ping notifications
 - **Mute chats** — 8h / 1 week / Always submenu; bell-slash badge + dimmed unread; suppresses banner + dock badge + reaction notifications; @-mentions pierce mute; cross-device sync
 - **Edit group name + description** — admin-only inline-pencil edit from the chat inspector; URLs auto-linked; phone-side edits land via `events.GroupInfo`
+- **Community sub-groups directory** — browse every group linked under a community from the inspector; best-effort Join chip (surfaces approval-pending state when the server queues the request)
+- **Per-chat drafts** — typed-but-unsent text persists across restarts, per chat
+- **Composer ergonomics** — ⌘V stages files / pasted screenshots as attachments; ⇧Return inserts a newline
+- **Keyboard shortcuts sheet** — ⌘? from the Help menu lists every shortcut
 - **Interface size** — Small/Compact/Default/Large/X-Large multiplier in Settings (point-size scaling, since macOS skips Dynamic Type for custom fonts)
 - Locale-aware sidebar dates ("Yesterday", year on old dates, 12/24h per system)
 - Read receipts, typing indicators, presence
@@ -41,8 +45,8 @@ brew install --cask vadika/yawac/yawac
 ```
 
 Builds are ad-hoc signed; the cask strips the macOS quarantine flag
-automatically. Releases are cut from `vX.Y.Z` git tags (e.g. `git tag v0.4.0
-&& git push origin v0.4.0`).
+automatically. Releases are cut from `vX.Y.Z` git tags (e.g. `git tag v0.5.0
+&& git push origin v0.5.0`).
 
 Requires macOS 14 (Sonoma) or newer.
 
