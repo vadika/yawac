@@ -830,6 +830,10 @@ struct ChatInfoView: View {
         guard let client = session.client else { return }
         loadingGroup = true
         defer { loadingGroup = false }
+        // Reset cross-chat state so a non-community group doesn't
+        // carry the previous chat's directory.
+        subGroups = []
+        joinStatusByJID = [:]
         do {
             let g = try client.getGroupInfo(jid: chatJID)
             self.group = g
