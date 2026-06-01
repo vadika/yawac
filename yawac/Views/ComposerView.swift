@@ -72,11 +72,13 @@ struct ComposerView: View {
     private func installPasteMonitor() {
         removePasteMonitor()
         pasteMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            // ⌘V only, no shift / option.
-            guard focused,
-                  event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-                    == .command,
-                  event.charactersIgnoringModifiers == "v" else {
+            // ⌘V (allow capslock; reject shift/option/control combos).
+            let flags = event.modifierFlags
+            guard flags.contains(.command),
+                  !flags.contains(.shift),
+                  !flags.contains(.option),
+                  !flags.contains(.control),
+                  event.charactersIgnoringModifiers?.lowercased() == "v" else {
                 return event
             }
             if pasteAttachmentsFromPasteboard() {
