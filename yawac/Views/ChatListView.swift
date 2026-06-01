@@ -20,7 +20,7 @@ struct ChatListView: View {
             case .all:         return "All"
             case .chats:       return "Direct"
             case .groups:      return "Groups"
-            case .communities: return "Channels"
+            case .communities: return "Communities"
             }
         }
         var icon: String {
@@ -132,7 +132,7 @@ struct ChatListView: View {
         }
 
         if (s == .all || s == .communities) && !communities.isEmpty {
-            out.append(.section(id: "channels", label: "Channels",
+            out.append(.section(id: "communities", label: "Communities",
                                 count: communities.count))
             for parent in communities {
                 out.append(.chat(parent, indent: 0))
