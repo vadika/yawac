@@ -1458,10 +1458,21 @@ final class ConversationViewModel {
     /// image / video keeps rendering from disk without re-download.
     private func persistOutgoingMedia(_ m: UIMessage, kind: String, localPath: String) {
         guard let context else { return }
+        // Mine caption + filename out of the UIMessage so the persisted
+        // row keeps them across reload. Earlier builds dropped both,
+        // surfacing a "Document" placeholder on reload.
+        var caption: String? = nil
+        var fileName: String? = nil
+        if case .media(_, let cap, let name, _) = m.body {
+            caption = cap
+            fileName = name
+        }
         let row = PersistedMessage(
             id: m.id, chatJID: m.chatJID, senderJID: m.senderJID,
             fromMe: m.fromMe, timestamp: m.timestamp, kind: kind, text: nil,
             mediaPath: localPath,
+            mediaCaption: caption,
+            mediaFileName: fileName,
             quotedMessageID: m.quotedMessageID,
             quotedSenderJID: m.quotedSenderJID,
             quotedFromMe: m.quotedFromMe,
