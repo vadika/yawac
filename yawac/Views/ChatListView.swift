@@ -8,6 +8,7 @@ struct ChatListView: View {
     @State private var archivedExpanded = false
     @State private var pendingDelete: Chat?
     @State private var pendingBlock: Chat?
+    @State private var communityInfoFor: Chat?
     @State private var contactEditing: Chat?
     @Binding var selection: Chat.ID?
     @AppStorage("yawac.chatListScope") private var scopeRaw: String = Scope.all.rawValue
@@ -323,6 +324,36 @@ struct ChatListView: View {
                 vm.addContact(chat, fullName: full, firstName: first)
             }
         }
+        .sheet(item: $communityInfoFor) { chat in
+            VStack(spacing: 0) {
+                HStack {
+                    Text("Community info")
+                        .scaledUI(15, weight: .semibold)
+                        .foregroundStyle(Theme.text)
+                    Spacer()
+                    Button {
+                        communityInfoFor = nil
+                    } label: {
+                        Image(systemName: "xmark")
+                            .scaledIcon(11, weight: .semibold)
+                            .foregroundStyle(Theme.textMuted)
+                    }
+                    .buttonStyle(.plain)
+                    .keyboardShortcut(.escape, modifiers: [])
+                }
+                .padding(.horizontal, 18)
+                .padding(.vertical, 14)
+                .background(Theme.bg)
+                .overlay(Rectangle().frame(height: 1)
+                            .foregroundStyle(Theme.border), alignment: .bottom)
+                ScrollView {
+                    ChatInfoView(chatJID: chat.jid)
+                        .environment(session)
+                }
+            }
+            .frame(width: 480, height: 640)
+            .background(Theme.bg)
+        }
         // Keep active search results in sync with any chat-list mutation —
         // adds/removes (count), and in-place updates (e.g. lastMessage flip
         // to a tombstone after a delete) which leave count unchanged.
@@ -405,6 +436,11 @@ struct ChatListView: View {
             }
             Button(chat.archivedAt != nil ? "Unarchive" : "Archive") {
                 vm.archiveChat(chat, archived: chat.archivedAt == nil)
+            }
+            if chat.isCommunityParent {
+                Button("Community info…") {
+                    communityInfoFor = chat
+                }
             }
             if !chat.isGroup && !chat.isCommunityParent {
                 Button(session.isSavedContact(chat.jid) ? "Edit name…" : "Add to contacts…") {
