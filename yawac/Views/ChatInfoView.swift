@@ -27,7 +27,8 @@ struct ChatInfoView: View {
     @State private var group: BridgeGroupModel?
     @State private var loadingGroup = false
     @State private var loadError: String?
-    @State private var linkedGroups: [BridgeGroupModel] = []
+    @State private var subGroups: [BridgeSubGroup] = []
+    @State private var joiningSubJID: String? = nil
     @State private var userAbout: String?
     @State private var loadingUserInfo = false
     @State private var mediaVM: ChatMediaViewModel?
@@ -425,11 +426,11 @@ struct ChatInfoView: View {
             }
         }
 
-        if g.isParent && !linkedGroups.isEmpty {
-            sectionLabel("LINKED GROUPS", trailing: "\(linkedGroups.count)")
+        if g.isParent && !subGroups.isEmpty {
+            sectionLabel("LINKED GROUPS", trailing: "\(subGroups.count)")
             VStack(spacing: 0) {
-                ForEach(linkedGroups, id: \.jid) { sub in
-                    linkedGroupRow(sub)
+                ForEach(subGroups, id: \.jid) { sub in
+                    subGroupRow(sub)
                     Rectangle().fill(Theme.hairline).frame(height: 1)
                 }
             }
@@ -664,38 +665,64 @@ struct ChatInfoView: View {
     }
 
     @ViewBuilder
-    private func linkedGroupRow(_ sub: BridgeGroupModel) -> some View {
-        Button {
-            session.requestSelectChat(sub.jid)
-        } label: {
-            HStack(spacing: 10) {
-                AvatarView(jid: sub.jid,
-                           name: sub.name.isEmpty
-                               ? session.displayName(for: sub.jid)
-                               : sub.name,
-                           size: 30)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(sub.name.isEmpty
-                         ? session.displayName(for: sub.jid)
-                         : sub.name)
-                        .scaledUI(13, weight: .medium)
-                        .foregroundStyle(Theme.text)
-                        .lineLimit(1)
-                    Text(sub.jid)
-                        .scaledMono(10.5)
-                        .foregroundStyle(Theme.textFaint)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
-                Spacer()
+    private func subGroupRow(_ sub: BridgeSubGroup) -> some View {
+        let joined = session.chatList?.chats.contains(where: { $0.jid == sub.jid }) ?? false
+        let displayName = sub.name.isEmpty
+            ? session.displayName(for: sub.jid)
+            : sub.name
+        HStack(spacing: 10) {
+            AvatarView(jid: sub.jid, name: displayName, size: 30)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(displayName)
+                    .scaledUI(13, weight: .medium)
+                    .foregroundStyle(joined ? Theme.text : Theme.textMuted)
+                    .lineLimit(1)
+                Text(sub.jid)
+                    .scaledMono(10.5)
+                    .foregroundStyle(Theme.textFaint)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            Spacer()
+            if joined {
                 Image(systemName: "arrow.right")
                     .scaledIcon(11, weight: .medium)
                     .foregroundStyle(Theme.textMuted)
+            } else if joiningSubJID == sub.jid {
+                ProgressView().controlSize(.small)
+            } else {
+                Button("Join") {
+                    Task { await join(sub: sub) }
+                }
+                .buttonStyle(.plain)
+                .scaledUI(11, weight: .semibold)
+                .foregroundStyle(Theme.accentText)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .background(Theme.accentSoft, in: Capsule())
             }
-            .padding(.vertical, 8)
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .padding(.vertical, 8)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            guard joined else { return }
+            session.requestSelectChat(sub.jid)
+        }
+    }
+
+    @MainActor
+    private func join(sub: BridgeSubGroup) async {
+        guard let client = session.client else { return }
+        joiningSubJID = sub.jid
+        defer { joiningSubJID = nil }
+        do {
+            _ = try client.joinSubGroup(subJID: sub.jid)
+            // Existing JoinedGroup ingest path will add the chat to
+            // session.chatList?.chats; the row's `joined` derives
+            // from that and flips automatically.
+        } catch {
+            loadError = "Couldn't join \(sub.name): \(error.localizedDescription)"
+        }
     }
 
     private struct StarredMessageRow: View {
@@ -776,8 +803,8 @@ struct ChatInfoView: View {
                 name: g.name.isEmpty ? nil : g.name,
                 description: g.topic.isEmpty ? "" : g.topic)
             if g.isParent {
-                if let all = try? client.listGroups() {
-                    self.linkedGroups = all.filter { $0.linkedParentJID == chatJID }
+                if let subs = try? client.listSubGroups(parentJID: chatJID) {
+                    self.subGroups = subs
                 }
             }
         } catch {

@@ -151,6 +151,68 @@ func (c *Client) CreateGroup(name string, participantJIDs string) (string, error
 	return info.JID.String(), nil
 }
 
+// JSubGroup mirrors whatsmeow's types.GroupLinkTarget — a community
+// parent's child entry. Carries name + JID + the default-sub flag, no
+// participants (cheap directory listing).
+type JSubGroup struct {
+	JID               string `json:"jid"`
+	Name              string `json:"name"`
+	IsDefaultSubGroup bool   `json:"is_default_sub_group"`
+}
+
+// ListSubGroups returns every group linked under `parentJID` — both ones
+// the user has joined and ones still available to join. Used by the
+// ChatInfoView's parent inspector to render the full directory of a
+// community.
+func (c *Client) ListSubGroups(parentJID string) (string, error) {
+	if c.wa == nil {
+		return "", errors.New("client closed")
+	}
+	parent, err := types.ParseJID(parentJID)
+	if err != nil {
+		return "", fmt.Errorf("parse parent: %w", err)
+	}
+	targets, err := c.wa.GetSubGroups(context.Background(), parent)
+	if err != nil {
+		return "", fmt.Errorf("get sub groups: %w", err)
+	}
+	out := make([]JSubGroup, 0, len(targets))
+	for _, t := range targets {
+		out = append(out, JSubGroup{
+			JID:               t.JID.String(),
+			Name:              t.GroupName.Name,
+			IsDefaultSubGroup: t.GroupIsDefaultSub.IsDefaultSubGroup,
+		})
+	}
+	b, _ := json.Marshal(out)
+	return string(b), nil
+}
+
+// JoinSubGroup is a best-effort community member join: fetches the
+// sub-group's invite link (works for the user if the server treats
+// community membership as inviter-equivalent) and joins via the
+// returned code. Returns the joined JID on success. Surfaces the
+// underlying error (forbidden / not-in-community) verbatim on failure
+// so the UI can decide what to show.
+func (c *Client) JoinSubGroup(subJID string) (string, error) {
+	if c.wa == nil {
+		return "", errors.New("client closed")
+	}
+	jid, err := types.ParseJID(subJID)
+	if err != nil {
+		return "", fmt.Errorf("parse sub: %w", err)
+	}
+	link, err := c.wa.GetGroupInviteLink(context.Background(), jid, false)
+	if err != nil {
+		return "", fmt.Errorf("get invite link: %w", err)
+	}
+	joined, err := c.wa.JoinGroupWithLink(context.Background(), link)
+	if err != nil {
+		return "", fmt.Errorf("join: %w", err)
+	}
+	return joined.String(), nil
+}
+
 // LeaveGroup removes the current user from the group `jidStr`.
 func (c *Client) LeaveGroup(jidStr string) error {
 	if c.wa == nil {

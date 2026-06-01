@@ -438,6 +438,26 @@ final class WAClient: PhoneValidating {
         return try JSONDecoder().decode(BridgeGroupModel.self, from: Data(json.utf8))
     }
 
+    /// Returns every sub-group linked under `parentJID` (a community
+    /// parent), joined or not. Cheap directory listing.
+    func listSubGroups(parentJID: String) throws -> [BridgeSubGroup] {
+        var err: NSError?
+        let json = go.listSubGroups(parentJID, error: &err)
+        if let err { throw err }
+        return try JSONDecoder().decode([BridgeSubGroup].self, from: Data(json.utf8))
+    }
+
+    /// Best-effort community-member self-join: fetches the sub-group's
+    /// invite link and joins via the returned code. Returns the joined
+    /// JID. Throws the bridge error (forbidden / not-in-community)
+    /// verbatim when the server rejects the call.
+    func joinSubGroup(subJID: String) throws -> String {
+        var err: NSError?
+        let result = go.joinSubGroup(subJID, error: &err)
+        if let err { throw err }
+        return result
+    }
+
     func listContacts() throws -> [BridgeContact] {
         var err: NSError?
         let json = go.listContacts(&err)

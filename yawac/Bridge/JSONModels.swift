@@ -204,6 +204,19 @@ struct BridgeParticipantModel: Codable {
     }
 }
 
+/// Lightweight community sub-group entry — name + JID + default flag.
+/// Used by the ChatInfoView parent inspector to render every group
+/// linked under a community, joined or not.
+struct BridgeSubGroup: Codable {
+    let jid: String
+    let name: String
+    let isDefaultSubGroup: Bool
+    enum CodingKeys: String, CodingKey {
+        case jid, name
+        case isDefaultSubGroup = "is_default_sub_group"
+    }
+}
+
 struct BridgeReaction: Codable {
     let chatJID: String
     let targetMessageID: String
