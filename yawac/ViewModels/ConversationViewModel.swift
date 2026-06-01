@@ -15,7 +15,9 @@ struct PendingAttachment: Identifiable, Equatable {
 final class ConversationViewModel {
     let chatJID: String
     var messages: [UIMessage] = []
-    var draft: String = ""
+    var draft: String = "" {
+        didSet { scheduleDraftSave() }
+    }
     var peerTyping: Bool = false
     var receiptStatus: [String: UIMessage.Status] = [:]
     var localPaths: [String: String] = [:]
@@ -415,6 +417,7 @@ final class ConversationViewModel {
     func loadHistory() {
         guard let context else { return }
         let jid = chatJID
+        restoreDraftIfNeeded()
         // One-shot migration: earlier builds persisted some rows with raw
         // (device-suffixed / @lid) chatJID via CVM.persist. Scrub anything
         // whose canonical form matches this chat back to canonical so the
@@ -1993,6 +1996,51 @@ final class ConversationViewModel {
         case .delivered: return 1
         case .played:    return 2
         case .read:      return 3
+        }
+    }
+
+    // MARK: - Draft persistence
+
+    private var draftSaveTask: Task<Void, Never>?
+
+    /// Debounced PersistedChat.draft write triggered by every `draft`
+    /// mutation. Coalesces rapid typing into a single SwiftData save
+    /// after the user pauses for 500 ms. Send / saveEdit set `draft = ""`,
+    /// which lands here too and persists `nil` (cleared).
+    private func scheduleDraftSave() {
+        draftSaveTask?.cancel()
+        let snapshot = draft
+        draftSaveTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(500))
+            guard let self, !Task.isCancelled else { return }
+            self.persistDraft(snapshot)
+        }
+    }
+
+    private func persistDraft(_ text: String) {
+        guard let context else { return }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let value: String? = trimmed.isEmpty ? nil : text
+        let jid = chatJID
+        let descriptor = FetchDescriptor<PersistedChat>(
+            predicate: #Predicate { $0.jid == jid })
+        guard let row = try? context.fetch(descriptor).first,
+              row.draft != value else { return }
+        row.draft = value
+        try? context.save()
+    }
+
+    /// Called from loadHistory once the chat opens. Pulls the persisted
+    /// draft into `vm.draft` so the composer fills in immediately.
+    /// Idempotent — re-entry during refreshes is harmless.
+    func restoreDraftIfNeeded() {
+        guard draft.isEmpty, let context else { return }
+        let jid = chatJID
+        let descriptor = FetchDescriptor<PersistedChat>(
+            predicate: #Predicate { $0.jid == jid })
+        if let row = try? context.fetch(descriptor).first,
+           let saved = row.draft, !saved.isEmpty {
+            draft = saved
         }
     }
 

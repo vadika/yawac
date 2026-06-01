@@ -167,6 +167,10 @@ final class PersistedChat {
     var archivedAt: Date? = nil
     var mutedUntil: Date? = nil
     var groupDescription: String? = nil
+    /// Composer text typed-but-unsent for this chat, persisted so a
+    /// restart keeps the draft. Local to this device — WhatsApp drafts
+    /// are not synced cross-device.
+    var draft: String? = nil
 
     init(jid: String, name: String,
          lastMessageText: String? = nil,
@@ -177,7 +181,8 @@ final class PersistedChat {
          pinnedAt: Date? = nil,
          archivedAt: Date? = nil,
          mutedUntil: Date? = nil,
-         groupDescription: String? = nil) {
+         groupDescription: String? = nil,
+         draft: String? = nil) {
         self.jid = jid
         self.name = name
         self.lastMessageText = lastMessageText
@@ -190,6 +195,7 @@ final class PersistedChat {
         self.archivedAt = archivedAt
         self.mutedUntil = mutedUntil
         self.groupDescription = groupDescription
+        self.draft = draft
     }
 }
 
