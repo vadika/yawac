@@ -133,6 +133,13 @@ type JChatMuted struct {
 	Timestamp    int64  `json:"timestamp"`
 }
 
+type JGroupInfoChanged struct {
+	ChatJID     string `json:"chat_jid"`
+	Name        string `json:"name"`        // empty = unchanged this event
+	Description string `json:"description"` // empty = unchanged this event
+	Timestamp   int64  `json:"timestamp"`
+}
+
 type JChatDeleted struct {
 	ChatJID   string `json:"chat_jid"`
 	Timestamp int64  `json:"timestamp"`

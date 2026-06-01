@@ -146,6 +146,69 @@ func TestContactJSON(t *testing.T) {
 	}
 }
 
+func TestGroupInfoNameOnlyJSON(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/gn.db")
+	defer c.Close()
+	sink := newRecSink()
+	c.SetEventSink(sink)
+	jid := types.JID{User: "111", Server: types.GroupServer}
+	c.dispatchGroupInfo(&events.GroupInfo{
+		JID:       jid,
+		Timestamp: time.Unix(1700000000, 0),
+		Name:      &types.GroupName{Name: "New Name"},
+	})
+	e := sink.wait(t, "GroupInfoChanged", time.Second)
+	var j JGroupInfoChanged
+	if err := json.Unmarshal([]byte(e.payload), &j); err != nil {
+		t.Fatal(err)
+	}
+	if j.Name != "New Name" || j.Description != "" {
+		t.Errorf("got %+v", j)
+	}
+}
+
+func TestGroupInfoTopicOnlyJSON(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/gt.db")
+	defer c.Close()
+	sink := newRecSink()
+	c.SetEventSink(sink)
+	jid := types.JID{User: "111", Server: types.GroupServer}
+	c.dispatchGroupInfo(&events.GroupInfo{
+		JID:       jid,
+		Timestamp: time.Unix(1700000000, 0),
+		Topic:     &types.GroupTopic{Topic: "New description"},
+	})
+	e := sink.wait(t, "GroupInfoChanged", time.Second)
+	var j JGroupInfoChanged
+	if err := json.Unmarshal([]byte(e.payload), &j); err != nil {
+		t.Fatal(err)
+	}
+	if j.Description != "New description" || j.Name != "" {
+		t.Errorf("got %+v", j)
+	}
+}
+
+func TestGroupInfoNeitherSkipsDispatch(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/gz.db")
+	defer c.Close()
+	sink := newRecSink()
+	c.SetEventSink(sink)
+	jid := types.JID{User: "111", Server: types.GroupServer}
+	c.dispatchGroupInfo(&events.GroupInfo{
+		JID:       jid,
+		Timestamp: time.Unix(1700000000, 0),
+	})
+	// No dispatch expected. dispatch is async (a goroutine in c.dispatch),
+	// so give it a brief grace period before asserting silence.
+	time.Sleep(50 * time.Millisecond)
+	sink.mu.Lock()
+	n := len(sink.events)
+	sink.mu.Unlock()
+	if n != 0 {
+		t.Fatalf("unexpected dispatch: %+v", sink.events)
+	}
+}
+
 func TestBlocklistJSON(t *testing.T) {
 	c, _ := NewClient(t.TempDir() + "/bl.db")
 	defer c.Close()

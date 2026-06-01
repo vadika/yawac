@@ -70,6 +70,8 @@ func (c *Client) handleWAEvent(evt any) {
 		c.dispatchArchive(v)
 	case *events.Mute:
 		c.dispatchMute(v)
+	case *events.GroupInfo:
+		c.dispatchGroupInfo(v)
 	case *events.DeleteChat:
 		c.dispatchDeleteChat(v)
 	case *events.Contact:
@@ -218,6 +220,34 @@ func (c *Client) dispatchMute(evt *events.Mute) {
 		Timestamp:    evt.Timestamp.Unix(),
 	})
 	c.dispatch("ChatMuted", string(b))
+}
+
+// dispatchGroupInfo surfaces app-level group metadata changes
+// (name + description). Other GroupInfo fields (locked, announce,
+// ephemeral, membership-approval, participant changes) are ignored
+// here — they belong on separate handlers. When neither name nor
+// description carried a value in this event, we don't dispatch.
+func (c *Client) dispatchGroupInfo(evt *events.GroupInfo) {
+	var name, description string
+	if evt.Name != nil {
+		name = evt.Name.Name
+	}
+	if evt.Topic != nil {
+		description = evt.Topic.Topic
+	}
+	if name == "" && description == "" {
+		return
+	}
+	fmt.Fprintf(os.Stderr,
+		"[yawac/groupInfo] dispatch jid=%s name=%q desc_len=%d\n",
+		evt.JID.String(), name, len(description))
+	b, _ := json.Marshal(JGroupInfoChanged{
+		ChatJID:     evt.JID.String(),
+		Name:        name,
+		Description: description,
+		Timestamp:   evt.Timestamp.Unix(),
+	})
+	c.dispatch("GroupInfoChanged", string(b))
 }
 
 // dispatchDeleteChat surfaces app-state delete-chat events (a conversation
