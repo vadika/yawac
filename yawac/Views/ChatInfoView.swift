@@ -722,12 +722,15 @@ struct ChatInfoView: View {
         defer { joiningSubJID = nil }
         do {
             let joinedJID = try client.joinSubGroup(subJID: sub.jid)
-            // No events.JoinedGroup handler yet — fetch the group
-            // record explicitly and feed it through the same merge
-            // path the cold-start groups dump uses. Flips the row's
-            // "Joined" badge + makes it appear in the sidebar.
+            // JoinGroupWithLink returns a JID for both immediate joins
+            // AND pending-approval requests; whatsmeow swallows the
+            // distinction. Probe via getGroupInfo — succeeds only when
+            // the user is actually a member. Failure here means the
+            // join is queued behind an admin approval.
             if let info = try? client.getGroupInfo(jid: joinedJID) {
                 session.chatList?.mergeGroups([info])
+            } else {
+                loadError = "Request sent for \(sub.name) — waiting for an admin to approve"
             }
         } catch {
             loadError = "Couldn't join \(sub.name): \(error.localizedDescription)"
