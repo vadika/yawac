@@ -30,6 +30,7 @@ struct ComposerView: View {
     @FocusState private var focused: Bool
     @State private var recorder = VoiceRecorder()
     @State private var wantsCancel = false
+    @State private var pasteMonitor: Any?
 
     var body: some View {
         VStack(spacing: 8) {
@@ -56,6 +57,60 @@ struct ComposerView: View {
         .onChange(of: vm.replyTarget?.id) { _, new in
             if new != nil { focused = true }
         }
+        .onAppear { installPasteMonitor() }
+        .onDisappear { removePasteMonitor() }
+    }
+
+    /// Local NSEvent monitor watching for ⌘V while the composer is
+    /// alive. Necessary because SwiftUI's `.onPasteCommand` on a
+    /// TextField never fires — the TextField consumes the paste at
+    /// the NSResponder level first, inserting the pasteboard's text
+    /// representation (e.g. the file's path string). Intercepting at
+    /// the window's local key-down lets us check the pasteboard
+    /// ourselves and stage attachments when the payload is a file URL
+    /// or image bitmap. Plain text paste falls through unchanged.
+    private func installPasteMonitor() {
+        removePasteMonitor()
+        pasteMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            // ⌘V only, no shift / option.
+            guard focused,
+                  event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+                    == .command,
+                  event.charactersIgnoringModifiers == "v" else {
+                return event
+            }
+            if pasteAttachmentsFromPasteboard() {
+                return nil    // consumed; default paste suppressed
+            }
+            return event      // not a file/image — let TextField paste text
+        }
+    }
+
+    private func removePasteMonitor() {
+        if let m = pasteMonitor {
+            NSEvent.removeMonitor(m)
+            pasteMonitor = nil
+        }
+    }
+
+    /// Inspects the general pasteboard for file URLs or image bitmaps
+    /// and stages them through `vm.stageAttachment`. Returns true when
+    /// it consumed at least one item.
+    @discardableResult
+    private func pasteAttachmentsFromPasteboard() -> Bool {
+        let pb = NSPasteboard.general
+        if let urls = pb.readObjects(forClasses: [NSURL.self], options: nil) as? [URL],
+           !urls.isEmpty {
+            for url in urls { vm.stageAttachment(at: url) }
+            return true
+        }
+        if let images = pb.readObjects(forClasses: [NSImage.self], options: nil) as? [NSImage],
+           let first = images.first,
+           let url = ComposerView.saveImageToTemp(first) {
+            vm.stageAttachment(at: url)
+            return true
+        }
+        return false
     }
 
     private var draftIsEmpty: Bool {
@@ -136,9 +191,6 @@ struct ComposerView: View {
                     vm.picker.update(text: new)
                 }
                 .onSubmit { send() }
-                .onPasteCommand(of: [UTType.fileURL, UTType.image]) { providers in
-                    handlePasted(providers)
-                }
                 .onKeyPress(.tab) {
                     guard vm.picker.isActive else { return .ignored }
                     if let pick = vm.picker.commitSelected() {
@@ -356,25 +408,6 @@ struct ComposerView: View {
         }
     }
 
-    /// `.onPasteCommand` handler: stages file URLs / image bitmaps from
-    /// the pasteboard as composer attachments. NSItemProvider loaders are
-    /// async; staging hops to the main actor on completion.
-    private func handlePasted(_ providers: [NSItemProvider]) {
-        for provider in providers {
-            if provider.canLoadObject(ofClass: URL.self) {
-                _ = provider.loadObject(ofClass: URL.self) { url, _ in
-                    guard let url else { return }
-                    Task { @MainActor in vm.stageAttachment(at: url) }
-                }
-            } else if provider.canLoadObject(ofClass: NSImage.self) {
-                _ = provider.loadObject(ofClass: NSImage.self) { obj, _ in
-                    guard let img = obj as? NSImage,
-                          let url = ComposerView.saveImageToTemp(img) else { return }
-                    Task { @MainActor in vm.stageAttachment(at: url) }
-                }
-            }
-        }
-    }
 
     // ─── Staged-attachment preview strip ─────────────────────────────
     @ViewBuilder
