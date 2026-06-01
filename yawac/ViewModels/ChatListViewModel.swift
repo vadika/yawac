@@ -868,13 +868,10 @@ final class ChatListViewModel {
         sortChats()
     }
 
-    /// Apply a mute change that arrived via `events.Mute`.
-    /// LWW: ignore when our local `mutedUntil` is newer than `at`.
-    func applyIncomingMute(chatJID: String, mutedUntil: Date?, at: Date) {
-        if let existing = chats.first(where: { $0.jid == chatJID })?.mutedUntil,
-           existing > at {
-            return
-        }
+    /// Apply a mute change that arrived via `events.Mute`. Last-event-wins
+    /// for this state — `mutedUntil` is a state value (end-of-mute), not
+    /// an operation timestamp, so no time-based reconciliation against it.
+    func applyIncomingMute(chatJID: String, mutedUntil: Date?, at _: Date) {
         applyLocalMute(chatJID: chatJID, mutedUntil: mutedUntil)
     }
 
