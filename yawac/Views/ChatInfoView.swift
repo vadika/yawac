@@ -29,6 +29,21 @@ struct ChatInfoView: View {
     @State private var loadError: String?
     @State private var subGroups: [BridgeSubGroup] = []
     @State private var joiningSubJID: String? = nil
+
+    enum JoinStatus: Equatable {
+        case pending(String)   // "Request sent…"
+        case error(String)     // "Couldn't join…"
+        var text: String {
+            switch self {
+            case .pending(let s), .error(let s): return s
+            }
+        }
+        var isError: Bool {
+            if case .error = self { return true }
+            return false
+        }
+    }
+    @State private var joinStatusByJID: [String: JoinStatus] = [:]
     @State private var userAbout: String?
     @State private var loadingUserInfo = false
     @State private var mediaVM: ChatMediaViewModel?
@@ -675,6 +690,7 @@ struct ChatInfoView: View {
         let displayName = sub.name.isEmpty
             ? session.displayName(for: sub.jid)
             : sub.name
+        let status = joinStatusByJID[sub.jid]
         HStack(spacing: 10) {
             AvatarView(jid: sub.jid, name: displayName, size: 30)
             VStack(alignment: .leading, spacing: 2) {
@@ -682,11 +698,20 @@ struct ChatInfoView: View {
                     .scaledUI(13, weight: .medium)
                     .foregroundStyle(joined ? Theme.text : Theme.textMuted)
                     .lineLimit(1)
-                Text(sub.jid)
-                    .scaledMono(10.5)
-                    .foregroundStyle(Theme.textFaint)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+                if let status {
+                    Text(status.text)
+                        .scaledUI(11)
+                        .foregroundStyle(status.isError
+                                         ? Color.red.opacity(0.85)
+                                         : Theme.accentText)
+                        .lineLimit(2)
+                } else {
+                    Text(sub.jid)
+                        .scaledMono(10.5)
+                        .foregroundStyle(Theme.textFaint)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
             }
             Spacer()
             if joined {
@@ -719,21 +744,23 @@ struct ChatInfoView: View {
     private func join(sub: BridgeSubGroup) async {
         guard let client = session.client else { return }
         joiningSubJID = sub.jid
+        joinStatusByJID[sub.jid] = nil
         defer { joiningSubJID = nil }
         do {
             let joinedJID = try client.joinSubGroup(subJID: sub.jid)
-            // JoinGroupWithLink returns a JID for both immediate joins
-            // AND pending-approval requests; whatsmeow swallows the
-            // distinction. Probe via getGroupInfo — succeeds only when
-            // the user is actually a member. Failure here means the
-            // join is queued behind an admin approval.
+            // JoinGroupWithLink returns a JID for both instant-join
+            // AND pending-approval; whatsmeow swallows the distinction.
+            // Probe via getGroupInfo — succeeds only when the user is
+            // actually a member.
             if let info = try? client.getGroupInfo(jid: joinedJID) {
                 session.chatList?.mergeGroups([info])
             } else {
-                loadError = "Request sent for \(sub.name) — waiting for an admin to approve"
+                joinStatusByJID[sub.jid] =
+                    .pending("Request sent — waiting for admin approval")
             }
         } catch {
-            loadError = "Couldn't join \(sub.name): \(error.localizedDescription)"
+            joinStatusByJID[sub.jid] =
+                .error(error.localizedDescription)
         }
     }
 
