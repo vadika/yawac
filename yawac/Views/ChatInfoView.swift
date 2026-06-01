@@ -426,10 +426,15 @@ struct ChatInfoView: View {
             }
         }
 
-        if g.isParent && !subGroups.isEmpty {
-            sectionLabel("LINKED GROUPS", trailing: "\(subGroups.count)")
+        // Surface community sibling groups whenever there's a parent —
+        // either we ARE the parent, or we're a sub-group with a known
+        // parent. Skip the current chat (no self-row in its own list).
+        let directory = subGroups.filter { $0.jid != chatJID }
+        if !directory.isEmpty {
+            let label = g.isParent ? "LINKED GROUPS" : "COMMUNITY GROUPS"
+            sectionLabel(label, trailing: "\(directory.count)")
             VStack(spacing: 0) {
-                ForEach(subGroups, id: \.jid) { sub in
+                ForEach(directory, id: \.jid) { sub in
                     subGroupRow(sub)
                     Rectangle().fill(Theme.hairline).frame(height: 1)
                 }
@@ -802,10 +807,17 @@ struct ChatInfoView: View {
                 chatJID: chatJID,
                 name: g.name.isEmpty ? nil : g.name,
                 description: g.topic.isEmpty ? "" : g.topic)
-            if g.isParent {
-                if let subs = try? client.listSubGroups(parentJID: chatJID) {
-                    self.subGroups = subs
-                }
+            // Populate the sub-groups directory whether the user is
+            // viewing the community parent OR a sub-group of one. The
+            // parent can't be opened as a chat (default-sub redirect),
+            // so the announce / sub-group inspector is the practical
+            // entry point for browsing siblings.
+            let parentForDirectory: String? = g.isParent
+                ? chatJID
+                : g.linkedParentJID
+            if let parent = parentForDirectory, !parent.isEmpty,
+               let subs = try? client.listSubGroups(parentJID: parent) {
+                self.subGroups = subs
             }
         } catch {
             self.loadError = error.localizedDescription
