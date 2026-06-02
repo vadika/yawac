@@ -520,6 +520,83 @@ class WAClient: PhoneValidating, LIDResolving {
         return out
     }
 
+    /// Creates a new community parent group. The server auto-creates the
+    /// default announcements sub-group, whose JID arrives via a JoinedGroup
+    /// event shortly after. Returns the parent's JID.
+    func createCommunity(name: String) throws -> String {
+        var err: NSError?
+        let out = go.createCommunity(name, error: &err)
+        if let err { throw err }
+        return out
+    }
+
+    /// Creates a new sub-group inside the community parent identified by
+    /// `parentJID`. Caller must be admin of the parent (server enforces).
+    /// Returns the new sub-group's JID.
+    func createSubGroup(parentJID: String,
+                        name: String,
+                        participantJIDs: [String]) throws -> String {
+        let jids = try JSONEncoder().encode(participantJIDs)
+        let jidsString = String(data: jids, encoding: .utf8) ?? "[]"
+        var err: NSError?
+        let out = go.createSubGroup(parentJID,
+                                    name: name,
+                                    participantJIDsJSON: jidsString,
+                                    error: &err)
+        if let err { throw err }
+        return out
+    }
+
+    /// Attaches a child group to a community parent. Both JIDs must be
+    /// admin-controlled. Surfaces whatsmeow errors verbatim.
+    nonisolated func linkSubGroup(parentJID: String, subJID: String) throws {
+        try go.linkSubGroup(parentJID, subJIDStr: subJID)
+    }
+
+    /// Detaches a child from its parent community. Swift gates against
+    /// isDefaultSubGroup; server accepts the IQ even on the default
+    /// sub-group but it breaks the community.
+    nonisolated func unlinkSubGroup(parentJID: String, subJID: String) throws {
+        try go.unlinkSubGroup(parentJID, subJIDStr: subJID)
+    }
+
+    /// Returns the pending join-request queue for `chatJID`. Empty array
+    /// when the queue is empty or approval-mode is off (the two are
+    /// indistinguishable at this layer — consult
+    /// `BridgeGroupModel.joinApprovalMode` for the mode flag).
+    func getGroupJoinRequests(chatJID: String) throws -> [BridgeJoinRequest] {
+        var err: NSError?
+        let json = go.getGroupJoinRequests(chatJID, error: &err)
+        if let err { throw err }
+        return try JSONDecoder().decode([BridgeJoinRequest].self,
+                                        from: Data(json.utf8))
+    }
+
+    /// Applies "approve" or "reject" to a batch of pending join requests.
+    /// Per-row failures populate `errorCode` on the returned rows; the
+    /// outer error is reserved for fatal cases (network / unauthorized /
+    /// group missing).
+    func updateGroupJoinRequests(chatJID: String,
+                                 action: String,
+                                 jids: [String]) throws -> [BridgeJoinRequestResult] {
+        let encoded = try JSONEncoder().encode(jids)
+        let jidsString = String(data: encoded, encoding: .utf8) ?? "[]"
+        var err: NSError?
+        let json = go.updateGroupJoinRequests(chatJID,
+                                              action: action,
+                                              participantJIDsJSON: jidsString,
+                                              error: &err)
+        if let err { throw err }
+        return try JSONDecoder().decode([BridgeJoinRequestResult].self,
+                                        from: Data(json.utf8))
+    }
+
+    /// Flips the require-admin-approval gate on a group on or off.
+    /// Admin only.
+    nonisolated func setGroupJoinApprovalMode(chatJID: String, on: Bool) throws {
+        try go.setGroupJoinApprovalMode(chatJID, on: on)
+    }
+
     nonisolated func leaveGroup(jid: String) throws {
         try go.leaveGroup(jid)
     }
