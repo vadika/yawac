@@ -58,6 +58,11 @@ final class ConversationViewModel {
     /// Forward selection mode. `forwardSelection` holds the chosen message ids.
     var forwardSelecting = false
     var forwardSelection: Set<String> = []
+
+    /// Drives the PollComposerView modal sheet. Toggled by the composer's
+    /// "+" menu and by Cancel / on-success inside the sheet.
+    var showPollComposer: Bool = false
+
     /// Inbound message ids that still owe a read receipt — populated
     /// from `PersistedChat.unread` (last-N inbound rows) at history
     /// load and from `ingest` on the fly. `markVisibleAsRead` drains
