@@ -214,6 +214,11 @@ struct ContentView: View {
                     vm.applyIncomingContact(jid: canonical, fullName: fullName)
                 case .blocklistChanged(let action, let changes):
                     session.applyBlocklistChange(action: action, changes: changes)
+                case .groupParticipantsChanged(let chatJID, let action, _, let jids, let ts):
+                    let when = Date(timeIntervalSince1970: TimeInterval(ts))
+                    let canonical = JIDNormalize.canonical(chatJID, client: client)
+                    vm.applyGroupParticipantsChange(
+                        chatJID: canonical, action: action, jids: jids, at: when)
                 default:
                     break
                 }
