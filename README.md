@@ -6,37 +6,39 @@ A native macOS SwiftUI client backed by [tulir/whatsmeow](https://github.com/tul
 
 ## Features
 
-- QR-based device pairing (multi-device protocol)
-- Text, image, and file messaging — 1:1 and groups
-- Drag-and-drop / multi-select attachments — staged with previews + a caption before sending
-- Push-and-hold voice notes (Opus/PTT, slide-up to cancel)
-- Reactions, reply / quote, edit, revoke, delete-for-me
-- Forward messages (single or multi-select) to another chat
-- Star messages (⌘S) — synced via appstate
-- Pin chats — pinned section at the top of the sidebar
-- Pin messages in chat — banner above the conversation, jump on tap
-- Add to contacts / edit name — synced to the phone address book
-- Archive chats (collapsible Archived section) and delete chats — synced; deletes stay deleted across restarts
-- Block / unblock contacts — blocked banner, sidebar indicator, Settings list
-- Leave groups
-- Right-click message menu with quick-reaction strip; sidebar + conversation-header action menus
-- Shortcuts: double-click to edit/reply, ↑ to recall last own message
+**Messaging**
+- Text, images, files, and voice notes (Opus/PTT, push-and-hold, slide to cancel) — 1:1 and groups
+- Drag-and-drop, multi-select, or `⌘V` to stage attachments with previews + caption before sending
+- Reactions, reply, edit, revoke, delete-for-me, forward (single or multi-select), star
+- `@`-mention autocomplete (and `@everyone` in groups) — recipients see proper mentions + ping notifications
 - On-device translation (Apple Translation framework)
-- Chat inspector: contact About text, starred messages, shared media grid, files list — click any item to jump to its message
-- **Message search** — in-chat ⌘F find bar with highlight + ↑/↓ nav, plus sectioned global search in the sidebar (`⌘K`) — Messages section shows ranked snippets, tap to jump
-- **@-mention autocomplete** — type `@` in any chat to pick a participant (or `@everyone` in groups); recipients see proper highlighted mentions + ping notifications
-- **Mute chats** — 8h / 1 week / Always submenu; bell-slash badge + dimmed unread; suppresses banner + dock badge + reaction notifications; @-mentions pierce mute; cross-device sync
-- **Edit group name + description** — admin-only inline-pencil edit from the chat inspector; URLs auto-linked; phone-side edits land via `events.GroupInfo`
-- **Group management** — admins can add (from contacts or by phone), remove, promote, and demote members from the chat inspector; edit the group photo with a crop sheet; share or revoke the public invite link with a QR code. ⌘K also recognises pasted `chat.whatsapp.com` / `wa.me` links and offers a one-tap join.
-- **Community sub-groups directory** — browse every group linked under a community from the inspector; best-effort Join chip (surfaces approval-pending state when the server queues the request)
-- **Per-chat drafts** — typed-but-unsent text persists across restarts, per chat
-- **Composer ergonomics** — ⌘V stages files / pasted screenshots as attachments; ⇧Return inserts a newline
-- **Keyboard shortcuts sheet** — ⌘? from the Help menu lists every shortcut
-- **Interface size** — Small/Compact/Default/Large/X-Large multiplier in Settings (point-size scaling, since macOS skips Dynamic Type for custom fonts)
+
+**Chats**
+- Pin chats (sidebar section) and pin messages in chat (jump-on-tap banner)
+- Mute (8h / 1 week / Always; bell-slash badge; suppresses banner + dock badge + reactions; `@`-mentions pierce mute)
+- Archive, delete, block / unblock — synced via appstate; deletes survive restarts
+- Add to contacts and edit names — synced to the phone address book
+- Per-chat drafts persist across restarts
 - Locale-aware sidebar dates ("Yesterday", year on old dates, 12/24h per system)
+
+**Groups & Communities**
+- Edit group name, description, and photo (with pan/zoom crop sheet) — admin-gated, cross-device sync
+- Live participant management — add (from contacts or by `+phone`), remove, promote, demote
+- Public invite link with QR — copy, share, admin-only revoke with cooldown
+- `⌘K` recognises pasted `chat.whatsapp.com` / `wa.me` links and offers one-tap join (with pending-approval state)
+- Community sub-groups directory — browse every group linked under a community; best-effort Join
+
+**Search & navigation**
+- In-chat `⌘F` find bar with highlight + ↑/↓ navigation
+- Sidebar `⌘K` — chats, messages (FTS5 ranked snippets, tap to jump), and invite-link previews
+- Chat inspector — About text, starred messages, shared media grid, files list (tap any to jump)
+
+**Platform**
+- QR-based pairing (multi-device protocol); history sync; macOS native notifications + dock badge
 - Read receipts, typing indicators, presence
-- Peer-device sync (edits / delete-for-me / star / pin) via appstate + SecretEncrypted
-- History sync, macOS native notifications
+- Peer-device sync (edits, delete-for-me, star, pin, mute) via appstate
+- Interface size scaling (Small → X-Large) for custom fonts
+- Keyboard shortcuts sheet (`⌘?` from the Help menu)
 
 ## Install via Homebrew
 
