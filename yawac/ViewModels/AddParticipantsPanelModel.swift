@@ -33,6 +33,10 @@ final class AddParticipantsPanelModel {
     /// Avoids running `localizedCaseInsensitiveContains` against full
     /// contact lists (~10K+ entries) on every keystroke.
     private let haystack: [String]
+    /// Digits-only JID user part, parallel to `allContacts`. Used so a
+    /// partial phone-number query (`+358 50`) hits existing contacts
+    /// before the user types the full number.
+    private let jidDigits: [String]
     private let validator: PhoneValidating
     private var debounceTask: Task<Void, Never>? = nil
     private static let maxSuggestionsShown = 80
@@ -49,6 +53,7 @@ final class AddParticipantsPanelModel {
             }
             return s
         }
+        self.jidDigits = allContacts.map { Self.digitsOnly($0.jid) }
         self.validator = validator
         refreshSuggestions()
     }
@@ -146,6 +151,7 @@ final class AddParticipantsPanelModel {
     private func refreshSuggestions() {
         let normalized = query.trimmingCharacters(in: .whitespacesAndNewlines)
                               .lowercased()
+        let queryDigits = Self.digitsOnly(query)
         let chipJIDs = Set(chips.map(\.jid))
         var out: [BridgeContact] = []
         out.reserveCapacity(Self.maxSuggestionsShown)
@@ -153,8 +159,12 @@ final class AddParticipantsPanelModel {
             let c = allContacts[i]
             if existingParticipantJIDs.contains(c.jid) { continue }
             if chipJIDs.contains(c.jid) { continue }
-            if !normalized.isEmpty && !haystack[i].contains(normalized) {
-                continue
+            if !normalized.isEmpty || !queryDigits.isEmpty {
+                let nameHit = !normalized.isEmpty
+                    && haystack[i].contains(normalized)
+                let digitHit = !queryDigits.isEmpty
+                    && jidDigits[i].contains(queryDigits)
+                if !nameHit && !digitHit { continue }
             }
             out.append(c)
             if out.count >= Self.maxSuggestionsShown { break }
