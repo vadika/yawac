@@ -589,3 +589,65 @@ func (c *Client) GetGroupJoinRequests(chatJIDStr string) (string, error) {
 	b, _ := json.Marshal(out)
 	return string(b), nil
 }
+
+// JJoinRequestResult is one row of the UpdateGroupJoinRequests response.
+type JJoinRequestResult struct {
+	JID       string `json:"jid"`
+	ErrorCode int    `json:"error_code,omitempty"`
+}
+
+func joinRequestChangeFromString(s string) (whatsmeow.ParticipantRequestChange, error) {
+	switch s {
+	case "approve":
+		return whatsmeow.ParticipantChangeApprove, nil
+	case "reject":
+		return whatsmeow.ParticipantChangeReject, nil
+	}
+	return "", fmt.Errorf("invalid action %q (want approve|reject)", s)
+}
+
+// UpdateGroupJoinRequests applies "approve" or "reject" to a JSON
+// []string batch. Returns JSON []JJoinRequestResult. Per-row failures
+// populate ErrorCode; outer error is reserved for fatal cases
+// (network / unauthorized / group missing).
+func (c *Client) UpdateGroupJoinRequests(
+	chatJIDStr, action, participantJIDsJSON string,
+) (string, error) {
+	if c.wa == nil {
+		return "", errors.New("client closed")
+	}
+	change, err := joinRequestChangeFromString(action)
+	if err != nil {
+		return "", err
+	}
+	jid, err := types.ParseJID(chatJIDStr)
+	if err != nil {
+		return "", fmt.Errorf("parse jid: %w", err)
+	}
+	var jids []string
+	if err := json.Unmarshal([]byte(participantJIDsJSON), &jids); err != nil {
+		return "", fmt.Errorf("parse participants: %w", err)
+	}
+	parsed := make([]types.JID, 0, len(jids))
+	for _, s := range jids {
+		j, err := types.ParseJID(s)
+		if err != nil {
+			return "", fmt.Errorf("parse %q: %w", s, err)
+		}
+		parsed = append(parsed, j)
+	}
+	results, err := c.wa.UpdateGroupRequestParticipants(
+		context.Background(), jid, parsed, change)
+	if err != nil {
+		return "", fmt.Errorf("update join requests: %w", err)
+	}
+	out := make([]JJoinRequestResult, 0, len(results))
+	for _, r := range results {
+		out = append(out, JJoinRequestResult{
+			JID:       r.JID.String(),
+			ErrorCode: r.Error,
+		})
+	}
+	b, _ := json.Marshal(out)
+	return string(b), nil
+}

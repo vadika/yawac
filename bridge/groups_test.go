@@ -233,3 +233,56 @@ func TestJJoinRequestJSONShape(t *testing.T) {
 		t.Fatalf("JSON mismatch:\ngot:  %s\nwant: %s", got, want)
 	}
 }
+
+func TestJoinRequestChangeFromString(t *testing.T) {
+	cases := []struct {
+		in   string
+		want whatsmeow.ParticipantRequestChange
+		ok   bool
+	}{
+		{"approve", whatsmeow.ParticipantChangeApprove, true},
+		{"reject", whatsmeow.ParticipantChangeReject, true},
+		{"banish", "", false},
+		{"", "", false},
+	}
+	for _, c := range cases {
+		got, err := joinRequestChangeFromString(c.in)
+		if c.ok && (err != nil || got != c.want) {
+			t.Fatalf("%q: got (%q,%v) want (%q,nil)", c.in, got, err, c.want)
+		}
+		if !c.ok && err == nil {
+			t.Fatalf("%q: expected error, got nil", c.in)
+		}
+	}
+}
+
+func TestUpdateGroupJoinRequestsUnpaired(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/ujr.db")
+	defer c.Close()
+	_, err := c.UpdateGroupJoinRequests(
+		"1234@g.us", "approve",
+		`["1111@s.whatsapp.net"]`)
+	if err == nil {
+		t.Fatal("expected error on unpaired client")
+	}
+}
+
+func TestUpdateGroupJoinRequestsInvalidAction(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/ujr2.db")
+	defer c.Close()
+	_, err := c.UpdateGroupJoinRequests(
+		"1234@g.us", "banish",
+		`["1111@s.whatsapp.net"]`)
+	if err == nil {
+		t.Fatal("expected error for invalid action")
+	}
+}
+
+func TestJJoinRequestResultJSONShape(t *testing.T) {
+	in := JJoinRequestResult{JID: "1@s.whatsapp.net", ErrorCode: 403}
+	b, _ := json.Marshal(in)
+	want := `{"jid":"1@s.whatsapp.net","error_code":403}`
+	if string(b) != want {
+		t.Fatalf("got %s want %s", b, want)
+	}
+}
