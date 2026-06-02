@@ -230,3 +230,99 @@ func TestBlocklistJSON(t *testing.T) {
 		t.Fatalf("bad blocklist: %+v", j)
 	}
 }
+
+func TestDispatchGroupParticipantsAddOnly(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/gp1.db")
+	defer c.Close()
+	sink := newRecSink()
+	c.SetEventSink(sink)
+	chat, _ := types.ParseJID("123@g.us")
+	sender, _ := types.ParseJID("999@s.whatsapp.net")
+	j1, _ := types.ParseJID("1@s.whatsapp.net")
+	j2, _ := types.ParseJID("2@s.whatsapp.net")
+	c.dispatchGroupParticipants(&events.GroupInfo{
+		JID:       chat,
+		Sender:    &sender,
+		Join:      []types.JID{j1, j2},
+		Timestamp: time.Unix(100, 0),
+	})
+	e := sink.wait(t, "GroupParticipantsChanged", time.Second)
+	var jp JGroupParticipantsChanged
+	if err := json.Unmarshal([]byte(e.payload), &jp); err != nil {
+		t.Fatal(err)
+	}
+	if jp.Action != "add" || len(jp.JIDs) != 2 ||
+		jp.ChatJID != "123@g.us" || jp.ActorJID != "999@s.whatsapp.net" ||
+		jp.Timestamp != 100 {
+		t.Fatalf("bad payload: %+v", jp)
+	}
+}
+
+func TestDispatchGroupParticipantsAllFourActions(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/gp2.db")
+	defer c.Close()
+	sink := newRecSink()
+	c.SetEventSink(sink)
+	chat, _ := types.ParseJID("123@g.us")
+	j1, _ := types.ParseJID("1@s.whatsapp.net")
+	c.dispatchGroupParticipants(&events.GroupInfo{
+		JID:       chat,
+		Join:      []types.JID{j1},
+		Leave:     []types.JID{j1},
+		Promote:   []types.JID{j1},
+		Demote:    []types.JID{j1},
+		Timestamp: time.Unix(7, 0),
+	})
+	actions := map[string]bool{}
+	for i := 0; i < 4; i++ {
+		e := sink.wait(t, "GroupParticipantsChanged", time.Second)
+		var jp JGroupParticipantsChanged
+		if err := json.Unmarshal([]byte(e.payload), &jp); err != nil {
+			t.Fatal(err)
+		}
+		actions[jp.Action] = true
+	}
+	for _, k := range []string{"add", "remove", "promote", "demote"} {
+		if !actions[k] {
+			t.Fatalf("missing action %q in %v", k, actions)
+		}
+	}
+}
+
+func TestDispatchGroupParticipantsNoSender(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/gp3.db")
+	defer c.Close()
+	sink := newRecSink()
+	c.SetEventSink(sink)
+	chat, _ := types.ParseJID("123@g.us")
+	j1, _ := types.ParseJID("1@s.whatsapp.net")
+	c.dispatchGroupParticipants(&events.GroupInfo{
+		JID:       chat,
+		Join:      []types.JID{j1},
+		Timestamp: time.Unix(1, 0),
+	})
+	e := sink.wait(t, "GroupParticipantsChanged", time.Second)
+	var jp JGroupParticipantsChanged
+	if err := json.Unmarshal([]byte(e.payload), &jp); err != nil {
+		t.Fatal(err)
+	}
+	if jp.ActorJID != "" {
+		t.Fatalf("expected empty ActorJID, got %q", jp.ActorJID)
+	}
+}
+
+func TestDispatchGroupParticipantsEmptyAllNoEvents(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/gp4.db")
+	defer c.Close()
+	sink := newRecSink()
+	c.SetEventSink(sink)
+	chat, _ := types.ParseJID("123@g.us")
+	c.dispatchGroupParticipants(&events.GroupInfo{
+		JID: chat, Timestamp: time.Unix(1, 0),
+	})
+	select {
+	case e := <-sink.ch:
+		t.Fatalf("expected no events, got %+v", e)
+	case <-time.After(100 * time.Millisecond):
+	}
+}

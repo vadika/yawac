@@ -32,8 +32,10 @@ func (r *recSink) wait(t *testing.T, kind string, d time.Duration) recEvent {
 		select {
 		case <-r.ch:
 			r.mu.Lock()
-			for _, e := range r.events {
+			for i, e := range r.events {
 				if e.kind == kind {
+					// Remove the returned event so subsequent calls don't return it again
+					r.events = append(r.events[:i], r.events[i+1:]...)
 					r.mu.Unlock()
 					return e
 				}

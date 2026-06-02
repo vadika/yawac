@@ -72,6 +72,7 @@ func (c *Client) handleWAEvent(evt any) {
 		c.dispatchMute(v)
 	case *events.GroupInfo:
 		c.dispatchGroupInfo(v)
+		c.dispatchGroupParticipants(v)
 	case *events.DeleteChat:
 		c.dispatchDeleteChat(v)
 	case *events.Contact:
@@ -291,4 +292,39 @@ func (c *Client) dispatchBlocklist(evt *events.Blocklist) {
 		Changes: changes,
 	})
 	c.dispatch("BlocklistChanged", string(b))
+}
+
+// dispatchGroupParticipants splits a single events.GroupInfo into up to
+// four GroupParticipantsChanged events, one per non-empty Join / Leave
+// / Promote / Demote slice. Skips emit when every slice is empty. Sender
+// JID populates ActorJID; missing sender → "".
+func (c *Client) dispatchGroupParticipants(evt *events.GroupInfo) {
+	fan := []struct {
+		action string
+		jids   []types.JID
+	}{
+		{"add", evt.Join}, {"remove", evt.Leave},
+		{"promote", evt.Promote}, {"demote", evt.Demote},
+	}
+	actor := ""
+	if evt.Sender != nil {
+		actor = evt.Sender.String()
+	}
+	for _, f := range fan {
+		if len(f.jids) == 0 {
+			continue
+		}
+		out := make([]string, len(f.jids))
+		for i, j := range f.jids {
+			out[i] = j.String()
+		}
+		b, _ := json.Marshal(JGroupParticipantsChanged{
+			ChatJID:   evt.JID.String(),
+			Action:    f.action,
+			ActorJID:  actor,
+			JIDs:      out,
+			Timestamp: evt.Timestamp.Unix(),
+		})
+		c.dispatch("GroupParticipantsChanged", string(b))
+	}
 }
