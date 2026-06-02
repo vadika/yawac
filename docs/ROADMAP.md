@@ -12,8 +12,10 @@ relevant context lingers).
 
 - ☐ **Status / Stories** — view + post (whatsmeow supports).
 - ☐ **Calls** — voice/video. Out of scope (companion-device limit).
-- ☐ **Polls — create** (voting already works); whatsmeow `BuildPollCreation`
-  exists with the documented `selectableOptionCount` clamp gotcha.
+- ✅ **Polls — create** — composer paperclip menu opens a sheet
+  (question + 2–12 options + multi-select toggle); bridge wraps
+  `BuildPollCreation` + `SendMessage`; optimistic bubble + persistence
+  via existing `PersistedMessage.pollJSON`. Shipped 2026-06-02.
 - ◐ **Stickers** — incoming render works; need pack browsing + send from
   pack.
 - ☐ **Location sharing** — current + live.
