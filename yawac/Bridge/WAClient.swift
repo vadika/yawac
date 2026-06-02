@@ -23,7 +23,7 @@ protocol PhoneValidating: AnyObject {
 }
 
 @MainActor
-final class WAClient: PhoneValidating {
+final class WAClient: PhoneValidating, LIDResolving {
     enum Event {
         case qr(String)
         case pairSuccess
@@ -392,6 +392,17 @@ final class WAClient: PhoneValidating {
     nonisolated func resolveLIDToPN(_ jid: String) -> String {
         var err: NSError?
         let result = go.resolveLID(toPN: jid, error: &err)
+        if err != nil || result.isEmpty { return jid }
+        return result
+    }
+
+    /// Reverse direction: resolves a `@s.whatsapp.net` JID to its `@lid`
+    /// form via the same local map. Returns the input unchanged when no
+    /// mapping is known. Used by JIDNormalize.same to establish identity
+    /// equality regardless of which namespace each side happens to be in.
+    nonisolated func resolvePNToLID(_ jid: String) -> String {
+        var err: NSError?
+        let result = go.resolvePN(toLID: jid, error: &err)
         if err != nil || result.isEmpty { return jid }
         return result
     }
