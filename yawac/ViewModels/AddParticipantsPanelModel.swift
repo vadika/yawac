@@ -29,14 +29,26 @@ final class AddParticipantsPanelModel {
 
     private let existingParticipantJIDs: Set<String>
     private let allContacts: [BridgeContact]
+    /// Pre-lowercased haystack per contact, parallel to `allContacts`.
+    /// Avoids running `localizedCaseInsensitiveContains` against full
+    /// contact lists (~10K+ entries) on every keystroke.
+    private let haystack: [String]
     private let validator: PhoneValidating
     private var debounceTask: Task<Void, Never>? = nil
+    private static let maxSuggestionsShown = 80
 
     init(existingParticipantJIDs: Set<String>,
          allContacts: [BridgeContact],
          validator: PhoneValidating) {
         self.existingParticipantJIDs = existingParticipantJIDs
         self.allContacts = allContacts
+        self.haystack = allContacts.map { c in
+            var s = c.name.lowercased()
+            if let f = c.fullName, !f.isEmpty {
+                s += "\n" + f.lowercased()
+            }
+            return s
+        }
         self.validator = validator
         refreshSuggestions()
     }
@@ -135,13 +147,19 @@ final class AddParticipantsPanelModel {
         let normalized = query.trimmingCharacters(in: .whitespacesAndNewlines)
                               .lowercased()
         let chipJIDs = Set(chips.map(\.jid))
-        suggestions = allContacts.filter { c in
-            if existingParticipantJIDs.contains(c.jid) { return false }
-            if chipJIDs.contains(c.jid) { return false }
-            if normalized.isEmpty { return true }
-            return c.name.localizedCaseInsensitiveContains(normalized)
-                || c.fullName?.localizedCaseInsensitiveContains(normalized) == true
+        var out: [BridgeContact] = []
+        out.reserveCapacity(Self.maxSuggestionsShown)
+        for i in allContacts.indices {
+            let c = allContacts[i]
+            if existingParticipantJIDs.contains(c.jid) { continue }
+            if chipJIDs.contains(c.jid) { continue }
+            if !normalized.isEmpty && !haystack[i].contains(normalized) {
+                continue
+            }
+            out.append(c)
+            if out.count >= Self.maxSuggestionsShown { break }
         }
+        suggestions = out
     }
 
     static func looksLikePhone(_ s: String) -> Bool {

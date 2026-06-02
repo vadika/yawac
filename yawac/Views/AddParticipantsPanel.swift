@@ -59,7 +59,7 @@ struct AddParticipantsPanel: View {
     @ViewBuilder
     private var suggestionsRow: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
+            LazyVStack(alignment: .leading, spacing: 0) {
                 if let candidate = model.phoneCandidate {
                     Button {
                         model.addPhoneCandidate()
