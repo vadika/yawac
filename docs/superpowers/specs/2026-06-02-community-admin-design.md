@@ -2,37 +2,53 @@
 
 **Date:** 2026-06-02
 **Status:** Approved (design)
-**Topic:** Community admin actions — link/unlink sub-groups, toggle
-membership-approval mode, review pending join requests. Surfaced
-from `ChatInfoView` for community parents (link/unlink) and
-sub-groups (approval-mode toggle + request queue) with a sidebar
-chip on chat rows that have pending requests. Builds on the group
-management plumbing landed 2026-06-02 (live participant management,
-invite links, paste-to-join).
+**Topic:** Community admin actions — create new group, create new
+community, create new sub-group inside a community, link/unlink
+existing sub-groups, toggle membership-approval mode, review pending
+join requests. Creation surfaces from a sidebar "+" menu (plain
+group + community) and from the community parent's `ChatInfoView`
+LINKED GROUPS section (new sub-group). Admin actions surface from
+`ChatInfoView` for community parents (link/unlink) and sub-groups
+(approval-mode toggle + request queue), with a sidebar chip on chat
+rows that have pending requests. Builds on the group management
+plumbing landed 2026-06-02 (live participant management, invite
+links, paste-to-join).
 
 ## Goal
 
-The Communities surface in yawac today is read-only. Users can
-browse the linked sub-group directory of a community parent and
-join sub-groups via invite link, but admins cannot:
+The group / community surface in yawac today is read-only-plus-edit.
+Users can browse the linked sub-group directory of a community
+parent and join sub-groups via invite link, and admins can edit
+existing groups (name, description, avatar, participants, invite
+link). What is missing on every level:
 
-- Attach new groups to a community parent (`LinkGroup`).
+- **Creation.** `bridge.CreateGroup(name, participantJIDs)` exists
+  but has no UI caller, and only handles plain groups — community
+  parents (`IsParent=true`) and sub-groups of a community
+  (`LinkedParentJID=<jid>`) are not exposed at all.
+- Attach existing groups to a community parent (`LinkGroup`).
 - Detach a sub-group from its parent (`UnlinkGroup`).
 - Toggle a sub-group's "require admin approval to join"
   (`SetGroupJoinApprovalMode`).
 - See or act on pending join requests
   (`GetGroupRequestParticipants` / `UpdateGroupRequestParticipants`).
 
-Wire the whatsmeow primitives behind those operations so an admin
-drives community structure and moderation from the desktop. Surface
-the pending-request count in the sidebar so admins notice without
-opening the chat.
+Wire the whatsmeow primitives behind those operations so a user
+can stand up a new group / community / sub-group from the desktop
+and an admin can drive structure + moderation without falling back
+to the phone. Surface the pending-request count in the sidebar so
+admins notice without opening the chat.
 
 ## Non-goals
 
-- Creating a community parent group from scratch
-  (`CreateGroup` with `LinkedParentJID="@newcommunity"`). Separate
-  flow, scope later.
+- Setting group avatar / description / approval-mode / disappearing
+  default at creation time. All of those are post-creation edits
+  using already-shipped flows.
+- Inviting non-contact `+phone` numbers during creation. The
+  AddParticipantsPanel pattern (phone resolver + `AddRequest`
+  privacy fallback) already exists; for v0.7.0 the create sheets
+  pick from contacts only and use the existing
+  participant-management UI for any post-creation phone adds.
 - Editing a community description distinct from the parent group's
   description (single field today).
 - Per-request justification text from the joining user — rendered as
@@ -43,32 +59,43 @@ opening the chat.
   `JIDNormalize.canonical` already does.
 - Approval-mode UI for plain non-community groups. The toggle works
   there too; we expose it only inside community sub-groups for
-  v0.6.0 scope clarity. Revisit in a follow-up if asked.
+  v0.7.0 scope clarity. Revisit in a follow-up if asked.
 
 ## Architecture
 
 Three subsystems share one spine; mirrors the prior group-management
 spec (`docs/superpowers/specs/2026-06-02-group-management-design.md`).
 
-1. **Bridge writes** — five new gomobile-bindable Go functions in
-   `bridge/groups.go`: link sub-group, unlink sub-group, get join
-   requests, update join requests, set approval mode.
+1. **Bridge writes** — seven new gomobile-bindable Go functions in
+   `bridge/groups.go`: create community, create sub-group, link
+   sub-group, unlink sub-group, get join requests, update join
+   requests, set approval mode. (Existing `CreateGroup` for plain
+   groups is reused — has a Swift wrapper, just needs UI.)
 2. **Bridge events** — extend `dispatchGroupInfo` to fan out a new
    `JoinApprovalModeChanged` event when
    `events.GroupInfo.MembershipApprovalMode` is non-nil, and to
    carry `linked_parent_jid` / `is_default_subgroup` in the
    `GroupInfoChanged` payload (today only name + description).
-3. **Swift UI** — three new views (`LinkSubGroupSheet`,
-   `PendingRequestsSection`, sidebar pending chip) and one new
-   state object (`JoinRequestStore`) inside `ChatInfoView` and
-   `ChatListView`.
+   Creation paths surface in the sidebar via the existing
+   `JoinedGroup` event (already wired) — no new event needed.
+3. **Swift UI** — six new views (`NewGroupSheet`,
+   `NewCommunitySheet`, `NewSubGroupSheet`, `LinkSubGroupSheet`,
+   `PendingRequestsSection`, sidebar pending chip), one sidebar
+   "+" header button + menu, and one new state object
+   (`JoinRequestStore`) inside `ChatInfoView` and `ChatListView`.
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
+│ Sidebar header ("+" button → menu)                           │
+│ ├─ New group…       → NewGroupSheet                          │
+│ └─ New community…   → NewCommunitySheet                      │
+│                                                               │
 │ ChatInfoView (community parent OR sub-group, admin gating)   │
 │                                                               │
 │ Parent view:                                                  │
-│ ├─ LINKED GROUPS section → "+ Link group" → LinkSubGroupSheet │
+│ ├─ LINKED GROUPS section header "+" menu (admin only):        │
+│ │    "Link existing group…"  → LinkSubGroupSheet              │
+│ │    "Create new sub-group…" → NewSubGroupSheet               │
 │ │   → existing subgroup rows: ctx menu "Unlink"               │
 │ │     (hidden when isDefaultSubGroup)                         │
 │                                                               │
@@ -83,7 +110,8 @@ spec (`docs/superpowers/specs/2026-06-02-group-management-design.md`).
               │ WAClient wrappers
               ▼
 ┌──────────────────────────────────────────────────────────────┐
-│ bridge/groups.go — 5 new gomobile funcs                      │
+│ bridge/groups.go — 7 new + 1 reused gomobile funcs            │
+│   CreateGroup (reused) · CreateCommunity · CreateSubGroup     │
 │   LinkSubGroup · UnlinkSubGroup                               │
 │   GetGroupJoinRequests · UpdateGroupJoinRequests              │
 │   SetGroupJoinApprovalMode                                    │
@@ -93,6 +121,7 @@ spec (`docs/superpowers/specs/2026-06-02-group-management-design.md`).
 └──────────────────────────────────────────────────────────────┘
               │ whatsmeow
               ▼
+   CreateGroup (with IsParent / LinkedParentJID flags) /
    LinkGroup / UnlinkGroup / GetGroupRequestParticipants /
    UpdateGroupRequestParticipants / SetGroupJoinApprovalMode
 ```
@@ -123,10 +152,29 @@ stays under ~700 lines after additions; no split.
 
 ### Bridge (Go)
 
-`bridge/groups.go` gains five exported methods. All gomobile-friendly
-types: `string`, `int64`, `bool`, JSON strings for arrays.
+`bridge/groups.go` gains seven exported methods (two creation, two
+linking, three approval). All gomobile-friendly types: `string`,
+`int64`, `bool`, JSON strings for arrays. Existing
+`CreateGroup(name, participantJIDsJSON)` is reused for plain-group
+creation — wrapper exists in Swift already; only UI to add.
 
 ```go
+// CreateCommunity creates a new community parent group with the
+// given display name. Whatsmeow server auto-creates the default
+// announcements sub-group; its JID arrives via a JoinedGroup event
+// shortly after. Returns the parent's JID string. Server enforces
+// the 25-char Name limit (406 not_acceptable on overflow).
+func (c *Client) CreateCommunity(name string) (string, error)
+
+// CreateSubGroup creates a new group inside the community parent
+// identified by parentJIDStr, optionally pre-populating participants.
+// participantJIDsJSON is a JSON []string (may be "[]"). Returns the
+// new sub-group's JID. Caller must be admin of the parent (server
+// enforces; surfaces ErrNotAuthorized verbatim).
+func (c *Client) CreateSubGroup(
+    parentJIDStr, name, participantJIDsJSON string,
+) (string, error)
+
 // LinkSubGroup attaches a child group to a community parent. Both
 // JIDs must be admin-controlled (server enforces). Surfaces
 // ErrGroupNotFound / ErrNotAuthorized / ErrGroupParent verbatim.
@@ -225,9 +273,15 @@ extended `GroupInfoChanged` already carries.
 
 ### Swift bridge (WAClient)
 
-Five new wrappers in `yawac/Bridge/WAClient.swift`:
+Seven new wrappers in `yawac/Bridge/WAClient.swift` (the existing
+`createGroup(name:participantJIDs:)` wrapper is kept and gets its
+first UI caller):
 
 ```swift
+func createCommunity(name: String) throws -> String
+func createSubGroup(parentJID: String, name: String,
+                    participantJIDs: [String]) throws -> String
+
 nonisolated func linkSubGroup(parentJID: String, subJID: String) throws
 nonisolated func unlinkSubGroup(parentJID: String, subJID: String) throws
 
@@ -266,11 +320,121 @@ already populated) and from the extended `GroupInfoChanged` payload.
 
 ### Swift views
 
+#### Sidebar "+" header button
+
+`ChatListView` already renders a 64pt `WindowDragHandle` gutter
+above the search row. The "+" button slots into the existing
+search-row trailing edge (replaces nothing; just an additional
+button before the `⌘K` hint or aligned right of the field).
+Glyph: `plus.circle`. Tap opens an `NSMenu`-style menu:
+
+```
+┌─────────────────────────┐
+│  New group…             │
+│  New community…         │
+└─────────────────────────┘
+```
+
+Both rows present their respective sheet on tap. No "New chat" row
+in this menu — chat creation is the implicit default of typing a
+contact name into the existing search field, no change there.
+
+#### `Views/NewGroupSheet.swift` — new
+
+Modal sheet for creating a plain (non-community) group.
+
+```
+┌── New group ──────────────────────────────────────────┐
+│  Name: [Climbing Crew___________________]   23 / 25   │
+│                                                       │
+│  ┌─────────────────────────────────────────────────┐  │
+│  │ [Anna Berg ×] [Dana Park ×] | …                 │  │  ← chip row + search
+│  ├─────────────────────────────────────────────────┤  │
+│  │ SUGGESTIONS                                      │  │
+│  │ Carlos Romero                                    │  │
+│  │ — scroll for more —                              │  │
+│  └─────────────────────────────────────────────────┘  │
+│                                                       │
+│                       [ Cancel ]   [ Create ]         │
+└───────────────────────────────────────────────────────┘
+```
+
+State (`@Observable NewGroupSheetModel`):
+
+- `name: String` — trimmed at send. Empty disables Create. Length
+  capped client-side at 25 (matches whatsmeow server limit).
+- `chips: [BridgeContact]` — chosen participants. Empty allowed
+  (WhatsApp accepts solo group; rare flow but legal).
+- `query: String` + `suggestions: [BridgeContact]` — same filter
+  pattern as the existing `AddParticipantsPanel` (contacts only;
+  `+phone` resolution deferred per non-goals).
+- `inFlight: Bool` / `error: String?`.
+
+`Create` calls `WAClient.createGroup(name:, participantJIDs:)`
+off-main. Success → sheet closes → `JoinedGroup` event arrives →
+`ChatListViewModel` merges the new chat → caller does
+`requestSelectChat(newJID)` to focus it.
+
+#### `Views/NewCommunitySheet.swift` — new
+
+Modal sheet for creating a community parent. No participants
+field — the community parent is a shell; members join sub-groups,
+not the parent directly. Server auto-creates the default
+announcements sub-group.
+
+```
+┌── New community ──────────────────────────────────────┐
+│  Name: [Outdoor Club______________________]  11 / 25  │
+│                                                       │
+│  A community holds related groups together.           │
+│  Members are added by linking or creating sub-groups. │
+│                                                       │
+│                       [ Cancel ]   [ Create ]         │
+└───────────────────────────────────────────────────────┘
+```
+
+State:
+
+- `name: String` — same trim + 25-cap.
+- `inFlight: Bool` / `error: String?`.
+
+`Create` calls `WAClient.createCommunity(name:)`. Success → sheet
+closes → two `JoinedGroup` events typically arrive (parent + auto
+announcements sub) → `ChatListViewModel` merges both. Caller
+focuses the parent JID. The default sub-group surfaces under
+LINKED GROUPS automatically on next `loadGroup()`.
+
+#### `Views/NewSubGroupSheet.swift` — new
+
+Modal sheet presented from the LINKED GROUPS section header's
+"Create new sub-group…" menu item, when the chat is a community
+parent and the user is admin.
+
+Identical layout to `NewGroupSheet` but with the parent context
+displayed in the sheet title and the bridge call routed to
+`createSubGroup(parentJID:, name:, participantJIDs:)`.
+
+```
+┌── New sub-group in "Outdoor Club" ────────────────────┐
+│  Name: [Hiking & Wild Cycling_____________]  21 / 25  │
+│                                                       │
+│  ┌─────────────────────────────────────────────────┐  │
+│  │ [Anna Berg ×] | …                                │  │
+│  └─────────────────────────────────────────────────┘  │
+│                                                       │
+│                       [ Cancel ]   [ Create ]         │
+└───────────────────────────────────────────────────────┘
+```
+
+State + flow same as `NewGroupSheet`; on success the parent's
+`ChatInfoView.subGroups` is reloaded so the new row appears.
+
 #### `Views/LinkSubGroupSheet.swift` — new
 
-Modal sheet presented from the LINKED GROUPS section header's "+
-Link group" button in `ChatInfoView` when the chat is a community
-parent and the current user is admin.
+Modal sheet presented from the LINKED GROUPS section header's
+"Link existing group…" menu item (see Sidebar / sub-group section
+above for the menu shape) when the chat is a community parent and
+the current user is admin.
 
 ```
 ┌── Link group to "Climbing Crew" ─────────────────────┐
@@ -447,7 +611,10 @@ is the only source of truth.
 
 | Surface | Gating |
 |---|---|
+| Sidebar "+" menu (NewGroup / NewCommunity) | everyone (creation creates admin role) |
+| LINKED GROUPS section header "+" menu | admin of parent (both items inside) |
 | LinkSubGroupSheet open | admin of parent |
+| NewSubGroupSheet open | admin of parent |
 | Per-subgroup Unlink ctx item | admin of parent + admin of sub + `!isDefaultSubGroup` |
 | Approval-mode toggle row | admin of sub-group |
 | PendingRequestsSection visible | admin + `joinApprovalMode == true` + `count > 0` |
@@ -461,6 +628,8 @@ Inline only, no NSAlert outside the existing destructive
 
 | Surface | Pattern |
 |---|---|
+| NewGroup / NewCommunity / NewSubGroup sheets | inline red row under fields; sheet stays open; Create re-enabled |
+| Name overflow (>25 chars) | client-side block (`Create` disabled, char counter turns red); the 406 path is a defence-in-depth fallback rendered as inline error |
 | LinkSubGroupSheet | inline red row below picker; sheet stays open |
 | Unlink ctx-menu op | inline red text at LINKED GROUPS section header, 6s auto-dismiss |
 | Approval-mode toggle | revert optimistic flip; inline red strip under toggle |
@@ -472,6 +641,12 @@ Inline only, no NSAlert outside the existing destructive
 
 ### `bridge/groups_test.go` — extended
 
+- `CreateCommunity` → success returns parent JID; 406 name-too-long
+  surfaces verbatim; ErrNotConnected when client closed.
+- `CreateSubGroup` → success returns sub JID with `LinkedParentJID`
+  set on response; empty participant list permitted; bad parent
+  JID → parse error.
+- `CreateGroup` (existing) — keep current passing cases.
 - `LinkSubGroup` → success / `ErrNotAuthorized` / `ErrGroupNotFound`.
 - `UnlinkSubGroup` → success / `ErrNotAuthorized`.
 - `GetGroupJoinRequests` empty queue → empty JSON array.
@@ -501,6 +676,13 @@ Inline only, no NSAlert outside the existing destructive
 
 ### `yawacTests/` — new files
 
+- `NewGroupSheetModelTests` — name trim + 25-char block; empty
+  name disables Create; bridge call dispatched with chip JIDs;
+  failure leaves sheet open with inline error.
+- `NewCommunitySheetModelTests` — same name-validation shape,
+  no participants field.
+- `NewSubGroupSheetModelTests` — parent JID propagated to bridge
+  call; success triggers parent `loadGroup()` reload.
 - `LinkSubGroupSheetModelTests` — candidate filter (admin gate,
   parent exclusion, current-community exclusion); cross-community
   move requires confirmation; success reload path.
@@ -520,7 +702,21 @@ Inline only, no NSAlert outside the existing destructive
 
 ### Manual smoke (release runbook)
 
-- As community-parent admin: open info → tap "+ Link group" → pick
+- From sidebar "+" menu → "New group" → enter name + add 2
+  contacts → Create → new chat appears at the top of the sidebar,
+  same group appears on phone within ~3s.
+- "+" menu → "New community" → enter name → Create → community
+  parent appears in sidebar with the community-parent badge; open
+  it → LINKED GROUPS shows one row (the auto-created announcements
+  default sub-group) within ~3s.
+- Inside the new community's info → LINKED GROUPS header "+" menu
+  → "Create new sub-group" → enter name + 2 contacts → Create →
+  new sub-group row appears under LINKED GROUPS, also visible as
+  its own chat in sidebar.
+- Name > 25 chars: Create stays disabled, char counter red. Server
+  never sees the request.
+- As community-parent admin: open info → LINKED GROUPS header "+"
+  menu → "Link existing group" → pick
   a non-community group I admin → row appears in LINKED GROUPS.
   Verify same row appears on phone within ~3s.
 - As community-parent admin: pick a group already in another
@@ -548,7 +744,7 @@ Inline only, no NSAlert outside the existing destructive
   stale-by-up-to-foreground-poll. Acceptable for moderator workflow
   but documented. Mitigation later: parse system messages of type
   `membership_approval_request` if WhatsApp posts them to the
-  admin's chat stream (needs investigation; out of scope for v0.6.0).
+  admin's chat stream (needs investigation; out of scope for v0.7.0).
 - **`events.GroupInfo.Sender` may be nil** (same caveat as the prior
   spec). `ActorJID` on `JoinApprovalModeChanged` falls back to
   empty; no UI consequence today.
@@ -577,30 +773,44 @@ Inline only, no NSAlert outside the existing destructive
 
 **New:**
 
+- `yawac/Views/NewGroupSheet.swift`
+- `yawac/Views/NewCommunitySheet.swift`
+- `yawac/Views/NewSubGroupSheet.swift`
 - `yawac/Views/LinkSubGroupSheet.swift`
 - `yawac/Views/PendingRequestsSection.swift`
 - `yawac/Bridge/JoinRequestStore.swift`
+- `yawacTests/NewGroupSheetModelTests.swift`
+- `yawacTests/NewCommunitySheetModelTests.swift`
+- `yawacTests/NewSubGroupSheetModelTests.swift`
 - `yawacTests/LinkSubGroupSheetModelTests.swift`
 - `yawacTests/PendingRequestsSectionModelTests.swift`
 - `yawacTests/JoinRequestStoreTests.swift`
 
 **Modified:**
 
-- `bridge/groups.go` — five new exported methods.
+- `bridge/groups.go` — seven new exported methods
+  (`CreateCommunity`, `CreateSubGroup`, `LinkSubGroup`,
+  `UnlinkSubGroup`, `GetGroupJoinRequests`,
+  `UpdateGroupJoinRequests`, `SetGroupJoinApprovalMode`).
 - `bridge/groups_test.go` — extended.
 - `bridge/events.go` — `JoinApprovalModeChanged` dispatcher; extend
   `dispatchGroupInfo` payload with `linked_parent_jid` +
   `is_default_subgroup`.
 - `bridge/events_dispatch_test.go` — extended.
-- `yawac/Bridge/WAClient.swift` — five new wrappers, new Event case,
-  new decode arm.
+- `yawac/Bridge/WAClient.swift` — seven new wrappers
+  (`createCommunity`, `createSubGroup`, `linkSubGroup`,
+  `unlinkSubGroup`, `getGroupJoinRequests`,
+  `updateGroupJoinRequests`, `setGroupJoinApprovalMode`); new Event
+  case `joinApprovalModeChanged`; new decode arm.
 - `yawac/Bridge/JSONModels.swift` — `BridgeJoinRequest`,
   `BridgeJoinRequestResult`; `BridgeGroupModel.joinApprovalMode`.
-- `yawac/Views/ChatInfoView.swift` — LINK GROUPS section "+ Link
-  group" button + per-row Unlink ctx item; approval-mode toggle row;
+- `yawac/Views/ChatInfoView.swift` — LINK GROUPS section header
+  "+" menu ("Link existing group" + "Create new sub-group") +
+  per-row Unlink ctx item; approval-mode toggle row;
   `PendingRequestsSection` host; event subscription extension for
   `joinApprovalModeChanged`.
-- `yawac/Views/ChatListView.swift` — sidebar pending chip render.
+- `yawac/Views/ChatListView.swift` — sidebar header "+" button +
+  menu (NewGroup / NewCommunity); sidebar pending chip render.
 - `yawac/ViewModels/ChatListViewModel.swift` — extended
   `dispatchGroupInfo` mapping (`communityParentJID` /
   `isDefaultSubGroup` from events); `pendingRequestsChip(for:)`
