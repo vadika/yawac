@@ -101,6 +101,17 @@ final class ConversationViewModelPollCreateTests: XCTestCase {
         XCTAssertNil(fake.lastPollQuestion)
     }
 
+    func testSendPollNoopOnTooManyOptions() async throws {
+        let fake = try FakeWAClient.make()
+        let vm = makeVM(client: fake)
+        let thirteen = (1...13).map { "Option \($0)" }
+        await vm.sendPoll(question: "Q",
+                          options: thirteen,
+                          allowMultiple: false)
+        XCTAssertNil(fake.lastPollQuestion)
+        XCTAssertTrue(vm.messages.isEmpty)
+    }
+
     func testSendPollOnErrorSetsTransientError() async throws {
         let fake = try FakeWAClient.make()
         fake.pollError = NSError(domain: "x", code: 1)
