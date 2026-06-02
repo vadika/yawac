@@ -140,6 +140,18 @@ type JGroupInfoChanged struct {
 	Timestamp   int64  `json:"timestamp"`
 }
 
+// JGroupParticipantsChanged carries a single action verb (add / remove /
+// promote / demote) and the affected participant JIDs. A single
+// whatsmeow events.GroupInfo can carry more than one — the dispatcher
+// emits one of these per non-empty slice.
+type JGroupParticipantsChanged struct {
+	ChatJID   string   `json:"chat_jid"`
+	Action    string   `json:"action"`
+	ActorJID  string   `json:"actor_jid,omitempty"`
+	JIDs      []string `json:"jids"`
+	Timestamp int64    `json:"timestamp"`
+}
+
 type JChatDeleted struct {
 	ChatJID   string `json:"chat_jid"`
 	Timestamp int64  `json:"timestamp"`
