@@ -370,3 +370,22 @@ func (c *Client) RemoveGroupPhoto(chatJID string) error {
 	}
 	return nil
 }
+
+// GetGroupInviteLink returns the full `https://chat.whatsapp.com/<code>`.
+// reset=true revokes the prior link before issuing the new one. Surfaces
+// whatsmeow's ErrGroupInviteLinkUnauthorized / ErrGroupNotFound /
+// ErrNotInGroup verbatim — the caller renders the localized message.
+func (c *Client) GetGroupInviteLink(chatJID string, reset bool) (string, error) {
+	if c.wa == nil {
+		return "", errors.New("client closed")
+	}
+	jid, err := types.ParseJID(chatJID)
+	if err != nil {
+		return "", fmt.Errorf("parse jid: %w", err)
+	}
+	link, err := c.wa.GetGroupInviteLink(context.Background(), jid, reset)
+	if err != nil {
+		return "", fmt.Errorf("get invite link: %w", err)
+	}
+	return link, nil
+}

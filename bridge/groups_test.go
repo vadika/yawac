@@ -73,3 +73,12 @@ func TestRemoveGroupPhotoUnpaired(t *testing.T) {
 		t.Fatal("expected error on unpaired client")
 	}
 }
+
+func TestGetGroupInviteLinkUnpaired(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/il.db")
+	defer c.Close()
+	_, err := c.GetGroupInviteLink("1234@g.us", false)
+	if err == nil {
+		t.Fatal("expected error on unpaired client")
+	}
+}
