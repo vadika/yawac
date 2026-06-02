@@ -651,16 +651,11 @@ struct ConversationView: View {
             }
     }
 
-    /// Receipt match that avoids a synchronous gomobile FFI call on every
-    /// receipt event. Fast-paths the common case (already-canonical PN JID)
-    /// by comparing `bare()` first, only paying for `canonical()` (which
-    /// crosses into Go for LID→PN resolution) when the receipt is in
-    /// `@lid` form.
+    /// Receipt match. JIDNormalize.same fast-paths the bare-equal case
+    /// before paying for any bridge call, so the original perf concern
+    /// (avoid gomobile FFI on every receipt) is preserved.
     static func receiptMatches(_ receiptJID: String, chat: String, client: WAClient) -> Bool {
-        let bare = JIDNormalize.bare(receiptJID)
-        if bare == chat { return true }
-        guard bare.hasSuffix("@lid") else { return false }
-        return JIDNormalize.canonical(receiptJID, client: client) == chat
+        JIDNormalize.same(receiptJID, chat, client: client)
     }
 }
 

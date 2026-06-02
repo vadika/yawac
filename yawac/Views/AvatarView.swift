@@ -53,9 +53,9 @@ struct AvatarView: View {
         }
         .onReceive(NotificationCenter.default.publisher(
             for: .avatarCacheInvalidated)) { note in
-            guard let invalid = note.userInfo?["jid"] as? String else { return }
-            let invalidCanon = JIDNormalize.canonical(invalid, client: session.client)
-            guard invalidCanon == cacheKey else { return }
+            guard let invalid = note.userInfo?["jid"] as? String,
+                  JIDNormalize.same(invalid, jid, client: session.client)
+            else { return }
             // Clear the URL so the placeholder shows during the brief
             // re-fetch window; bumping `revision` re-runs `.task`.
             imageURL = nil

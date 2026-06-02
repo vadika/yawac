@@ -456,17 +456,9 @@ struct ChatInfoView: View {
         let client = session.client
         let rawOwn = client?.ownJID ?? ""
         guard !rawOwn.isEmpty else { return false }
-        // Match across both LID and PN forms: the participant entry may
-        // carry an @lid JID while ownJID is the @s.whatsapp.net form (or
-        // vice versa) for the same physical person.
-        let ownBare = JIDNormalize.bare(rawOwn)
-        let ownCanon = JIDNormalize.canonical(rawOwn, client: client)
         return g.participants.contains { p in
             guard p.isAdmin || p.isSuper else { return false }
-            let pBare = JIDNormalize.bare(p.jid)
-            if pBare == ownBare || pBare == ownCanon { return true }
-            let pCanon = JIDNormalize.canonical(p.jid, client: client)
-            return pCanon == ownBare || pCanon == ownCanon
+            return JIDNormalize.same(p.jid, rawOwn, client: client)
         }
     }
 
@@ -1052,50 +1044,44 @@ struct ChatInfoView: View {
 
     private func openAddPanel(group: BridgeGroupModel) {
         guard let client = session.client else { return }
-        // Existing roster + own user excluded. JIDNormalize.canonical strips
-        // device suffixes and resolves @lid → PN via the local LID map so
-        // the same person doesn't appear twice from both namespaces.
-        let ownCanon = JIDNormalize.canonical(client.ownJID, client: client)
-        var existing = Set(group.participants.map {
-            JIDNormalize.canonical($0.jid, client: client)
-        })
-        existing.insert(ownCanon)
+        // Existing roster: build a set of all known forms for every
+        // participant so a contact in either namespace gets filtered out.
+        var existing = Set<String>()
+        for p in group.participants {
+            existing.formUnion(JIDNormalize.allForms(p.jid, client: client))
+        }
+        existing.formUnion(JIDNormalize.allForms(client.ownJID, client: client))
 
-        // Dedup contacts in two passes:
-        //   1. By canonical JID — folds LID↔PN duplicates whenever the
-        //      local LID map has the mapping.
-        //   2. By (lowercased display name) — fallback when the LID map
-        //      has no mapping yet; prefer the PN-form entry since it's
-        //      the one that resolves correctly in most groups.
-        var byJID: [String: BridgeContact] = [:]
+        // Dedup contacts by canonical key, then by display name as a
+        // fallback for entries the LID map hasn't bridged yet. Prefer the
+        // PN-form entry of any pair since PN sends correctly in most groups.
+        var byKey: [String: BridgeContact] = [:]
         for (jid, name) in session.contactNames {
-            let canon = JIDNormalize.canonical(jid, client: client)
-            guard canon != ownCanon else { continue }
-            if let existingEntry = byJID[canon] {
-                // Keep the PN-form entry if available.
+            let key = JIDNormalize.key(jid, client: client)
+            if existing.contains(key) { continue }
+            if let existingEntry = byKey[key] {
                 if existingEntry.jid.hasSuffix("@lid"),
-                   !canon.hasSuffix("@lid") {
-                    byJID[canon] = BridgeContact(
-                        jid: canon, name: name,
+                   !key.hasSuffix("@lid") {
+                    byKey[key] = BridgeContact(
+                        jid: key, name: name,
                         pushName: nil, fullName: nil, businessName: nil)
                 }
                 continue
             }
-            byJID[canon] = BridgeContact(
-                jid: canon, name: name,
+            byKey[key] = BridgeContact(
+                jid: key, name: name,
                 pushName: nil, fullName: nil, businessName: nil)
         }
         var byName: [String: BridgeContact] = [:]
-        for (_, c) in byJID {
-            let key = c.name.lowercased()
-            if let existingEntry = byName[key] {
-                if existingEntry.jid.hasSuffix("@lid"),
-                   !c.jid.hasSuffix("@lid") {
-                    byName[key] = c
+        for (_, c) in byKey {
+            let nameKey = c.name.lowercased()
+            if let prior = byName[nameKey] {
+                if prior.jid.hasSuffix("@lid"), !c.jid.hasSuffix("@lid") {
+                    byName[nameKey] = c
                 }
                 continue
             }
-            byName[key] = c
+            byName[nameKey] = c
         }
         let contacts = Array(byName.values)
         addPanelModel = AddParticipantsPanelModel(
@@ -1144,9 +1130,7 @@ struct ChatInfoView: View {
     private func isCurrentUser(_ jid: String) -> Bool {
         let own = session.client?.ownJID ?? ""
         guard !own.isEmpty else { return false }
-        return JIDNormalize.bare(jid) == JIDNormalize.bare(own)
-            || JIDNormalize.canonical(jid, client: session.client) ==
-               JIDNormalize.canonical(own, client: session.client)
+        return JIDNormalize.same(jid, own, client: session.client)
     }
 
     private func applyParticipantOp(group: BridgeGroupModel,
