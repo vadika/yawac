@@ -37,6 +37,11 @@ final class LinkSubGroupSheetModel {
 
     private let linker: SubGroupLinker
 
+    /// LID resolver used to match `myJID` against participant JIDs across
+    /// the LID ↔ PN identity split. Optional so tests can pass `nil` and
+    /// rely on the bare-equality fast path in `JIDNormalize.same`.
+    private let client: LIDResolving?
+
     /// Search query applied to candidate names (case-insensitive).
     var query: String = ""
 
@@ -57,11 +62,13 @@ final class LinkSubGroupSheetModel {
     init(parentChatJID: String,
          myJID: String,
          availableGroups: [BridgeGroupModel],
-         linker: SubGroupLinker) {
+         linker: SubGroupLinker,
+         client: LIDResolving? = nil) {
         self.parentChatJID = parentChatJID
         self.myJID = myJID
         self.availableGroups = availableGroups
         self.linker = linker
+        self.client = client
     }
 
     /// Groups the caller can link under `parentChatJID`:
@@ -82,8 +89,14 @@ final class LinkSubGroupSheetModel {
     }
 
     private func isAdmin(of group: BridgeGroupModel) -> Bool {
+        // JIDNormalize.same bridges the LID ↔ PN identity split so the
+        // gate still fires when the participant entry came back in
+        // `@lid` form but `myJID` is the PN (or vice versa). Mirrors the
+        // canonical pattern in ChatListViewModel.isCurrentUserAdmin /
+        // ChatInfoView.isCurrentUserAdmin.
         group.participants.contains {
-            $0.jid == myJID && ($0.isAdmin || $0.isSuper)
+            guard $0.isAdmin || $0.isSuper else { return false }
+            return JIDNormalize.same($0.jid, myJID, client: client)
         }
     }
 

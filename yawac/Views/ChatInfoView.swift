@@ -207,7 +207,8 @@ struct ChatInfoView: View {
                     parentChatJID: g.jid,
                     myJID: client.ownJID,
                     availableGroups: allGroups,
-                    linker: client)
+                    linker: client,
+                    client: client)
                 LinkSubGroupSheet(
                     model: model,
                     parentName: g.name,
