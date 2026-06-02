@@ -166,6 +166,15 @@ struct ChatInfoView: View {
         } message: {
             Text("They'll lose admin privileges in this group.")
         }
+        .sheet(isPresented: $inviteSheetOpen) {
+            if let client = session.client {
+                InviteLinkSheet(chatJID: chatJID,
+                                chatName: name,
+                                isAdmin: isAdminForCurrentGroup,
+                                client: client,
+                                onClose: { inviteSheetOpen = false })
+            }
+        }
     }
 
     private func leaveGroup() {
@@ -589,6 +598,8 @@ struct ChatInfoView: View {
         actionRow(actions: [
             .init(label: "Mute", icon: "speaker.slash"),
             .init(label: "Search", icon: "magnifyingglass"),
+            .init(label: "Invite", icon: "link",
+                  action: { inviteSheetOpen = true }),
             .init(label: "Leave", icon: "rectangle.portrait.and.arrow.right",
                   destructive: true, action: { confirmLeave = true }),
         ])
