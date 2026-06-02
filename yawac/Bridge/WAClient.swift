@@ -530,7 +530,11 @@ class WAClient: PhoneValidating, LIDResolving {
     /// Creates a new community parent group. The server auto-creates the
     /// default announcements sub-group, whose JID arrives via a JoinedGroup
     /// event shortly after. Returns the parent's JID.
-    func createCommunity(name: String) throws -> String {
+    ///
+    /// Nonisolated so `NewCommunitySheetModel` can call it from a detached
+    /// task — the bridge call is synchronous and the create round-trip must
+    /// not block the main actor.
+    nonisolated func createCommunity(name: String) throws -> String {
         var err: NSError?
         let out = go.createCommunity(name, error: &err)
         if let err { throw err }
