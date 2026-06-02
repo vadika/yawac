@@ -53,6 +53,17 @@ struct ChatInfoView: View {
     @State private var editingDescription: Bool = false
     @State private var nameDraft: String = ""
     @State private var descriptionDraft: String = ""
+    @State private var addPanelOpen: Bool = false
+    @State private var addPanelModel: AddParticipantsPanelModel? = nil
+    @State private var addPanelError: String? = nil
+    @State private var participantOpError: String? = nil
+    @State private var confirmRemoveJID: String? = nil
+    @State private var confirmDemoteJID: String? = nil
+    @State private var avatarMenuOpen: Bool = false
+    @State private var avatarError: String? = nil
+    @State private var pickedImage: NSImage? = nil
+    @State private var confirmRemovePhoto: Bool = false
+    @State private var inviteSheetOpen: Bool = false
 
     private var isGroup: Bool { chatJID.hasSuffix("@g.us") }
     private var name: String { session.displayName(for: chatJID) }
@@ -433,7 +444,34 @@ struct ChatInfoView: View {
         sharedMediaSection
         filesSection
 
-        sectionLabel("PARTICIPANTS", trailing: "\(g.participants.count)")
+        HStack {
+            sectionLabel("PARTICIPANTS", trailing: "\(g.participants.count)")
+            if admin {
+                Button {
+                    openAddPanel(group: g)
+                } label: {
+                    Label("Add member", systemImage: "plus")
+                        .scaledUI(11, weight: .medium)
+                        .foregroundStyle(Theme.accentText)
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 6)
+            }
+        }
+        if addPanelOpen, let model = addPanelModel {
+            AddParticipantsPanel(
+                model: model,
+                onCommit: { jids in commitAdd(group: g, jids: jids) },
+                onCancel: { closeAddPanel() }
+            )
+            .padding(.bottom, 6)
+        }
+        if let err = participantOpError {
+            Text(err)
+                .scaledUI(11)
+                .foregroundStyle(Color.red.opacity(0.9))
+                .padding(.bottom, 4)
+        }
         VStack(spacing: 0) {
             ForEach(sortedParticipants(g.participants), id: \.jid) { p in
                 participantRow(p)
@@ -810,6 +848,51 @@ struct ChatInfoView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+        }
+    }
+
+    private func openAddPanel(group: BridgeGroupModel) {
+        guard let client = session.client else { return }
+        let existing = Set(group.participants.map(\.jid))
+        let contacts = session.contactNames.map { (jid, name) in
+            BridgeContact(jid: jid, name: name,
+                          pushName: nil, fullName: nil, businessName: nil)
+        }
+        addPanelModel = AddParticipantsPanelModel(
+            existingParticipantJIDs: existing,
+            allContacts: contacts,
+            validator: client)
+        addPanelOpen = true
+    }
+
+    private func closeAddPanel() {
+        addPanelOpen = false
+        addPanelModel = nil
+    }
+
+    private func commitAdd(group: BridgeGroupModel, jids: [String]) {
+        guard let client = session.client, let model = addPanelModel else { return }
+        model.inFlight = true
+        let chatJID = group.jid
+        Task { @MainActor in
+            defer { model.inFlight = false }
+            do {
+                let resp = try client.updateGroupParticipants(
+                    chatJID: chatJID, action: "add",
+                    participantJIDs: jids)
+                model.applyResult(resp)
+                await loadGroup()
+            } catch {
+                participantOpError = error.localizedDescription
+                scheduleParticipantErrorAutodismiss()
+            }
+        }
+    }
+
+    private func scheduleParticipantErrorAutodismiss() {
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(6))
+            participantOpError = nil
         }
     }
 
