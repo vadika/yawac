@@ -335,3 +335,38 @@ func (c *Client) UpdateGroupParticipants(
 	b, _ := json.Marshal(out)
 	return string(b), nil
 }
+
+// SetGroupPhoto uploads `jpeg` bytes as the group's picture. Returns the
+// new picture ID. Surfaces whatsmeow.ErrInvalidImageFormat verbatim when
+// the bytes aren't a JPEG the server accepts.
+func (c *Client) SetGroupPhoto(chatJID string, jpeg []byte) (string, error) {
+	if c.wa == nil {
+		return "", errors.New("client closed")
+	}
+	jid, err := types.ParseJID(chatJID)
+	if err != nil {
+		return "", fmt.Errorf("parse jid: %w", err)
+	}
+	pictureID, err := c.wa.SetGroupPhoto(context.Background(), jid, jpeg)
+	if err != nil {
+		return "", fmt.Errorf("set photo: %w", err)
+	}
+	return pictureID, nil
+}
+
+// RemoveGroupPhoto clears the group's picture. Equivalent to SetGroupPhoto
+// with nil bytes per whatsmeow's contract.
+func (c *Client) RemoveGroupPhoto(chatJID string) error {
+	if c.wa == nil {
+		return errors.New("client closed")
+	}
+	jid, err := types.ParseJID(chatJID)
+	if err != nil {
+		return fmt.Errorf("parse jid: %w", err)
+	}
+	_, err = c.wa.SetGroupPhoto(context.Background(), jid, nil)
+	if err != nil {
+		return fmt.Errorf("remove photo: %w", err)
+	}
+	return nil
+}

@@ -55,3 +55,21 @@ func TestUpdateGroupParticipantsUnpaired(t *testing.T) {
 		t.Fatal("expected error on unpaired client")
 	}
 }
+
+func TestSetGroupPhotoUnpaired(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/sp.db")
+	defer c.Close()
+	_, err := c.SetGroupPhoto("1234@g.us", []byte{0xff, 0xd8, 0xff})
+	if err == nil {
+		t.Fatal("expected error on unpaired client")
+	}
+}
+
+func TestRemoveGroupPhotoUnpaired(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/rp.db")
+	defer c.Close()
+	err := c.RemoveGroupPhoto("1234@g.us")
+	if err == nil {
+		t.Fatal("expected error on unpaired client")
+	}
+}
