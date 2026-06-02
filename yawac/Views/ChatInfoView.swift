@@ -75,6 +75,11 @@ struct ChatInfoView: View {
     // join" toggle (T25). Cleared after a short delay so the row
     // doesn't grow a permanent error tail across re-renders.
     @State private var toggleError: String?
+    /// Drives the in-info pending-requests admin queue (T27). Created
+    /// lazily in `loadGroup()` once we know the user admins this group
+    /// and approval-mode is on; nilled out otherwise so a non-admin or
+    /// approval-off chat doesn't render the section header.
+    @State private var pendingRequestsModel: PendingRequestsSectionModel?
 
     private var isGroup: Bool { chatJID.hasSuffix("@g.us") }
     private var name: String { session.displayName(for: chatJID) }
@@ -809,6 +814,21 @@ struct ChatInfoView: View {
             }
         }
 
+        // Pending join requests — only when the user admins this
+        // sub-group, approval-mode is on, and there's at least one
+        // pending row. The header hides on an empty queue so the
+        // admin panel doesn't grow a perma-empty section.
+        if isCurrentUserAdmin(g),
+           !g.isParent,
+           g.joinApprovalMode,
+           let prModel = pendingRequestsModel,
+           !prModel.requests.isEmpty {
+            PendingRequestsSection(
+                model: prModel,
+                displayName: { jid in session.contactNames[jid] ?? jid }
+            )
+        }
+
         // Surface community sibling groups whenever there's a parent —
         // either we ARE the parent, or we're a sub-group with a known
         // parent. Skip the current chat (no self-row in its own list).
@@ -1431,6 +1451,41 @@ struct ChatInfoView: View {
             if let parent = parentForDirectory, !parent.isEmpty,
                let subs = try? client.listSubGroups(parentJID: parent) {
                 self.subGroups = subs
+            }
+            // Seed the pending-requests section model whenever the
+            // user admins this sub-group AND approval-mode is on.
+            // Parent/community shells don't have a queue of their own;
+            // the queue lives on each sub-group, so we skip parents
+            // here. Non-admin / approval-off paths nil out the model
+            // so the section disappears without a stale row list.
+            if isCurrentUserAdmin(g), !g.isParent, g.joinApprovalMode {
+                if pendingRequestsModel?.chatJID != g.jid {
+                    pendingRequestsModel = PendingRequestsSectionModel(
+                        chatJID: g.jid,
+                        updater: client,
+                        store: session.joinRequestStore)
+                }
+                let chatJID = g.jid
+                do {
+                    let rows = try await Task.detached {
+                        try client.getGroupJoinRequests(chatJID: chatJID)
+                    }.value
+                    pendingRequestsModel?.requests = rows.map { r in
+                        PendingRequestRow(
+                            jid: r.jid,
+                            displayName: session.contactNames[r.jid] ?? r.jid,
+                            requestedAt: r.requestedAt
+                        )
+                    }
+                    session.joinRequestStore.set(
+                        chatJID: chatJID, count: rows.count)
+                } catch {
+                    // Silent: keep whatever rows the section already
+                    // had so a transient bridge hiccup doesn't blank
+                    // the admin panel mid-session.
+                }
+            } else {
+                pendingRequestsModel = nil
             }
         } catch {
             self.loadError = error.localizedDescription
