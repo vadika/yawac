@@ -27,6 +27,8 @@ A native macOS SwiftUI client backed by [tulir/whatsmeow](https://github.com/tul
 - Public invite link with QR — copy, share, admin-only revoke with cooldown
 - `⌘K` recognises pasted `chat.whatsapp.com` / `wa.me` links and offers one-tap join (with pending-approval state)
 - Community sub-groups directory — browse every group linked under a community; best-effort Join
+- Create groups, communities, and sub-groups from the sidebar `+` menu and from a community parent's info pane
+- Community admin — link / unlink existing groups, toggle "require admin approval to join", review and approve / reject pending join requests with a sidebar pending-count chip
 
 **Search & navigation**
 - In-chat `⌘F` find bar with highlight + ↑/↓ navigation
