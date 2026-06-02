@@ -184,3 +184,21 @@ func TestLinkSubGroupBadJID(t *testing.T) {
 		t.Fatal("expected parse error on bad sub JID")
 	}
 }
+
+func TestUnlinkSubGroupUnpaired(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/us.db")
+	defer c.Close()
+	err := c.UnlinkSubGroup("1111@g.us", "2222@g.us")
+	if err == nil {
+		t.Fatal("expected error on unpaired client")
+	}
+}
+
+func TestUnlinkSubGroupBadJID(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/us2.db")
+	defer c.Close()
+	err := c.UnlinkSubGroup("not a jid", "2222@g.us")
+	if err == nil {
+		t.Fatal("expected parse error on bad parent JID")
+	}
+}
