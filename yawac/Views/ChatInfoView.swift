@@ -134,6 +134,38 @@ struct ChatInfoView: View {
         } message: {
             Text("You'll stop receiving messages from this group.")
         }
+        .confirmationDialog(
+            "Remove \(confirmRemoveJID.map { session.displayName(for: $0) } ?? "member")?",
+            isPresented: Binding(
+                get: { confirmRemoveJID != nil },
+                set: { if !$0 { confirmRemoveJID = nil } })
+        ) {
+            Button("Remove", role: .destructive) {
+                if let jid = confirmRemoveJID, let g = group {
+                    applyParticipantOp(group: g, action: "remove", jid: jid)
+                }
+                confirmRemoveJID = nil
+            }
+            Button("Cancel", role: .cancel) { confirmRemoveJID = nil }
+        } message: {
+            Text("They'll stop receiving messages from this group.")
+        }
+        .confirmationDialog(
+            "Demote \(confirmDemoteJID.map { session.displayName(for: $0) } ?? "admin")?",
+            isPresented: Binding(
+                get: { confirmDemoteJID != nil },
+                set: { if !$0 { confirmDemoteJID = nil } })
+        ) {
+            Button("Demote", role: .destructive) {
+                if let jid = confirmDemoteJID, let g = group {
+                    applyParticipantOp(group: g, action: "demote", jid: jid)
+                }
+                confirmDemoteJID = nil
+            }
+            Button("Cancel", role: .cancel) { confirmDemoteJID = nil }
+        } message: {
+            Text("They'll lose admin privileges in this group.")
+        }
     }
 
     private func leaveGroup() {
@@ -474,7 +506,7 @@ struct ChatInfoView: View {
         }
         VStack(spacing: 0) {
             ForEach(sortedParticipants(g.participants), id: \.jid) { p in
-                participantRow(p)
+                participantRow(p, in: g, currentUserIsAdmin: admin)
                 Rectangle().fill(Theme.hairline).frame(height: 1)
             }
         }
@@ -666,7 +698,9 @@ struct ChatInfoView: View {
     }
 
     @ViewBuilder
-    private func participantRow(_ p: BridgeParticipantModel) -> some View {
+    private func participantRow(_ p: BridgeParticipantModel,
+                                in group: BridgeGroupModel,
+                                currentUserIsAdmin: Bool) -> some View {
         Button {
             let jid = p.jid
             Task { @MainActor in
@@ -708,6 +742,20 @@ struct ChatInfoView: View {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(session.displayName(for: p.jid),
                                                forType: .string)
+            }
+            if currentUserIsAdmin && !isCurrentUser(p.jid) {
+                Divider()
+                if p.isAdmin || p.isSuper {
+                    Button("Demote") { confirmDemoteJID = p.jid }
+                } else {
+                    Button("Promote to admin") {
+                        applyParticipantOp(group: group, action: "promote",
+                                           jid: p.jid)
+                    }
+                }
+                Button("Remove from group", role: .destructive) {
+                    confirmRemoveJID = p.jid
+                }
             }
         }
     }
@@ -893,6 +941,32 @@ struct ChatInfoView: View {
         Task { @MainActor in
             try? await Task.sleep(for: .seconds(6))
             participantOpError = nil
+        }
+    }
+
+    private func isCurrentUser(_ jid: String) -> Bool {
+        let own = session.client?.ownJID ?? ""
+        guard !own.isEmpty else { return false }
+        return JIDNormalize.bare(jid) == JIDNormalize.bare(own)
+            || JIDNormalize.canonical(jid, client: session.client) ==
+               JIDNormalize.canonical(own, client: session.client)
+    }
+
+    private func applyParticipantOp(group: BridgeGroupModel,
+                                    action: String,
+                                    jid: String) {
+        guard let client = session.client else { return }
+        let chatJID = group.jid
+        Task { @MainActor in
+            do {
+                _ = try client.updateGroupParticipants(
+                    chatJID: chatJID, action: action,
+                    participantJIDs: [jid])
+                await loadGroup()
+            } catch {
+                participantOpError = error.localizedDescription
+                scheduleParticipantErrorAutodismiss()
+            }
         }
     }
 
