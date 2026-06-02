@@ -646,6 +646,21 @@ struct ChatListView: View {
                         .foregroundStyle(Theme.textMuted)
                         .lineLimit(1)
                     Spacer(minLength: 0)
+                    // Pending join-request chip (admin gate added in T29 once Chat.amAdmin lands).
+                    if let pending = session.joinRequestStore.counts[chat.jid], pending > 0 {
+                        HStack(spacing: 2) {
+                            Image(systemName: "checkmark.circle")
+                                .scaledIcon(10, weight: .semibold)
+                            Text("\(pending)")
+                                .scaledMono(10.5, weight: .semibold)
+                                .monospacedDigit()
+                        }
+                        .foregroundStyle(Theme.accentText)
+                        .padding(.horizontal, 5)
+                        .frame(minHeight: 18)
+                        .background(Theme.accent.opacity(0.25), in: Capsule())
+                        .help("\(pending) pending request\(pending == 1 ? "" : "s")")
+                    }
                     if chat.unread > 0 {
                         let muted = (chat.mutedUntil.map { $0 > Date() }) ?? false
                         Text("\(chat.unread)")
