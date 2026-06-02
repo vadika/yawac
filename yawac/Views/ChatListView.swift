@@ -188,9 +188,28 @@ struct ChatListView: View {
         VStack(spacing: 0) {
             // ─── Title-bar gutter. 64pt matches the right pane's chat
             // header so the two columns share a single seam; traffic
-            // lights overlay the leading area.
+            // lights overlay the leading area, the "+" menu floats
+            // on the trailing edge alongside the system sidebar toggle.
             WindowDragHandle()
                 .frame(height: 64)
+                .overlay(alignment: .topTrailing) {
+                    Menu {
+                        Button("New group…") { showingNewGroup = true }
+                        Button("New community…") { showingNewCommunity = true }
+                    } label: {
+                        Image(systemName: "plus.circle")
+                            .scaledIcon(15, weight: .medium)
+                            .foregroundStyle(Theme.textFaint)
+                            .padding(6)
+                            .contentShape(Rectangle())
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    .padding(.top, 8)
+                    .padding(.trailing, 48)
+                    .help("New group or community")
+                }
 
             IndexingChip()
                 .padding(.bottom, 2)
@@ -227,17 +246,6 @@ struct ChatListView: View {
                                 .stroke(Theme.border, lineWidth: 1)
                         )
                 }
-                Menu {
-                    Button("New group…") { showingNewGroup = true }
-                    Button("New community…") { showingNewCommunity = true }
-                } label: {
-                    Image(systemName: "plus.circle")
-                        .scaledIcon(13, weight: .medium)
-                        .foregroundStyle(Theme.textFaint)
-                }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
             }
             .padding(.horizontal, 10).padding(.vertical, 7)
             .background(Theme.surface)
