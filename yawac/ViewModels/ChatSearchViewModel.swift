@@ -16,6 +16,7 @@ final class ChatSearchViewModel {
     private(set) var messageHits: [MessageIndex.Hit] = []
     private let messageIndex: MessageIndex
     private var messageTask: Task<Void, Never>? = nil
+    private var inviteLinkTask: Task<Void, Never>? = nil
 
     /// Debounce interval before running the filter / firing bridge validation.
     /// Exposed for tests so they don't have to sleep 500ms.
@@ -33,11 +34,13 @@ final class ChatSearchViewModel {
     func clear() {
         debounceTask?.cancel()
         messageTask?.cancel()
+        inviteLinkTask?.cancel()
         query = ""
         suggestion = nil
         validating = false
         filteredChats = listVM?.chats ?? []
         messageHits = []
+        listVM?.inviteLinkPreview = nil
     }
 
     private func onQueryChanged() {
@@ -55,6 +58,7 @@ final class ChatSearchViewModel {
             await self.runFilter(q)
             await self.maybeValidate(q)
             await self.refreshMessages(q)
+            await self.maybeResolveInviteLink(q)
         }
     }
 
@@ -149,6 +153,34 @@ final class ChatSearchViewModel {
             self.messageHits = hits
         }
         await messageTask?.value
+    }
+
+    private func maybeResolveInviteLink(_ q: String) async {
+        inviteLinkTask?.cancel()
+        let code = InviteLink.parseCode(q)
+        guard let code else {
+            listVM?.inviteLinkPreview = nil
+            return
+        }
+        // Skip resolution if we're not connected — the bridge call would just
+        // throw. Preview clears so the user isn't staring at a stale spinner.
+        let listVM = self.listVM
+        guard let client = listVM?.clientRef, !client.ownJID.isEmpty else {
+            listVM?.inviteLinkPreview = .error(
+                message: "Sign in to preview invite links.")
+            return
+        }
+        listVM?.inviteLinkPreview = .loading(code: code)
+        inviteLinkTask = Task { @MainActor [weak self] in
+            do {
+                let info = try client.groupInfoFromLink(code: code)
+                guard let _ = self, !Task.isCancelled else { return }
+                listVM?.inviteLinkPreview = .ready(info, code: code)
+            } catch {
+                listVM?.inviteLinkPreview = .error(
+                    message: error.localizedDescription)
+            }
+        }
     }
 
     /// Re-run the current text filter against the latest `listVM.chats`.

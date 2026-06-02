@@ -1025,6 +1025,10 @@ final class ChatListViewModel {
     var groupParticipantsTick: Int = 0
     private(set) var lastParticipantsChange: GroupParticipantsChange? = nil
 
+    /// Read-only accessor for collaborators that need to call bridge methods
+    /// directly (e.g. ChatSearchViewModel for invite-link preview).
+    var clientRef: WAClient? { client }
+
     // MARK: - Invite link preview
 
     enum InviteLinkPreviewState: Equatable {
