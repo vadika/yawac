@@ -690,10 +690,11 @@ struct ChatInfoView: View {
         // shell (the toggle isn't meaningful there) and on chats with
         // no linked community parent. Optimistic flip on the local
         // @State copy; revert + surface error on failure.
+        // WhatsApp accepts SetGroupJoinApprovalMode only on community
+        // parents and on standalone non-community groups; sub-groups
+        // inherit from the parent (server returns 400 bad-request).
         if isCurrentUserAdmin(g),
-           !g.isParent,
-           let parent = g.linkedParentJID,
-           !parent.isEmpty {
+           g.isParent || (g.linkedParentJID ?? "").isEmpty {
             sectionCard(label: "JOIN APPROVAL") {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(alignment: .top, spacing: 8) {
@@ -819,8 +820,10 @@ struct ChatInfoView: View {
         // sub-group, approval-mode is on, and there's at least one
         // pending row. The header hides on an empty queue so the
         // admin panel doesn't grow a perma-empty section.
+        // Pending requests live on the same JID that owns the
+        // approval gate — community parent or standalone group.
         if isCurrentUserAdmin(g),
-           !g.isParent,
+           g.isParent || (g.linkedParentJID ?? "").isEmpty,
            g.joinApprovalMode,
            let prModel = pendingRequestsModel,
            !prModel.requests.isEmpty {
@@ -1459,7 +1462,9 @@ struct ChatInfoView: View {
             // the queue lives on each sub-group, so we skip parents
             // here. Non-admin / approval-off paths nil out the model
             // so the section disappears without a stale row list.
-            if isCurrentUserAdmin(g), !g.isParent, g.joinApprovalMode {
+            if isCurrentUserAdmin(g),
+               g.isParent || (g.linkedParentJID ?? "").isEmpty,
+               g.joinApprovalMode {
                 if pendingRequestsModel?.chatJID != g.jid {
                     pendingRequestsModel = PendingRequestsSectionModel(
                         chatJID: g.jid,
