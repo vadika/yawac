@@ -23,7 +23,7 @@ protocol PhoneValidating: AnyObject {
 }
 
 @MainActor
-final class WAClient: PhoneValidating, LIDResolving {
+class WAClient: PhoneValidating, LIDResolving {
     enum Event {
         case qr(String)
         case pairSuccess
