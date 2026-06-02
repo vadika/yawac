@@ -6,6 +6,9 @@ struct AvatarView: View {
     let size: CGFloat
     @Environment(SessionViewModel.self) private var session
     @State private var imageURL: URL?
+    /// Bumped by AvatarCache.invalidate broadcasts so `.task(id:)`
+    /// re-runs and the view picks up the newly-fetched file.
+    @State private var revision: Int = 0
 
     var body: some View {
         Group {
@@ -23,7 +26,7 @@ struct AvatarView: View {
         }
         .frame(width: size, height: size)
         .clipShape(.circle)
-        .task(id: jid) {
+        .task(id: "\(jid)#\(revision)") {
             // Fast path: skip the actor hop + bridge call when the
             // avatar is already cached on disk.
             if let cached = AvatarCache.cachedURL(for: jid),
@@ -31,8 +34,20 @@ struct AvatarView: View {
                 imageURL = cached
                 return
             }
-            guard let client = session.client else { return }
+            guard let client = session.client else {
+                imageURL = nil
+                return
+            }
             imageURL = await AvatarCache.shared.ensure(jid: jid, using: client)
+        }
+        .onReceive(NotificationCenter.default.publisher(
+            for: .avatarCacheInvalidated)) { note in
+            guard let invalid = note.userInfo?["jid"] as? String,
+                  invalid == jid else { return }
+            // Clear the URL so the placeholder shows during the brief
+            // re-fetch window; bumping `revision` re-runs `.task`.
+            imageURL = nil
+            revision &+= 1
         }
     }
 

@@ -1,5 +1,13 @@
 import Foundation
 
+extension Notification.Name {
+    /// Posted by `AvatarCache.invalidate(jid:)` so on-screen `AvatarView`s
+    /// for that JID re-fetch instead of staying stuck on a deleted file.
+    /// userInfo["jid"] = String.
+    static let avatarCacheInvalidated =
+        Notification.Name("yawac.AvatarCacheInvalidated")
+}
+
 actor AvatarCache {
     static let shared = AvatarCache()
     private var inflight: [String: Task<URL?, Never>] = [:]
@@ -44,14 +52,23 @@ actor AvatarCache {
     }
 
     /// Drop the on-disk cache + negative-cache entry so the next ensure()
-    /// re-fetches from the bridge. Used when the group photo changes
-    /// server-side (locally or via events.GroupInfo).
+    /// re-fetches from the bridge. Broadcasts on the main thread so all
+    /// `AvatarView`s for the same JID re-run their fetch task — without
+    /// it, every on-screen avatar holding a stale URL would fall back to
+    /// the initials placeholder (file deleted, NSImage(contentsOf:) nil).
     func invalidate(jid: String) {
         let url = file(for: jid)
         try? FileManager.default.removeItem(at: url)
         negativeCache.remove(jid)
         inflight[jid]?.cancel()
         inflight[jid] = nil
+        let key = jid
+        Task { @MainActor in
+            NotificationCenter.default.post(
+                name: .avatarCacheInvalidated,
+                object: nil,
+                userInfo: ["jid": key])
+        }
     }
 
     func ensure(jid: String, using client: WAClient) async -> URL? {
