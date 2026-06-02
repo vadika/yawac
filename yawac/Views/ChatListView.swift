@@ -9,6 +9,8 @@ struct ChatListView: View {
     @State private var pendingDelete: Chat?
     @State private var pendingBlock: Chat?
     @State private var contactEditing: Chat?
+    @State private var showingNewGroup = false
+    @State private var showingNewCommunity = false
     @Binding var selection: Chat.ID?
     @AppStorage("yawac.chatListScope") private var scopeRaw: String = Scope.all.rawValue
 
@@ -225,6 +227,17 @@ struct ChatListView: View {
                                 .stroke(Theme.border, lineWidth: 1)
                         )
                 }
+                Menu {
+                    Button("New group…") { showingNewGroup = true }
+                    Button("New community…") { showingNewCommunity = true }
+                } label: {
+                    Image(systemName: "plus.circle")
+                        .scaledIcon(13, weight: .medium)
+                        .foregroundStyle(Theme.textFaint)
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
             }
             .padding(.horizontal, 10).padding(.vertical, 7)
             .background(Theme.surface)
@@ -341,6 +354,27 @@ struct ChatListView: View {
         .sheet(item: $contactEditing) { chat in
             ContactNameSheet(initialName: chat.name == chat.jid ? "" : chat.name) { full, first in
                 vm.addContact(chat, fullName: full, firstName: first)
+            }
+        }
+        .sheet(isPresented: $showingNewGroup) {
+            if let client = vm.clientRef {
+                NewGroupSheet(
+                    model: NewGroupSheetModel(creator: client),
+                    contacts: contactsForPicker,
+                    onCreated: { newJID in
+                        session.requestSelectChat(newJID)
+                    }
+                )
+            }
+        }
+        .sheet(isPresented: $showingNewCommunity) {
+            if let client = vm.clientRef {
+                NewCommunitySheet(
+                    model: NewCommunitySheetModel(creator: client),
+                    onCreated: { newJID in
+                        session.requestSelectChat(newJID)
+                    }
+                )
             }
         }
         // Keep active search results in sync with any chat-list mutation —
@@ -520,6 +554,32 @@ struct ChatListView: View {
         return f.string(from: d)
     }
 
+    /// Contact list passed to the participant picker in `NewGroupSheet`.
+    /// Mirrors the dedup pattern used by `ChatInfoView` when populating
+    /// add-participants: walk `session.contactNames`, prefer the PN form
+    /// over `@lid` when both are known, and drop self.
+    private var contactsForPicker: [BridgeContact] {
+        guard let client = vm.clientRef else { return [] }
+        let selfKey = JIDNormalize.key(client.ownJID, client: client)
+        var byKey: [String: BridgeContact] = [:]
+        for (jid, name) in session.contactNames {
+            let key = JIDNormalize.key(jid, client: client)
+            if key == selfKey { continue }
+            if let existing = byKey[key] {
+                if existing.jid.hasSuffix("@lid"), !key.hasSuffix("@lid") {
+                    byKey[key] = BridgeContact(
+                        jid: key, name: name,
+                        pushName: nil, fullName: nil, businessName: nil)
+                }
+                continue
+            }
+            byKey[key] = BridgeContact(
+                jid: key, name: name,
+                pushName: nil, fullName: nil, businessName: nil)
+        }
+        return Array(byKey.values)
+    }
+
     @MainActor
     private func joinPreview(code: String) async {
         guard let client = vm.clientRef else { return }
@@ -586,6 +646,24 @@ struct ChatListView: View {
                         .foregroundStyle(Theme.textMuted)
                         .lineLimit(1)
                     Spacer(minLength: 0)
+                    // Pending join-request chip — admin-gated via the VM
+                    // helper so non-admins never see the badge even when
+                    // the store happens to hold a count (e.g. stale entry
+                    // after demote).
+                    if let pending = vm.pendingRequestsChip(for: chat) {
+                        HStack(spacing: 2) {
+                            Image(systemName: "checkmark.circle")
+                                .scaledIcon(10, weight: .semibold)
+                            Text("\(pending)")
+                                .scaledMono(10.5, weight: .semibold)
+                                .monospacedDigit()
+                        }
+                        .foregroundStyle(Theme.accentText)
+                        .padding(.horizontal, 5)
+                        .frame(minHeight: 18)
+                        .background(Theme.accent.opacity(0.25), in: Capsule())
+                        .help("\(pending) pending request\(pending == 1 ? "" : "s")")
+                    }
                     if chat.unread > 0 {
                         let muted = (chat.mutedUntil.map { $0 > Date() }) ?? false
                         Text("\(chat.unread)")

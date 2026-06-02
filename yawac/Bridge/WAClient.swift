@@ -48,6 +48,10 @@ class WAClient: PhoneValidating, LIDResolving {
         case groupParticipantsChanged(chatJID: String, action: String,
                                       actorJID: String, jids: [String],
                                       timestamp: Int64)
+        case joinApprovalModeChanged(chatJID: String,
+                                     on: Bool,
+                                     actorJID: String,
+                                     timestamp: Int64)
         case messagePinned(chatJID: String, targetMessageID: String, senderJID: String, pinned: Bool, timestamp: Int64)
         case chatArchived(chatJID: String, archived: Bool, timestamp: Int64)
         case chatDeleted(chatJID: String, timestamp: Int64)
@@ -511,13 +515,105 @@ class WAClient: PhoneValidating, LIDResolving {
         return try JSONDecoder().decode(PhoneCheckResult.self, from: Data(json.utf8))
     }
 
-    func createGroup(name: String, participantJIDs: [String]) throws -> String {
+    /// Nonisolated so `NewGroupSheetModel` can call it from a detached task
+    /// — the bridge call is synchronous and a multi-second create round-trip
+    /// must not block the main actor.
+    nonisolated func createGroup(name: String, participantJIDs: [String]) throws -> String {
         let jids = try JSONEncoder().encode(participantJIDs)
         let jidsString = String(data: jids, encoding: .utf8) ?? "[]"
         var err: NSError?
         let out = go.createGroup(name, participantJIDs: jidsString, error: &err)
         if let err { throw err }
         return out
+    }
+
+    /// Creates a new community parent group. The server auto-creates the
+    /// default announcements sub-group, whose JID arrives via a JoinedGroup
+    /// event shortly after. Returns the parent's JID.
+    ///
+    /// Nonisolated so `NewCommunitySheetModel` can call it from a detached
+    /// task — the bridge call is synchronous and the create round-trip must
+    /// not block the main actor.
+    nonisolated func createCommunity(name: String) throws -> String {
+        var err: NSError?
+        let out = go.createCommunity(name, error: &err)
+        if let err { throw err }
+        return out
+    }
+
+    /// Creates a new sub-group inside the community parent identified by
+    /// `parentJID`. Caller must be admin of the parent (server enforces).
+    /// Returns the new sub-group's JID.
+    ///
+    /// Nonisolated so `NewSubGroupSheetModel` can call it from a detached
+    /// task — the bridge call is synchronous and the create round-trip
+    /// must not block the main actor.
+    nonisolated func createSubGroup(parentJID: String,
+                                    name: String,
+                                    participantJIDs: [String]) throws -> String {
+        let jids = try JSONEncoder().encode(participantJIDs)
+        let jidsString = String(data: jids, encoding: .utf8) ?? "[]"
+        var err: NSError?
+        let out = go.createSubGroup(parentJID,
+                                    name: name,
+                                    participantJIDsJSON: jidsString,
+                                    error: &err)
+        if let err { throw err }
+        return out
+    }
+
+    /// Attaches a child group to a community parent. Both JIDs must be
+    /// admin-controlled. Surfaces whatsmeow errors verbatim.
+    nonisolated func linkSubGroup(parentJID: String, subJID: String) throws {
+        try go.linkSubGroup(parentJID, subJIDStr: subJID)
+    }
+
+    /// Detaches a child from its parent community. Swift gates against
+    /// isDefaultSubGroup; server accepts the IQ even on the default
+    /// sub-group but it breaks the community.
+    nonisolated func unlinkSubGroup(parentJID: String, subJID: String) throws {
+        try go.unlinkSubGroup(parentJID, subJIDStr: subJID)
+    }
+
+    /// Returns the pending join-request queue for `chatJID`. Empty array
+    /// when the queue is empty or approval-mode is off (the two are
+    /// indistinguishable at this layer — consult
+    /// `BridgeGroupModel.joinApprovalMode` for the mode flag).
+    /// Nonisolated so `JoinRequestStore` can drive it from a detached
+    /// task without hopping back to the main actor for every group.
+    nonisolated func getGroupJoinRequests(chatJID: String) throws -> [BridgeJoinRequest] {
+        var err: NSError?
+        let json = go.getGroupJoinRequests(chatJID, error: &err)
+        if let err { throw err }
+        return try JSONDecoder().decode([BridgeJoinRequest].self,
+                                        from: Data(json.utf8))
+    }
+
+    /// Applies "approve" or "reject" to a batch of pending join requests.
+    /// Per-row failures populate `errorCode` on the returned rows; the
+    /// outer error is reserved for fatal cases (network / unauthorized /
+    /// group missing).
+    /// Nonisolated so the admin panel can dispatch the bridge call from a
+    /// detached task and keep the main actor free while the queue churns.
+    nonisolated func updateGroupJoinRequests(chatJID: String,
+                                             action: String,
+                                             jids: [String]) throws -> [BridgeJoinRequestResult] {
+        let encoded = try JSONEncoder().encode(jids)
+        let jidsString = String(data: encoded, encoding: .utf8) ?? "[]"
+        var err: NSError?
+        let json = go.updateGroupJoinRequests(chatJID,
+                                              action: action,
+                                              participantJIDsJSON: jidsString,
+                                              error: &err)
+        if let err { throw err }
+        return try JSONDecoder().decode([BridgeJoinRequestResult].self,
+                                        from: Data(json.utf8))
+    }
+
+    /// Flips the require-admin-approval gate on a group on or off.
+    /// Admin only.
+    nonisolated func setGroupJoinApprovalMode(chatJID: String, on: Bool) throws {
+        try go.setGroupJoinApprovalMode(chatJID, on: on)
     }
 
     nonisolated func leaveGroup(jid: String) throws {
@@ -877,6 +973,25 @@ class WAClient: PhoneValidating, LIDResolving {
                     chatJID: g.chatJID, action: g.action,
                     actorJID: g.actorJID ?? "",
                     jids: g.jids, timestamp: g.timestamp)
+            }
+        case "JoinApprovalModeChanged":
+            struct J: Codable {
+                let chatJID: String
+                let on: Bool
+                let actorJID: String?
+                let timestamp: Int64
+                enum CodingKeys: String, CodingKey {
+                    case chatJID = "chat_jid"
+                    case on
+                    case actorJID = "actor_jid"
+                    case timestamp
+                }
+            }
+            if let j = try? dec.decode(J.self, from: data) {
+                return .joinApprovalModeChanged(chatJID: j.chatJID,
+                                                on: j.on,
+                                                actorJID: j.actorJID ?? "",
+                                                timestamp: j.timestamp)
             }
         default:
             break

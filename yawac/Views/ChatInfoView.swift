@@ -64,6 +64,22 @@ struct ChatInfoView: View {
     @State private var pickedImage: NSImage? = nil
     @State private var confirmRemovePhoto: Bool = false
     @State private var inviteSheetOpen: Bool = false
+    // Community-admin link/create/unlink — surfaced from the LINKED
+    // GROUPS section header (+ menu) and per-row context menu. Sheets
+    // and the unlink confirmation are attached at the body level.
+    @State private var showingLinkSheet: Bool = false
+    @State private var showingNewSubGroupSheet: Bool = false
+    @State private var unlinkSubGroupTarget: BridgeSubGroup?
+    @State private var sectionError: String?
+    // Surfaces backend failures from the "Require admin approval to
+    // join" toggle (T25). Cleared after a short delay so the row
+    // doesn't grow a permanent error tail across re-renders.
+    @State private var toggleError: String?
+    /// Drives the in-info pending-requests admin queue (T27). Created
+    /// lazily in `loadGroup()` once we know the user admins this group
+    /// and approval-mode is on; nilled out otherwise so a non-admin or
+    /// approval-off chat doesn't render the section header.
+    @State private var pendingRequestsModel: PendingRequestsSectionModel?
 
     private var isGroup: Bool { chatJID.hasSuffix("@g.us") }
     private var name: String { session.displayName(for: chatJID) }
@@ -180,6 +196,80 @@ struct ChatInfoView: View {
                                 client: client,
                                 onClose: { inviteSheetOpen = false })
             }
+        }
+        .sheet(isPresented: $showingLinkSheet) {
+            if let g = group, let client = session.client {
+                // Bridge listGroups is synchronous; let the sheet render
+                // with an empty candidate set on failure rather than
+                // refusing to present.
+                let allGroups: [BridgeGroupModel] = (try? client.listGroups()) ?? []
+                let model = LinkSubGroupSheetModel(
+                    parentChatJID: g.jid,
+                    myJID: client.ownJID,
+                    availableGroups: allGroups,
+                    linker: client,
+                    client: client)
+                LinkSubGroupSheet(
+                    model: model,
+                    parentName: g.name,
+                    resolveCommunityName: { jid in
+                        session.chatList?.chats.first(where: { $0.jid == jid })?.name ?? jid
+                    },
+                    onLinked: {
+                        showingLinkSheet = false
+                        Task { await loadGroup() }
+                    }
+                )
+            }
+        }
+        .sheet(isPresented: $showingNewSubGroupSheet) {
+            if let g = group, let client = session.client {
+                let model = NewSubGroupSheetModel(parentJID: g.jid, creator: client)
+                NewSubGroupSheet(
+                    model: model,
+                    parentName: g.name,
+                    contacts: contactsForPicker,
+                    onCreated: { _ in
+                        showingNewSubGroupSheet = false
+                        Task { await loadGroup() }
+                    }
+                )
+            }
+        }
+        .confirmationDialog(
+            "Unlink \u{201C}\(unlinkSubGroupTarget?.name ?? "")\u{201D} from community?",
+            isPresented: Binding(
+                get: { unlinkSubGroupTarget != nil },
+                set: { if !$0 { unlinkSubGroupTarget = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button("Unlink", role: .destructive) {
+                if let sub = unlinkSubGroupTarget,
+                   let g = group,
+                   let client = session.client {
+                    let parentJID = g.jid
+                    let subJID = sub.jid
+                    Task { @MainActor in
+                        do {
+                            try await Task.detached {
+                                try client.unlinkSubGroup(parentJID: parentJID,
+                                                          subJID: subJID)
+                            }.value
+                            await loadGroup()
+                        } catch {
+                            sectionError = (error as NSError).localizedDescription
+                        }
+                        unlinkSubGroupTarget = nil
+                    }
+                } else {
+                    unlinkSubGroupTarget = nil
+                }
+            }
+            Button("Cancel", role: .cancel) {
+                unlinkSubGroupTarget = nil
+            }
+        } message: {
+            Text("It will become a standalone group. You can re-link it later.")
         }
     }
 
@@ -596,6 +686,75 @@ struct ChatInfoView: View {
             }
         }
 
+        // APPROVAL MODE — sub-group admin only. Hidden on the parent
+        // shell (the toggle isn't meaningful there) and on chats with
+        // no linked community parent. Optimistic flip on the local
+        // @State copy; revert + surface error on failure.
+        if isCurrentUserAdmin(g),
+           !g.isParent,
+           let parent = g.linkedParentJID,
+           !parent.isEmpty {
+            sectionCard(label: "JOIN APPROVAL") {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(alignment: .top, spacing: 8) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Require admin approval to join")
+                                .scaledUI(13)
+                                .foregroundStyle(Theme.text)
+                            Text("New members request to join; admins approve.")
+                                .scaledUI(11)
+                                .foregroundStyle(Theme.textMuted)
+                        }
+                        Spacer()
+                        Toggle("", isOn: Binding(
+                            get: { (group?.joinApprovalMode ?? g.joinApprovalMode) },
+                            set: { newValue in
+                                let prior = group?.joinApprovalMode
+                                    ?? g.joinApprovalMode
+                                // Optimistic flip on the @State shadow
+                                // copy so the UI reflects the new
+                                // state immediately.
+                                if var s = group {
+                                    s.joinApprovalMode = newValue
+                                    group = s
+                                }
+                                guard let client = session.client else { return }
+                                let jid = g.jid
+                                Task {
+                                    do {
+                                        try await Task.detached {
+                                            try client.setGroupJoinApprovalMode(
+                                                chatJID: jid, on: newValue)
+                                        }.value
+                                    } catch {
+                                        if var s = group {
+                                            s.joinApprovalMode = prior
+                                            group = s
+                                        }
+                                        toggleError = (error as NSError)
+                                            .localizedDescription
+                                    }
+                                }
+                            }
+                        ))
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+                    }
+                    if let err = toggleError {
+                        Text(err)
+                            .scaledUI(11)
+                            .foregroundStyle(Color.red.opacity(0.9))
+                            .task(id: err) {
+                                try? await Task.sleep(
+                                    nanoseconds: 6 * 1_000_000_000)
+                                toggleError = nil
+                            }
+                    }
+                }
+            }
+        }
+
         metadataRow([
             .init(label: "MEMBERS", value: "\(g.participants.count)"),
             .init(label: "CREATED",
@@ -656,13 +815,61 @@ struct ChatInfoView: View {
             }
         }
 
+        // Pending join requests — only when the user admins this
+        // sub-group, approval-mode is on, and there's at least one
+        // pending row. The header hides on an empty queue so the
+        // admin panel doesn't grow a perma-empty section.
+        if isCurrentUserAdmin(g),
+           !g.isParent,
+           g.joinApprovalMode,
+           let prModel = pendingRequestsModel,
+           !prModel.requests.isEmpty {
+            PendingRequestsSection(
+                model: prModel,
+                displayName: { jid in session.contactNames[jid] ?? jid }
+            )
+        }
+
         // Surface community sibling groups whenever there's a parent —
         // either we ARE the parent, or we're a sub-group with a known
         // parent. Skip the current chat (no self-row in its own list).
         let directory = subGroups.filter { $0.jid != chatJID }
-        if !directory.isEmpty {
+        let showLinkedSection = !directory.isEmpty || (isCurrentUserAdmin(g) && g.isParent)
+        if showLinkedSection {
             let label = g.isParent ? "LINKED GROUPS" : "COMMUNITY GROUPS"
-            sectionLabel(label, trailing: "\(directory.count)")
+            HStack(spacing: 8) {
+                sectionLabel(label, trailing: "\(directory.count)")
+                if isCurrentUserAdmin(g) && g.isParent {
+                    Menu {
+                        Button("Link existing group…") {
+                            showingLinkSheet = true
+                        }
+                        Button("Create new sub-group…") {
+                            showingNewSubGroupSheet = true
+                        }
+                    } label: {
+                        Image(systemName: "plus.circle")
+                            .scaledIcon(12, weight: .semibold)
+                            .foregroundStyle(Theme.accentText)
+                            .frame(width: 22, height: 22)
+                            .contentShape(Rectangle())
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    .help("Link or create a sub-group")
+                }
+            }
+            if let err = sectionError {
+                Text(err)
+                    .scaledUI(11)
+                    .foregroundStyle(Color.red.opacity(0.9))
+                    .padding(.bottom, 4)
+                    .task(id: err) {
+                        try? await Task.sleep(nanoseconds: 6 * 1_000_000_000)
+                        sectionError = nil
+                    }
+            }
             VStack(spacing: 0) {
                 ForEach(directory, id: \.jid) { sub in
                     subGroupRow(sub)
@@ -969,6 +1176,24 @@ struct ChatInfoView: View {
             guard joined else { return }
             session.requestSelectChat(sub.jid)
         }
+        .contextMenu {
+            Button("Copy JID") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(sub.jid, forType: .string)
+            }
+            // Unlink is gated on the *current* inspected group being a
+            // community parent that the user admins. Default sub-groups
+            // (the announcement sub) can't be unlinked individually.
+            if let g = group,
+               g.isParent,
+               isCurrentUserAdmin(g),
+               !sub.isDefaultSubGroup {
+                Divider()
+                Button("Unlink from community", role: .destructive) {
+                    unlinkSubGroupTarget = sub
+                }
+            }
+        }
     }
 
     @MainActor
@@ -1170,6 +1395,32 @@ struct ChatInfoView: View {
         }
     }
 
+    /// Contact list passed to `NewSubGroupSheet`'s participant picker.
+    /// Mirrors the dedup pattern from `ChatListView.contactsForPicker`:
+    /// walk `session.contactNames`, prefer the PN form over `@lid` when
+    /// both are known, and drop self.
+    private var contactsForPicker: [BridgeContact] {
+        guard let client = session.client else { return [] }
+        let selfKey = JIDNormalize.key(client.ownJID, client: client)
+        var byKey: [String: BridgeContact] = [:]
+        for (jid, name) in session.contactNames {
+            let key = JIDNormalize.key(jid, client: client)
+            if key == selfKey { continue }
+            if let existing = byKey[key] {
+                if existing.jid.hasSuffix("@lid"), !key.hasSuffix("@lid") {
+                    byKey[key] = BridgeContact(
+                        jid: key, name: name,
+                        pushName: nil, fullName: nil, businessName: nil)
+                }
+                continue
+            }
+            byKey[key] = BridgeContact(
+                jid: key, name: name,
+                pushName: nil, fullName: nil, businessName: nil)
+        }
+        return Array(byKey.values)
+    }
+
     @MainActor
     private func loadGroup() async {
         guard let client = session.client else { return }
@@ -1201,6 +1452,41 @@ struct ChatInfoView: View {
             if let parent = parentForDirectory, !parent.isEmpty,
                let subs = try? client.listSubGroups(parentJID: parent) {
                 self.subGroups = subs
+            }
+            // Seed the pending-requests section model whenever the
+            // user admins this sub-group AND approval-mode is on.
+            // Parent/community shells don't have a queue of their own;
+            // the queue lives on each sub-group, so we skip parents
+            // here. Non-admin / approval-off paths nil out the model
+            // so the section disappears without a stale row list.
+            if isCurrentUserAdmin(g), !g.isParent, g.joinApprovalMode {
+                if pendingRequestsModel?.chatJID != g.jid {
+                    pendingRequestsModel = PendingRequestsSectionModel(
+                        chatJID: g.jid,
+                        updater: client,
+                        store: session.joinRequestStore)
+                }
+                let chatJID = g.jid
+                do {
+                    let rows = try await Task.detached {
+                        try client.getGroupJoinRequests(chatJID: chatJID)
+                    }.value
+                    pendingRequestsModel?.requests = rows.map { r in
+                        PendingRequestRow(
+                            jid: r.jid,
+                            displayName: session.contactNames[r.jid] ?? r.jid,
+                            requestedAt: r.requestedAt
+                        )
+                    }
+                    session.joinRequestStore.set(
+                        chatJID: chatJID, count: rows.count)
+                } catch {
+                    // Silent: keep whatever rows the section already
+                    // had so a transient bridge hiccup doesn't blank
+                    // the admin panel mid-session.
+                }
+            } else {
+                pendingRequestsModel = nil
             }
         } catch {
             self.loadError = error.localizedDescription

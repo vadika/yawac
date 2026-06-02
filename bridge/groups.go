@@ -22,7 +22,42 @@ type JGroup struct {
 	IsParent          bool           `json:"is_parent,omitempty"`
 	LinkedParentJID   string         `json:"linked_parent_jid,omitempty"`
 	IsDefaultSubGroup bool           `json:"is_default_sub_group,omitempty"`
+	JoinApprovalMode  bool           `json:"join_approval_mode,omitempty"`
 	Participants      []JParticipant `json:"participants"`
+}
+
+// mapGroupInfo projects a whatsmeow types.GroupInfo into the bridge's
+// JSON-friendly JGroup. Centralises the @g.us normalisation for
+// LinkedParentJID (whatsmeow returns the bare default-server JID when
+// no parent is linked) and copies participants into JParticipant.
+// Used by both ListGroups and GetGroupInfo to keep their projections
+// in lock-step. Always returns a non-nil Participants slice (possibly
+// empty) so JSON marshals as `[]` rather than `null`.
+func mapGroupInfo(g *types.GroupInfo) JGroup {
+	linked := g.GroupLinkedParent.LinkedParentJID.String()
+	if !strings.HasSuffix(linked, "@g.us") {
+		linked = ""
+	}
+	out := JGroup{
+		JID:               g.JID.String(),
+		Name:              g.Name,  // promoted from embedded GroupName
+		Topic:             g.Topic, // promoted from embedded GroupTopic
+		OwnerJID:          g.OwnerJID.String(),
+		Created:           g.GroupCreated.Unix(),
+		IsParent:          g.GroupParent.IsParent,
+		LinkedParentJID:   linked,
+		IsDefaultSubGroup: g.GroupIsDefaultSub.IsDefaultSubGroup,
+		JoinApprovalMode:  g.GroupMembershipApprovalMode.IsJoinApprovalRequired,
+	}
+	out.Participants = make([]JParticipant, 0, len(g.Participants))
+	for _, p := range g.Participants {
+		out.Participants = append(out.Participants, JParticipant{
+			JID:     p.JID.String(),
+			IsAdmin: p.IsAdmin,
+			IsSuper: p.IsSuperAdmin,
+		})
+	}
+	return out
 }
 
 // JParticipant represents a single member of a group, optionally
@@ -52,32 +87,7 @@ func (c *Client) ListGroups() (string, error) {
 	}
 	out := make([]JGroup, 0, len(gs))
 	for _, g := range gs {
-		// LinkedParentJID may come back as the zero JID (rendered as the
-		// bare default server, e.g. "@s.whatsapp.net") when whatsmeow has
-		// no parent set. Treat anything that isn't a `@g.us` JID as none.
-		linked := g.GroupLinkedParent.LinkedParentJID.String()
-		if linked != "" && len(linked) >= 5 && linked[len(linked)-5:] != "@g.us" {
-			linked = ""
-		}
-		jg := JGroup{
-			JID:               g.JID.String(),
-			Name:              g.Name,  // promoted from embedded GroupName
-			Topic:             g.Topic, // promoted from embedded GroupTopic
-			OwnerJID:          g.OwnerJID.String(),
-			Created:           g.GroupCreated.Unix(),
-			IsParent:          g.GroupParent.IsParent,
-			LinkedParentJID:   linked,
-			IsDefaultSubGroup: g.GroupIsDefaultSub.IsDefaultSubGroup,
-		}
-		jg.Participants = make([]JParticipant, 0, len(g.Participants))
-		for _, p := range g.Participants {
-			jg.Participants = append(jg.Participants, JParticipant{
-				JID:     p.JID.String(),
-				IsAdmin: p.IsAdmin,
-				IsSuper: p.IsSuperAdmin,
-			})
-		}
-		out = append(out, jg)
+		out = append(out, mapGroupInfo(g))
 	}
 	b, _ := json.Marshal(out)
 	return string(b), nil
@@ -107,26 +117,7 @@ func (c *Client) GetGroupInfo(jidStr string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("get group: %w", err)
 	}
-	out := JGroup{
-		JID:               g.JID.String(),
-		Name:              g.Name,
-		Topic:             g.Topic,
-		OwnerJID:          g.OwnerJID.String(),
-		Created:           g.GroupCreated.Unix(),
-		IsParent:          g.GroupParent.IsParent,
-		LinkedParentJID:   g.GroupLinkedParent.LinkedParentJID.String(),
-		IsDefaultSubGroup: g.GroupIsDefaultSub.IsDefaultSubGroup,
-	}
-	if !strings.HasSuffix(out.LinkedParentJID, "@g.us") {
-		out.LinkedParentJID = ""
-	}
-	for _, p := range g.Participants {
-		out.Participants = append(out.Participants, JParticipant{
-			JID:     p.JID.String(),
-			IsAdmin: p.IsAdmin,
-			IsSuper: p.IsSuperAdmin,
-		})
-	}
+	out := mapGroupInfo(g)
 	b, _ := json.Marshal(out)
 	return string(b), nil
 }
@@ -156,6 +147,111 @@ func (c *Client) CreateGroup(name string, participantJIDs string) (string, error
 		return "", fmt.Errorf("create: %w", err)
 	}
 	return info.JID.String(), nil
+}
+
+// CreateCommunity creates a new community parent group. The server
+// auto-creates the default announcements sub-group, whose JID arrives
+// via a JoinedGroup event shortly after. Returns the parent's JID.
+// Surfaces the 25-char-name 406 from the server verbatim.
+func (c *Client) CreateCommunity(name string) (string, error) {
+	if c.wa == nil {
+		return "", errors.New("client closed")
+	}
+	info, err := c.wa.CreateGroup(context.Background(),
+		whatsmeow.ReqCreateGroup{
+			Name:        name,
+			GroupParent: types.GroupParent{IsParent: true},
+		})
+	if err != nil {
+		return "", fmt.Errorf("create community: %w", err)
+	}
+	return info.JID.String(), nil
+}
+
+// CreateSubGroup creates a new group inside the community parent
+// identified by parentJIDStr. participantJIDsJSON is a JSON []string
+// (may be "[]"). Caller must be admin of the parent (server enforces).
+// Returns the new sub-group's JID string.
+func (c *Client) CreateSubGroup(
+	parentJIDStr, name, participantJIDsJSON string,
+) (string, error) {
+	if c.wa == nil {
+		return "", errors.New("client closed")
+	}
+	parent, err := types.ParseJID(parentJIDStr)
+	if err != nil {
+		return "", fmt.Errorf("parse parent: %w", err)
+	}
+	var jids []string
+	if err := json.Unmarshal([]byte(participantJIDsJSON), &jids); err != nil {
+		return "", fmt.Errorf("parse participants: %w", err)
+	}
+	parsed := make([]types.JID, 0, len(jids))
+	for _, s := range jids {
+		j, err := types.ParseJID(s)
+		if err != nil {
+			return "", fmt.Errorf("parse %q: %w", s, err)
+		}
+		parsed = append(parsed, j)
+	}
+	// Guard before delegating: whatsmeow.CreateGroup probes
+	// Store.PrivacyTokens per participant and panics on an unpaired
+	// store. CreateCommunity never hits this because it sends no
+	// participants.
+	if c.wa.Store == nil || c.wa.Store.ID == nil {
+		return "", errors.New("not logged in")
+	}
+	info, err := c.wa.CreateGroup(context.Background(),
+		whatsmeow.ReqCreateGroup{
+			Name:              name,
+			Participants:      parsed,
+			GroupLinkedParent: types.GroupLinkedParent{LinkedParentJID: parent},
+		})
+	if err != nil {
+		return "", fmt.Errorf("create sub-group: %w", err)
+	}
+	return info.JID.String(), nil
+}
+
+// LinkSubGroup attaches a child group to a community parent. Both JIDs
+// must be admin-controlled. Surfaces whatsmeow errors verbatim.
+func (c *Client) LinkSubGroup(parentJIDStr, subJIDStr string) error {
+	if c.wa == nil {
+		return errors.New("client closed")
+	}
+	parent, err := types.ParseJID(parentJIDStr)
+	if err != nil {
+		return fmt.Errorf("parse parent: %w", err)
+	}
+	sub, err := types.ParseJID(subJIDStr)
+	if err != nil {
+		return fmt.Errorf("parse sub: %w", err)
+	}
+	if err := c.wa.LinkGroup(context.Background(), parent, sub); err != nil {
+		return fmt.Errorf("link group: %w", err)
+	}
+	return nil
+}
+
+// UnlinkSubGroup detaches a child from its parent community.
+// Swift gates against isDefaultSubGroup; server accepts the IQ
+// even on the default sub-group but it breaks the community.
+func (c *Client) UnlinkSubGroup(parentJIDStr, subJIDStr string) error {
+	if c.wa == nil {
+		return errors.New("client closed")
+	}
+	parent, err := types.ParseJID(parentJIDStr)
+	if err != nil {
+		return fmt.Errorf("parse parent: %w", err)
+	}
+	sub, err := types.ParseJID(subJIDStr)
+	if err != nil {
+		return fmt.Errorf("parse sub: %w", err)
+	}
+	if err := c.wa.UnlinkGroup(context.Background(), parent, sub); err != nil {
+		return fmt.Errorf("unlink group: %w", err)
+	}
+	return nil
 }
 
 // JSubGroup mirrors whatsmeow's types.GroupLinkTarget — a community
@@ -450,4 +546,116 @@ func (c *Client) JoinGroupViaLink(code string) (string, error) {
 		return "", fmt.Errorf("join via link: %w", err)
 	}
 	return jid.String(), nil
+}
+
+// JJoinRequest is one pending membership-approval request row.
+type JJoinRequest struct {
+	JID         string `json:"jid"`
+	RequestedAt int64  `json:"requested_at"` // unix seconds
+}
+
+// GetGroupJoinRequests returns JSON []JJoinRequest for `chatJIDStr`.
+// Returns "[]" when the queue is empty or approval-mode is off
+// (the two are indistinguishable at this layer; callers consult
+// BridgeGroupModel.joinApprovalMode for the mode flag).
+func (c *Client) GetGroupJoinRequests(chatJIDStr string) (string, error) {
+	if c.wa == nil {
+		return "", errors.New("client closed")
+	}
+	jid, err := types.ParseJID(chatJIDStr)
+	if err != nil {
+		return "", fmt.Errorf("parse jid: %w", err)
+	}
+	parts, err := c.wa.GetGroupRequestParticipants(context.Background(), jid)
+	if err != nil {
+		return "", fmt.Errorf("get join requests: %w", err)
+	}
+	out := make([]JJoinRequest, 0, len(parts))
+	for _, p := range parts {
+		out = append(out, JJoinRequest{
+			JID:         p.JID.String(),
+			RequestedAt: p.RequestedAt.Unix(),
+		})
+	}
+	b, _ := json.Marshal(out)
+	return string(b), nil
+}
+
+// JJoinRequestResult is one row of the UpdateGroupJoinRequests response.
+type JJoinRequestResult struct {
+	JID       string `json:"jid"`
+	ErrorCode int    `json:"error_code,omitempty"`
+}
+
+func joinRequestChangeFromString(s string) (whatsmeow.ParticipantRequestChange, error) {
+	switch s {
+	case "approve":
+		return whatsmeow.ParticipantChangeApprove, nil
+	case "reject":
+		return whatsmeow.ParticipantChangeReject, nil
+	}
+	return "", fmt.Errorf("invalid action %q (want approve|reject)", s)
+}
+
+// UpdateGroupJoinRequests applies "approve" or "reject" to a JSON
+// []string batch. Returns JSON []JJoinRequestResult. Per-row failures
+// populate ErrorCode; outer error is reserved for fatal cases
+// (network / unauthorized / group missing).
+func (c *Client) UpdateGroupJoinRequests(
+	chatJIDStr, action, participantJIDsJSON string,
+) (string, error) {
+	if c.wa == nil {
+		return "", errors.New("client closed")
+	}
+	change, err := joinRequestChangeFromString(action)
+	if err != nil {
+		return "", err
+	}
+	jid, err := types.ParseJID(chatJIDStr)
+	if err != nil {
+		return "", fmt.Errorf("parse jid: %w", err)
+	}
+	var jids []string
+	if err := json.Unmarshal([]byte(participantJIDsJSON), &jids); err != nil {
+		return "", fmt.Errorf("parse participants: %w", err)
+	}
+	parsed := make([]types.JID, 0, len(jids))
+	for _, s := range jids {
+		j, err := types.ParseJID(s)
+		if err != nil {
+			return "", fmt.Errorf("parse %q: %w", s, err)
+		}
+		parsed = append(parsed, j)
+	}
+	results, err := c.wa.UpdateGroupRequestParticipants(
+		context.Background(), jid, parsed, change)
+	if err != nil {
+		return "", fmt.Errorf("update join requests: %w", err)
+	}
+	out := make([]JJoinRequestResult, 0, len(results))
+	for _, r := range results {
+		out = append(out, JJoinRequestResult{
+			JID:       r.JID.String(),
+			ErrorCode: r.Error,
+		})
+	}
+	b, _ := json.Marshal(out)
+	return string(b), nil
+}
+
+// SetGroupJoinApprovalMode flips the require-admin-approval gate
+// on a group on or off. Admin only.
+func (c *Client) SetGroupJoinApprovalMode(chatJIDStr string, on bool) error {
+	if c.wa == nil {
+		return errors.New("client closed")
+	}
+	jid, err := types.ParseJID(chatJIDStr)
+	if err != nil {
+		return fmt.Errorf("parse jid: %w", err)
+	}
+	if err := c.wa.SetGroupJoinApprovalMode(
+		context.Background(), jid, on); err != nil {
+		return fmt.Errorf("set approval mode: %w", err)
+	}
+	return nil
 }

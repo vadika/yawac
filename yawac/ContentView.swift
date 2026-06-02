@@ -219,6 +219,13 @@ struct ContentView: View {
                     let canonical = JIDNormalize.canonical(chatJID, client: client)
                     vm.applyGroupParticipantsChange(
                         chatJID: canonical, action: action, jids: jids, at: when)
+                case .joinApprovalModeChanged(let chatJID, let on, _, _):
+                    // SessionViewModel already routes this event to refresh /
+                    // clear `JoinRequestStore`. Mirror the flag into `Chat`
+                    // so the sidebar chip gate flips in lockstep with the
+                    // store update.
+                    let canonical = JIDNormalize.canonical(chatJID, client: client)
+                    vm.applyIncomingJoinApprovalMode(chatJID: canonical, on: on)
                 default:
                     break
                 }

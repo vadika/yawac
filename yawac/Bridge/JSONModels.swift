@@ -159,6 +159,10 @@ struct BridgeGroupModel: Codable, Identifiable {
     let isParent: Bool
     let linkedParentJID: String?
     let isDefaultSubGroup: Bool
+    // `var` (not `let`) so admin UIs can optimistically flip the flag
+    // without re-building the whole struct. The decoder still treats
+    // missing/false payloads as `false`.
+    var joinApprovalMode: Bool
 
     enum CodingKeys: String, CodingKey {
         case jid, name, topic
@@ -167,12 +171,14 @@ struct BridgeGroupModel: Codable, Identifiable {
         case isParent = "is_parent"
         case linkedParentJID = "linked_parent_jid"
         case isDefaultSubGroup = "is_default_sub_group"
+        case joinApprovalMode = "join_approval_mode"
     }
 
     init(jid: String, name: String, topic: String, ownerJID: String,
          created: Int64, participants: [BridgeParticipantModel],
          isParent: Bool = false, linkedParentJID: String? = nil,
-         isDefaultSubGroup: Bool = false) {
+         isDefaultSubGroup: Bool = false,
+         joinApprovalMode: Bool = false) {
         self.jid = jid
         self.name = name
         self.topic = topic
@@ -182,6 +188,7 @@ struct BridgeGroupModel: Codable, Identifiable {
         self.isParent = isParent
         self.linkedParentJID = linkedParentJID
         self.isDefaultSubGroup = isDefaultSubGroup
+        self.joinApprovalMode = joinApprovalMode
     }
 
     init(from decoder: Decoder) throws {
@@ -201,6 +208,7 @@ struct BridgeGroupModel: Codable, Identifiable {
             linkedParentJID = nil
         }
         isDefaultSubGroup = try c.decodeIfPresent(Bool.self, forKey: .isDefaultSubGroup) ?? false
+        joinApprovalMode = try c.decodeIfPresent(Bool.self, forKey: .joinApprovalMode) ?? false
     }
 }
 
@@ -292,4 +300,24 @@ struct BridgeContact: Codable, Identifiable {
 struct BridgeUserInfo: Codable {
     let jid: String
     let status: String?
+}
+
+struct BridgeJoinRequest: Decodable, Hashable {
+    let jid: String
+    let requestedAt: Int64
+
+    enum CodingKeys: String, CodingKey {
+        case jid
+        case requestedAt = "requested_at"
+    }
+}
+
+struct BridgeJoinRequestResult: Decodable, Hashable {
+    let jid: String
+    let errorCode: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case jid
+        case errorCode = "error_code"
+    }
 }

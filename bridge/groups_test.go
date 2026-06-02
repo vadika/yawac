@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"go.mau.fi/whatsmeow"
+	"go.mau.fi/whatsmeow/types"
 )
 
 func TestListGroupsReturnsArray(t *testing.T) {
@@ -114,5 +115,212 @@ func TestJoinGroupViaLinkUnpaired(t *testing.T) {
 	_, err := c.JoinGroupViaLink("AbCdEfGhIjKlMn")
 	if err == nil {
 		t.Fatal("expected error on unpaired client")
+	}
+}
+
+func TestCreateCommunityUnpaired(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/cc.db")
+	defer c.Close()
+	_, err := c.CreateCommunity("Outdoor Club")
+	if err == nil {
+		t.Fatal("expected error on unpaired client")
+	}
+}
+
+func TestCreateCommunityClosed(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/cc2.db")
+	c.Close()
+	_, err := c.CreateCommunity("Outdoor Club")
+	if err == nil {
+		t.Fatal("expected error on closed client")
+	}
+}
+
+func TestCreateSubGroupUnpaired(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/csg.db")
+	defer c.Close()
+	_, err := c.CreateSubGroup(
+		"1234@g.us", "Hiking", `["1111@s.whatsapp.net"]`)
+	if err == nil {
+		t.Fatal("expected error on unpaired client")
+	}
+}
+
+func TestCreateSubGroupBadParentJID(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/csg2.db")
+	defer c.Close()
+	_, err := c.CreateSubGroup("not a jid", "Hiking", `[]`)
+	if err == nil {
+		t.Fatal("expected parse error on bad parent JID")
+	}
+}
+
+func TestCreateSubGroupBadParticipantJSON(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/csg3.db")
+	defer c.Close()
+	_, err := c.CreateSubGroup("1234@g.us", "Hiking", "not json")
+	if err == nil {
+		t.Fatal("expected parse error on bad participant JSON")
+	}
+}
+
+func TestLinkSubGroupUnpaired(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/ls.db")
+	defer c.Close()
+	err := c.LinkSubGroup("1111@g.us", "2222@g.us")
+	if err == nil {
+		t.Fatal("expected error on unpaired client")
+	}
+}
+
+func TestLinkSubGroupBadJID(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/ls2.db")
+	defer c.Close()
+	err := c.LinkSubGroup("not a jid", "2222@g.us")
+	if err == nil {
+		t.Fatal("expected parse error on bad parent JID")
+	}
+	err = c.LinkSubGroup("1111@g.us", "not a jid")
+	if err == nil {
+		t.Fatal("expected parse error on bad sub JID")
+	}
+}
+
+func TestUnlinkSubGroupUnpaired(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/us.db")
+	defer c.Close()
+	err := c.UnlinkSubGroup("1111@g.us", "2222@g.us")
+	if err == nil {
+		t.Fatal("expected error on unpaired client")
+	}
+}
+
+func TestUnlinkSubGroupBadJID(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/us2.db")
+	defer c.Close()
+	err := c.UnlinkSubGroup("not a jid", "2222@g.us")
+	if err == nil {
+		t.Fatal("expected parse error on bad parent JID")
+	}
+}
+
+func TestGetGroupJoinRequestsUnpaired(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/gjr.db")
+	defer c.Close()
+	_, err := c.GetGroupJoinRequests("1234@g.us")
+	if err == nil {
+		t.Fatal("expected error on unpaired client")
+	}
+}
+
+func TestGetGroupJoinRequestsBadJID(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/gjr2.db")
+	defer c.Close()
+	_, err := c.GetGroupJoinRequests("not a jid")
+	if err == nil {
+		t.Fatal("expected parse error")
+	}
+}
+
+func TestJJoinRequestJSONShape(t *testing.T) {
+	in := JJoinRequest{JID: "1111@s.whatsapp.net", RequestedAt: 1234567890}
+	b, err := json.Marshal(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(b)
+	want := `{"jid":"1111@s.whatsapp.net","requested_at":1234567890}`
+	if got != want {
+		t.Fatalf("JSON mismatch:\ngot:  %s\nwant: %s", got, want)
+	}
+}
+
+func TestJoinRequestChangeFromString(t *testing.T) {
+	cases := []struct {
+		in   string
+		want whatsmeow.ParticipantRequestChange
+		ok   bool
+	}{
+		{"approve", whatsmeow.ParticipantChangeApprove, true},
+		{"reject", whatsmeow.ParticipantChangeReject, true},
+		{"banish", "", false},
+		{"", "", false},
+	}
+	for _, c := range cases {
+		got, err := joinRequestChangeFromString(c.in)
+		if c.ok && (err != nil || got != c.want) {
+			t.Fatalf("%q: got (%q,%v) want (%q,nil)", c.in, got, err, c.want)
+		}
+		if !c.ok && err == nil {
+			t.Fatalf("%q: expected error, got nil", c.in)
+		}
+	}
+}
+
+func TestUpdateGroupJoinRequestsUnpaired(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/ujr.db")
+	defer c.Close()
+	_, err := c.UpdateGroupJoinRequests(
+		"1234@g.us", "approve",
+		`["1111@s.whatsapp.net"]`)
+	if err == nil {
+		t.Fatal("expected error on unpaired client")
+	}
+}
+
+func TestUpdateGroupJoinRequestsInvalidAction(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/ujr2.db")
+	defer c.Close()
+	_, err := c.UpdateGroupJoinRequests(
+		"1234@g.us", "banish",
+		`["1111@s.whatsapp.net"]`)
+	if err == nil {
+		t.Fatal("expected error for invalid action")
+	}
+}
+
+func TestJJoinRequestResultJSONShape(t *testing.T) {
+	in := JJoinRequestResult{JID: "1@s.whatsapp.net", ErrorCode: 403}
+	b, _ := json.Marshal(in)
+	want := `{"jid":"1@s.whatsapp.net","error_code":403}`
+	if string(b) != want {
+		t.Fatalf("got %s want %s", b, want)
+	}
+}
+
+func TestSetGroupJoinApprovalModeUnpaired(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/sm.db")
+	defer c.Close()
+	err := c.SetGroupJoinApprovalMode("1234@g.us", true)
+	if err == nil {
+		t.Fatal("expected error on unpaired client")
+	}
+}
+
+func TestSetGroupJoinApprovalModeBadJID(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/sm2.db")
+	defer c.Close()
+	err := c.SetGroupJoinApprovalMode("not a jid", true)
+	if err == nil {
+		t.Fatal("expected parse error")
+	}
+}
+
+func TestMapGroupInfoCarriesJoinApprovalMode(t *testing.T) {
+	in := &types.GroupInfo{
+		JID:       types.NewJID("5555", "g.us"),
+		GroupName: types.GroupName{Name: "Test"},
+		GroupMembershipApprovalMode: types.GroupMembershipApprovalMode{
+			IsJoinApprovalRequired: true,
+		},
+	}
+	got := mapGroupInfo(in)
+	if !got.JoinApprovalMode {
+		t.Fatalf("expected JoinApprovalMode true, got %+v", got)
+	}
+	in.GroupMembershipApprovalMode.IsJoinApprovalRequired = false
+	got = mapGroupInfo(in)
+	if got.JoinApprovalMode {
+		t.Fatalf("expected JoinApprovalMode false, got %+v", got)
 	}
 }

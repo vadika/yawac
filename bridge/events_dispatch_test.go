@@ -2,6 +2,7 @@ package bridge
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -324,5 +325,123 @@ func TestDispatchGroupParticipantsEmptyAllNoEvents(t *testing.T) {
 	case e := <-sink.ch:
 		t.Fatalf("expected no events, got %+v", e)
 	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+// findInSink scans the sink's recorded events for the first one with the
+// given kind. Returns nil if not found. Gives the goroutine dispatch a brief
+// grace window so all expected events are present before we look.
+func findInSink(sink *recSink, kind string) *recEvent {
+	deadline := time.Now().Add(200 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		sink.mu.Lock()
+		for i, e := range sink.events {
+			if e.kind == kind {
+				out := sink.events[i]
+				sink.mu.Unlock()
+				return &out
+			}
+		}
+		sink.mu.Unlock()
+		time.Sleep(10 * time.Millisecond)
+	}
+	return nil
+}
+
+func boolJSON(b bool) string {
+	if b {
+		return "true"
+	}
+	return "false"
+}
+
+// TestDispatchGroupInfoCarriesLinkedParentAndDefaultSub verifies that when
+// a GroupInfo arrives for a sub-group that was linked under a community
+// parent, the GroupInfoChanged payload carries both linked_parent_jid and
+// is_default_subgroup. whatsmeow exposes this via evt.Link, not via
+// direct fields on events.GroupInfo, so the test wires it that way.
+func TestDispatchGroupInfoCarriesLinkedParentAndDefaultSub(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/gi_lp.db")
+	defer c.Close()
+	sink := newRecSink()
+	c.SetEventSink(sink)
+	parent, _ := types.ParseJID("1111@g.us")
+	sub, _ := types.ParseJID("2222@g.us")
+	c.dispatchGroupInfo(&events.GroupInfo{
+		JID:       sub,
+		Name:      &types.GroupName{Name: "Sub"},
+		Timestamp: time.Unix(1700000000, 0),
+		Link: &types.GroupLinkChange{
+			Type: types.GroupLinkChangeTypeParent,
+			Group: types.GroupLinkTarget{
+				JID:               parent,
+				GroupIsDefaultSub: types.GroupIsDefaultSub{IsDefaultSubGroup: true},
+			},
+		},
+	})
+	ev := sink.wait(t, "GroupInfoChanged", time.Second)
+	if !strings.Contains(ev.payload, `"linked_parent_jid":"1111@g.us"`) {
+		t.Errorf("missing linked_parent_jid: %s", ev.payload)
+	}
+	if !strings.Contains(ev.payload, `"is_default_subgroup":true`) {
+		t.Errorf("missing is_default_subgroup: %s", ev.payload)
+	}
+}
+
+// TestDispatchGroupInfoFiresApprovalModeChanged covers the new
+// JoinApprovalModeChanged fan-out. whatsmeow uses bool
+// IsJoinApprovalRequired (not the "request_required" string in the spec).
+func TestDispatchGroupInfoFiresApprovalModeChanged(t *testing.T) {
+	cases := []struct {
+		required bool
+		wantOn   bool
+	}{
+		{true, true},
+		{false, false},
+	}
+	for _, tc := range cases {
+		c, _ := NewClient(t.TempDir() + "/gi_ap.db")
+		sink := newRecSink()
+		c.SetEventSink(sink)
+		jid := types.JID{User: "3333", Server: types.GroupServer}
+		c.dispatchGroupInfo(&events.GroupInfo{
+			JID: jid,
+			MembershipApprovalMode: &types.GroupMembershipApprovalMode{
+				IsJoinApprovalRequired: tc.required,
+			},
+			Timestamp: time.Unix(1700000001, 0),
+		})
+		ev := sink.wait(t, "JoinApprovalModeChanged", time.Second)
+		wantOnJSON := `"on":` + boolJSON(tc.wantOn)
+		if !strings.Contains(ev.payload, wantOnJSON) {
+			t.Errorf("required=%v: payload=%s want contains %s",
+				tc.required, ev.payload, wantOnJSON)
+		}
+		c.Close()
+	}
+}
+
+// TestDispatchGroupInfoFiresBothNameAndApprovalMode confirms a single
+// events.GroupInfo can fan out into both a GroupInfoChanged and a
+// JoinApprovalModeChanged event in one call.
+func TestDispatchGroupInfoFiresBothNameAndApprovalMode(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/gi_both.db")
+	defer c.Close()
+	sink := newRecSink()
+	c.SetEventSink(sink)
+	jid := types.JID{User: "4444", Server: types.GroupServer}
+	c.dispatchGroupInfo(&events.GroupInfo{
+		JID:  jid,
+		Name: &types.GroupName{Name: "Renamed"},
+		MembershipApprovalMode: &types.GroupMembershipApprovalMode{
+			IsJoinApprovalRequired: true,
+		},
+		Timestamp: time.Unix(1700000002, 0),
+	})
+	if findInSink(sink, "GroupInfoChanged") == nil {
+		t.Error("missing GroupInfoChanged")
+	}
+	if findInSink(sink, "JoinApprovalModeChanged") == nil {
+		t.Error("missing JoinApprovalModeChanged")
 	}
 }
