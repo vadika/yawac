@@ -593,9 +593,11 @@ class WAClient: PhoneValidating, LIDResolving {
     /// Per-row failures populate `errorCode` on the returned rows; the
     /// outer error is reserved for fatal cases (network / unauthorized /
     /// group missing).
-    func updateGroupJoinRequests(chatJID: String,
-                                 action: String,
-                                 jids: [String]) throws -> [BridgeJoinRequestResult] {
+    /// Nonisolated so the admin panel can dispatch the bridge call from a
+    /// detached task and keep the main actor free while the queue churns.
+    nonisolated func updateGroupJoinRequests(chatJID: String,
+                                             action: String,
+                                             jids: [String]) throws -> [BridgeJoinRequestResult] {
         let encoded = try JSONEncoder().encode(jids)
         let jidsString = String(data: encoded, encoding: .utf8) ?? "[]"
         var err: NSError?
