@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"go.mau.fi/whatsmeow"
+	"go.mau.fi/whatsmeow/types"
 )
 
 func TestListGroupsReturnsArray(t *testing.T) {
@@ -302,5 +303,24 @@ func TestSetGroupJoinApprovalModeBadJID(t *testing.T) {
 	err := c.SetGroupJoinApprovalMode("not a jid", true)
 	if err == nil {
 		t.Fatal("expected parse error")
+	}
+}
+
+func TestMapGroupInfoCarriesJoinApprovalMode(t *testing.T) {
+	in := &types.GroupInfo{
+		JID:       types.NewJID("5555", "g.us"),
+		GroupName: types.GroupName{Name: "Test"},
+		GroupMembershipApprovalMode: types.GroupMembershipApprovalMode{
+			IsJoinApprovalRequired: true,
+		},
+	}
+	got := mapGroupInfo(in)
+	if !got.JoinApprovalMode {
+		t.Fatalf("expected JoinApprovalMode true, got %+v", got)
+	}
+	in.GroupMembershipApprovalMode.IsJoinApprovalRequired = false
+	got = mapGroupInfo(in)
+	if got.JoinApprovalMode {
+		t.Fatalf("expected JoinApprovalMode false, got %+v", got)
 	}
 }

@@ -22,7 +22,42 @@ type JGroup struct {
 	IsParent          bool           `json:"is_parent,omitempty"`
 	LinkedParentJID   string         `json:"linked_parent_jid,omitempty"`
 	IsDefaultSubGroup bool           `json:"is_default_sub_group,omitempty"`
+	JoinApprovalMode  bool           `json:"join_approval_mode,omitempty"`
 	Participants      []JParticipant `json:"participants"`
+}
+
+// mapGroupInfo projects a whatsmeow types.GroupInfo into the bridge's
+// JSON-friendly JGroup. Centralises the @g.us normalisation for
+// LinkedParentJID (whatsmeow returns the bare default-server JID when
+// no parent is linked) and copies participants into JParticipant.
+// Used by both ListGroups and GetGroupInfo to keep their projections
+// in lock-step. Always returns a non-nil Participants slice (possibly
+// empty) so JSON marshals as `[]` rather than `null`.
+func mapGroupInfo(g *types.GroupInfo) JGroup {
+	linked := g.GroupLinkedParent.LinkedParentJID.String()
+	if !strings.HasSuffix(linked, "@g.us") {
+		linked = ""
+	}
+	out := JGroup{
+		JID:               g.JID.String(),
+		Name:              g.Name,  // promoted from embedded GroupName
+		Topic:             g.Topic, // promoted from embedded GroupTopic
+		OwnerJID:          g.OwnerJID.String(),
+		Created:           g.GroupCreated.Unix(),
+		IsParent:          g.GroupParent.IsParent,
+		LinkedParentJID:   linked,
+		IsDefaultSubGroup: g.GroupIsDefaultSub.IsDefaultSubGroup,
+		JoinApprovalMode:  g.GroupMembershipApprovalMode.IsJoinApprovalRequired,
+	}
+	out.Participants = make([]JParticipant, 0, len(g.Participants))
+	for _, p := range g.Participants {
+		out.Participants = append(out.Participants, JParticipant{
+			JID:     p.JID.String(),
+			IsAdmin: p.IsAdmin,
+			IsSuper: p.IsSuperAdmin,
+		})
+	}
+	return out
 }
 
 // JParticipant represents a single member of a group, optionally
@@ -52,32 +87,7 @@ func (c *Client) ListGroups() (string, error) {
 	}
 	out := make([]JGroup, 0, len(gs))
 	for _, g := range gs {
-		// LinkedParentJID may come back as the zero JID (rendered as the
-		// bare default server, e.g. "@s.whatsapp.net") when whatsmeow has
-		// no parent set. Treat anything that isn't a `@g.us` JID as none.
-		linked := g.GroupLinkedParent.LinkedParentJID.String()
-		if linked != "" && len(linked) >= 5 && linked[len(linked)-5:] != "@g.us" {
-			linked = ""
-		}
-		jg := JGroup{
-			JID:               g.JID.String(),
-			Name:              g.Name,  // promoted from embedded GroupName
-			Topic:             g.Topic, // promoted from embedded GroupTopic
-			OwnerJID:          g.OwnerJID.String(),
-			Created:           g.GroupCreated.Unix(),
-			IsParent:          g.GroupParent.IsParent,
-			LinkedParentJID:   linked,
-			IsDefaultSubGroup: g.GroupIsDefaultSub.IsDefaultSubGroup,
-		}
-		jg.Participants = make([]JParticipant, 0, len(g.Participants))
-		for _, p := range g.Participants {
-			jg.Participants = append(jg.Participants, JParticipant{
-				JID:     p.JID.String(),
-				IsAdmin: p.IsAdmin,
-				IsSuper: p.IsSuperAdmin,
-			})
-		}
-		out = append(out, jg)
+		out = append(out, mapGroupInfo(g))
 	}
 	b, _ := json.Marshal(out)
 	return string(b), nil
@@ -107,26 +117,7 @@ func (c *Client) GetGroupInfo(jidStr string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("get group: %w", err)
 	}
-	out := JGroup{
-		JID:               g.JID.String(),
-		Name:              g.Name,
-		Topic:             g.Topic,
-		OwnerJID:          g.OwnerJID.String(),
-		Created:           g.GroupCreated.Unix(),
-		IsParent:          g.GroupParent.IsParent,
-		LinkedParentJID:   g.GroupLinkedParent.LinkedParentJID.String(),
-		IsDefaultSubGroup: g.GroupIsDefaultSub.IsDefaultSubGroup,
-	}
-	if !strings.HasSuffix(out.LinkedParentJID, "@g.us") {
-		out.LinkedParentJID = ""
-	}
-	for _, p := range g.Participants {
-		out.Participants = append(out.Participants, JParticipant{
-			JID:     p.JID.String(),
-			IsAdmin: p.IsAdmin,
-			IsSuper: p.IsSuperAdmin,
-		})
-	}
+	out := mapGroupInfo(g)
 	b, _ := json.Marshal(out)
 	return string(b), nil
 }
