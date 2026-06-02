@@ -1039,10 +1039,24 @@ struct ChatInfoView: View {
 
     private func openAddPanel(group: BridgeGroupModel) {
         guard let client = session.client else { return }
-        let existing = Set(group.participants.map(\.jid))
-        let contacts = session.contactNames.map { (jid, name) in
-            BridgeContact(jid: jid, name: name,
-                          pushName: nil, fullName: nil, businessName: nil)
+        // Existing roster + the user themselves must not appear in the picker.
+        // Strip device suffixes via JIDNormalize.bare; the server rejects
+        // device-suffixed JIDs in update_participants IQ with a 400.
+        let ownBare = JIDNormalize.bare(client.ownJID)
+        var existing = Set(group.participants.map { JIDNormalize.bare($0.jid) })
+        existing.insert(ownBare)
+        // Dedupe contacts by bare JID — session.contactNames can carry the
+        // same person twice (e.g. once from address book, once from a
+        // device-suffixed message).
+        var seen = Set<String>()
+        var contacts: [BridgeContact] = []
+        for (jid, name) in session.contactNames {
+            let bare = JIDNormalize.bare(jid)
+            guard bare != ownBare, !seen.contains(bare) else { continue }
+            seen.insert(bare)
+            contacts.append(BridgeContact(
+                jid: bare, name: name,
+                pushName: nil, fullName: nil, businessName: nil))
         }
         addPanelModel = AddParticipantsPanelModel(
             existingParticipantJIDs: existing,
@@ -1060,15 +1074,20 @@ struct ChatInfoView: View {
         guard let client = session.client, let model = addPanelModel else { return }
         model.inFlight = true
         let chatJID = group.jid
+        // Defence in depth: strip device suffixes server-side rejects.
+        let bareJIDs = jids.map { JIDNormalize.bare($0) }
+        NSLog("[yawac/commitAdd] chat=%@ jids=%@", chatJID, bareJIDs.description)
         Task { @MainActor in
             defer { model.inFlight = false }
             do {
                 let resp = try client.updateGroupParticipants(
                     chatJID: chatJID, action: "add",
-                    participantJIDs: jids)
+                    participantJIDs: bareJIDs)
+                NSLog("[yawac/commitAdd] resp=%@", resp.description)
                 model.applyResult(resp)
                 await loadGroup()
             } catch {
+                NSLog("[yawac/commitAdd] failed: %@", String(describing: error))
                 participantOpError = error.localizedDescription
                 scheduleParticipantErrorAutodismiss()
             }
@@ -1095,13 +1114,18 @@ struct ChatInfoView: View {
                                     jid: String) {
         guard let client = session.client else { return }
         let chatJID = group.jid
+        let bare = JIDNormalize.bare(jid)
+        NSLog("[yawac/applyParticipantOp] chat=%@ action=%@ jid=%@",
+              chatJID, action, bare)
         Task { @MainActor in
             do {
                 _ = try client.updateGroupParticipants(
                     chatJID: chatJID, action: action,
-                    participantJIDs: [jid])
+                    participantJIDs: [bare])
                 await loadGroup()
             } catch {
+                NSLog("[yawac/applyParticipantOp] failed action=%@ jid=%@ err=%@",
+                      action, bare, String(describing: error))
                 participantOpError = error.localizedDescription
                 scheduleParticipantErrorAutodismiss()
             }
