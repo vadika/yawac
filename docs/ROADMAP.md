@@ -38,11 +38,13 @@ relevant context lingers).
 
 ## Groups
 
-- ✅ **Group management** — create + edit name + edit description
+- ✅ **Group management** — edit name + edit description
   (admin-only) shipped in v0.4.0; live participant add (contacts +
   +phone fallback with `AddRequest` privacy-block surfacing) /
   remove / promote / demote and avatar edit (with crop sheet)
-  shipped 2026-06-02.
+  shipped 2026-06-02. **New group creation** (sidebar `+` menu)
+  shipped in v0.7.1 — composer + multi-select participant picker
+  hits `WAClient.createGroup`.
 - ✅ **Invite link / QR** — generate, copy, share, admin-only revoke
   with cooldown; ⌘K paste-to-join with preview + pending-approval
   state. Shipped 2026-06-02.
@@ -57,9 +59,14 @@ relevant context lingers).
 - ✅ **Communities** — parent / sub-group display + directory +
   best-effort join shipped earlier; admin actions (link / unlink
   sub-groups, approve / reject join requests with sidebar pending
-  chip, approval-mode toggle) and create-new-group /
-  create-new-community / create-new-sub-group flows shipped in
-  v0.7.1.
+  chip, "require admin approval to join" toggle) and create-new-
+  community / create-new-sub-group flows shipped in v0.7.1.
+  Approval-mode toggle is gated server-side to community parents
+  and standalone non-community groups — community sub-groups
+  inherit from the parent and reject `SetGroupJoinApprovalMode`
+  with `400 bad-request`. Pending-request count refresh is bounded
+  by foreground polling (whatsmeow does not emit an inbound
+  `JoinRequest` event).
 
 ## Productivity / macOS
 
