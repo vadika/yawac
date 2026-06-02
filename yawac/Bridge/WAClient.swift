@@ -568,7 +568,9 @@ class WAClient: PhoneValidating, LIDResolving {
     /// when the queue is empty or approval-mode is off (the two are
     /// indistinguishable at this layer — consult
     /// `BridgeGroupModel.joinApprovalMode` for the mode flag).
-    func getGroupJoinRequests(chatJID: String) throws -> [BridgeJoinRequest] {
+    /// Nonisolated so `JoinRequestStore` can drive it from a detached
+    /// task without hopping back to the main actor for every group.
+    nonisolated func getGroupJoinRequests(chatJID: String) throws -> [BridgeJoinRequest] {
         var err: NSError?
         let json = go.getGroupJoinRequests(chatJID, error: &err)
         if let err { throw err }
