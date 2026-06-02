@@ -177,6 +177,51 @@ func (c *Client) CreateCommunity(name string) (string, error) {
 	return info.JID.String(), nil
 }
 
+// CreateSubGroup creates a new group inside the community parent
+// identified by parentJIDStr. participantJIDsJSON is a JSON []string
+// (may be "[]"). Caller must be admin of the parent (server enforces).
+// Returns the new sub-group's JID string.
+func (c *Client) CreateSubGroup(
+	parentJIDStr, name, participantJIDsJSON string,
+) (string, error) {
+	if c.wa == nil {
+		return "", errors.New("client closed")
+	}
+	parent, err := types.ParseJID(parentJIDStr)
+	if err != nil {
+		return "", fmt.Errorf("parse parent: %w", err)
+	}
+	var jids []string
+	if err := json.Unmarshal([]byte(participantJIDsJSON), &jids); err != nil {
+		return "", fmt.Errorf("parse participants: %w", err)
+	}
+	parsed := make([]types.JID, 0, len(jids))
+	for _, s := range jids {
+		j, err := types.ParseJID(s)
+		if err != nil {
+			return "", fmt.Errorf("parse %q: %w", s, err)
+		}
+		parsed = append(parsed, j)
+	}
+	// Guard before delegating: whatsmeow.CreateGroup probes
+	// Store.PrivacyTokens per participant and panics on an unpaired
+	// store. CreateCommunity never hits this because it sends no
+	// participants.
+	if c.wa.Store == nil || c.wa.Store.ID == nil {
+		return "", errors.New("not logged in")
+	}
+	info, err := c.wa.CreateGroup(context.Background(),
+		whatsmeow.ReqCreateGroup{
+			Name:              name,
+			Participants:      parsed,
+			GroupLinkedParent: types.GroupLinkedParent{LinkedParentJID: parent},
+		})
+	if err != nil {
+		return "", fmt.Errorf("create sub-group: %w", err)
+	}
+	return info.JID.String(), nil
+}
+
 // JSubGroup mirrors whatsmeow's types.GroupLinkTarget — a community
 // parent's child entry. Carries name + JID + the default-sub flag, no
 // participants (cheap directory listing).

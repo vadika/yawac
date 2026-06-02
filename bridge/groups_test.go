@@ -134,3 +134,31 @@ func TestCreateCommunityClosed(t *testing.T) {
 		t.Fatal("expected error on closed client")
 	}
 }
+
+func TestCreateSubGroupUnpaired(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/csg.db")
+	defer c.Close()
+	_, err := c.CreateSubGroup(
+		"1234@g.us", "Hiking", `["1111@s.whatsapp.net"]`)
+	if err == nil {
+		t.Fatal("expected error on unpaired client")
+	}
+}
+
+func TestCreateSubGroupBadParentJID(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/csg2.db")
+	defer c.Close()
+	_, err := c.CreateSubGroup("not a jid", "Hiking", `[]`)
+	if err == nil {
+		t.Fatal("expected parse error on bad parent JID")
+	}
+}
+
+func TestCreateSubGroupBadParticipantJSON(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/csg3.db")
+	defer c.Close()
+	_, err := c.CreateSubGroup("1234@g.us", "Hiking", "not json")
+	if err == nil {
+		t.Fatal("expected parse error on bad participant JSON")
+	}
+}
