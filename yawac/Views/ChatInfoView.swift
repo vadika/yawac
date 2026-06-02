@@ -1039,25 +1039,52 @@ struct ChatInfoView: View {
 
     private func openAddPanel(group: BridgeGroupModel) {
         guard let client = session.client else { return }
-        // Existing roster + the user themselves must not appear in the picker.
-        // Strip device suffixes via JIDNormalize.bare; the server rejects
-        // device-suffixed JIDs in update_participants IQ with a 400.
-        let ownBare = JIDNormalize.bare(client.ownJID)
-        var existing = Set(group.participants.map { JIDNormalize.bare($0.jid) })
-        existing.insert(ownBare)
-        // Dedupe contacts by bare JID — session.contactNames can carry the
-        // same person twice (e.g. once from address book, once from a
-        // device-suffixed message).
-        var seen = Set<String>()
-        var contacts: [BridgeContact] = []
+        // Existing roster + own user excluded. JIDNormalize.canonical strips
+        // device suffixes and resolves @lid → PN via the local LID map so
+        // the same person doesn't appear twice from both namespaces.
+        let ownCanon = JIDNormalize.canonical(client.ownJID, client: client)
+        var existing = Set(group.participants.map {
+            JIDNormalize.canonical($0.jid, client: client)
+        })
+        existing.insert(ownCanon)
+
+        // Dedup contacts in two passes:
+        //   1. By canonical JID — folds LID↔PN duplicates whenever the
+        //      local LID map has the mapping.
+        //   2. By (lowercased display name) — fallback when the LID map
+        //      has no mapping yet; prefer the PN-form entry since it's
+        //      the one that resolves correctly in most groups.
+        var byJID: [String: BridgeContact] = [:]
         for (jid, name) in session.contactNames {
-            let bare = JIDNormalize.bare(jid)
-            guard bare != ownBare, !seen.contains(bare) else { continue }
-            seen.insert(bare)
-            contacts.append(BridgeContact(
-                jid: bare, name: name,
-                pushName: nil, fullName: nil, businessName: nil))
+            let canon = JIDNormalize.canonical(jid, client: client)
+            guard canon != ownCanon else { continue }
+            if let existingEntry = byJID[canon] {
+                // Keep the PN-form entry if available.
+                if existingEntry.jid.hasSuffix("@lid"),
+                   !canon.hasSuffix("@lid") {
+                    byJID[canon] = BridgeContact(
+                        jid: canon, name: name,
+                        pushName: nil, fullName: nil, businessName: nil)
+                }
+                continue
+            }
+            byJID[canon] = BridgeContact(
+                jid: canon, name: name,
+                pushName: nil, fullName: nil, businessName: nil)
         }
+        var byName: [String: BridgeContact] = [:]
+        for (_, c) in byJID {
+            let key = c.name.lowercased()
+            if let existingEntry = byName[key] {
+                if existingEntry.jid.hasSuffix("@lid"),
+                   !c.jid.hasSuffix("@lid") {
+                    byName[key] = c
+                }
+                continue
+            }
+            byName[key] = c
+        }
+        let contacts = Array(byName.values)
         addPanelModel = AddParticipantsPanelModel(
             existingParticipantJIDs: existing,
             allContacts: contacts,
