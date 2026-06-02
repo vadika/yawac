@@ -43,6 +43,17 @@ actor AvatarCache {
         return baseDir.appendingPathComponent("\(safe).jpg")
     }
 
+    /// Drop the on-disk cache + negative-cache entry so the next ensure()
+    /// re-fetches from the bridge. Used when the group photo changes
+    /// server-side (locally or via events.GroupInfo).
+    func invalidate(jid: String) {
+        let url = file(for: jid)
+        try? FileManager.default.removeItem(at: url)
+        negativeCache.remove(jid)
+        inflight[jid]?.cancel()
+        inflight[jid] = nil
+    }
+
     func ensure(jid: String, using client: WAClient) async -> URL? {
         if negativeCache.contains(jid) { return nil }
         let url = file(for: jid)

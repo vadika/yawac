@@ -210,7 +210,12 @@ struct ChatInfoView: View {
     @ViewBuilder
     private var hero: some View {
         VStack(spacing: 10) {
-            AvatarView(jid: chatJID, name: name, size: 92)
+            ZStack {
+                AvatarView(jid: chatJID, name: name, size: 92)
+                if isGroup, isAdminForCurrentGroup {
+                    avatarHoverOverlay
+                }
+            }
             VStack(spacing: 4) {
                 Text(name)
                     .scaledUI(20, weight: .semibold)
@@ -233,8 +238,124 @@ struct ChatInfoView: View {
                     }
                 }
             }
+            if let err = avatarError {
+                Text(err)
+                    .scaledUI(11)
+                    .foregroundStyle(Color.red.opacity(0.9))
+                    .multilineTextAlignment(.center)
+            }
         }
         .frame(maxWidth: .infinity)
+    }
+
+    private var isAdminForCurrentGroup: Bool {
+        guard let g = group else { return false }
+        return isCurrentUserAdmin(g)
+    }
+
+    @State private var avatarHovered: Bool = false
+
+    @ViewBuilder
+    private var avatarHoverOverlay: some View {
+        Group {
+            if avatarHovered {
+                Circle()
+                    .fill(Color.black.opacity(0.5))
+                    .frame(width: 92, height: 92)
+                    .overlay {
+                        Text("EDIT\nPHOTO")
+                            .scaledUI(10, weight: .semibold)
+                            .tracking(0.6)
+                            .multilineTextAlignment(.center)
+                            .foregroundStyle(Color.white)
+                    }
+            }
+        }
+        .frame(width: 92, height: 92)
+        .contentShape(Circle())
+        .onHover { avatarHovered = $0 }
+        .onTapGesture { avatarMenuOpen = true }
+        .confirmationDialog("Group photo",
+                            isPresented: $avatarMenuOpen,
+                            titleVisibility: .visible) {
+            Button("Change photo…") { pickPhoto() }
+            Button("Remove photo", role: .destructive) {
+                confirmRemovePhoto = true
+            }
+            Button("Cancel", role: .cancel) {}
+        }
+        .confirmationDialog("Remove group photo?",
+                            isPresented: $confirmRemovePhoto) {
+            Button("Remove", role: .destructive) { removePhoto() }
+            Button("Cancel", role: .cancel) {}
+        }
+        .sheet(item: Binding(
+            get: { pickedImage.map { ImageBox(image: $0) } },
+            set: { pickedImage = $0?.image })
+        ) { box in
+            AvatarCropSheet(original: box.image,
+                            onApply: { data in
+                                pickedImage = nil
+                                uploadAvatar(data)
+                            },
+                            onCancel: { pickedImage = nil })
+        }
+    }
+
+    private struct ImageBox: Identifiable {
+        let id = UUID()
+        let image: NSImage
+    }
+
+    private func pickPhoto() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.allowedContentTypes = [.jpeg, .png, .heic]
+        panel.begin { resp in
+            guard resp == .OK, let url = panel.url,
+                  let img = NSImage(contentsOf: url) else { return }
+            DispatchQueue.main.async {
+                pickedImage = img
+            }
+        }
+    }
+
+    private func uploadAvatar(_ data: Data) {
+        guard let client = session.client else { return }
+        let chatJID = self.chatJID
+        Task { @MainActor in
+            do {
+                _ = try client.setGroupPhoto(chatJID: chatJID, jpeg: data)
+                await AvatarCache.shared.invalidate(jid: chatJID)
+            } catch {
+                avatarError = error.localizedDescription
+                scheduleAvatarErrorAutodismiss()
+            }
+        }
+    }
+
+    private func removePhoto() {
+        guard let client = session.client else { return }
+        let chatJID = self.chatJID
+        Task { @MainActor in
+            do {
+                try await Task.detached {
+                    try client.removeGroupPhoto(chatJID: chatJID)
+                }.value
+                await AvatarCache.shared.invalidate(jid: chatJID)
+            } catch {
+                avatarError = error.localizedDescription
+                scheduleAvatarErrorAutodismiss()
+            }
+        }
+    }
+
+    private func scheduleAvatarErrorAutodismiss() {
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(6))
+            avatarError = nil
+        }
     }
 
     // ─── JID row with copy ───────────────────────────────────────────
