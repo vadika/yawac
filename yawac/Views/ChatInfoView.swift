@@ -272,24 +272,24 @@ struct ChatInfoView: View {
 
     @ViewBuilder
     private var avatarHoverOverlay: some View {
-        Group {
-            if avatarHovered {
-                Circle()
-                    .fill(Color.black.opacity(0.5))
-                    .frame(width: 92, height: 92)
-                    .overlay {
-                        Text("EDIT\nPHOTO")
-                            .scaledUI(10, weight: .semibold)
-                            .tracking(0.6)
-                            .multilineTextAlignment(.center)
-                            .foregroundStyle(Color.white)
-                    }
+        // Always-rendered Circle so the overlay has a hit-test surface
+        // even when not hovered. The fill flips between clear and the
+        // darken-overlay on hover; "EDIT PHOTO" label fades in.
+        Circle()
+            .fill(avatarHovered ? Color.black.opacity(0.55) : Color.clear)
+            .frame(width: 92, height: 92)
+            .overlay {
+                if avatarHovered {
+                    Text("EDIT\nPHOTO")
+                        .scaledUI(10, weight: .semibold)
+                        .tracking(0.6)
+                        .multilineTextAlignment(.center)
+                        .foregroundStyle(Color.white)
+                }
             }
-        }
-        .frame(width: 92, height: 92)
-        .contentShape(Circle())
-        .onHover { avatarHovered = $0 }
-        .onTapGesture { avatarMenuOpen = true }
+            .contentShape(Circle())
+            .onHover { avatarHovered = $0 }
+            .onTapGesture { avatarMenuOpen = true }
         .confirmationDialog("Group photo",
                             isPresented: $avatarMenuOpen,
                             titleVisibility: .visible) {
