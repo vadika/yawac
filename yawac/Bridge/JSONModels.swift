@@ -159,7 +159,10 @@ struct BridgeGroupModel: Codable, Identifiable {
     let isParent: Bool
     let linkedParentJID: String?
     let isDefaultSubGroup: Bool
-    let joinApprovalMode: Bool
+    // `var` (not `let`) so admin UIs can optimistically flip the flag
+    // without re-building the whole struct. The decoder still treats
+    // missing/false payloads as `false`.
+    var joinApprovalMode: Bool
 
     enum CodingKeys: String, CodingKey {
         case jid, name, topic

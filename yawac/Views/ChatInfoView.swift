@@ -71,6 +71,10 @@ struct ChatInfoView: View {
     @State private var showingNewSubGroupSheet: Bool = false
     @State private var unlinkSubGroupTarget: BridgeSubGroup?
     @State private var sectionError: String?
+    // Surfaces backend failures from the "Require admin approval to
+    // join" toggle (T25). Cleared after a short delay so the row
+    // doesn't grow a permanent error tail across re-renders.
+    @State private var toggleError: String?
 
     private var isGroup: Bool { chatJID.hasSuffix("@g.us") }
     private var name: String { session.displayName(for: chatJID) }
@@ -671,6 +675,75 @@ struct ChatInfoView: View {
                         }
                         .buttonStyle(.plain)
                         .help("Edit description")
+                    }
+                }
+            }
+        }
+
+        // APPROVAL MODE — sub-group admin only. Hidden on the parent
+        // shell (the toggle isn't meaningful there) and on chats with
+        // no linked community parent. Optimistic flip on the local
+        // @State copy; revert + surface error on failure.
+        if isCurrentUserAdmin(g),
+           !g.isParent,
+           let parent = g.linkedParentJID,
+           !parent.isEmpty {
+            sectionCard(label: "JOIN APPROVAL") {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(alignment: .top, spacing: 8) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Require admin approval to join")
+                                .scaledUI(13)
+                                .foregroundStyle(Theme.text)
+                            Text("New members request to join; admins approve.")
+                                .scaledUI(11)
+                                .foregroundStyle(Theme.textMuted)
+                        }
+                        Spacer()
+                        Toggle("", isOn: Binding(
+                            get: { (group?.joinApprovalMode ?? g.joinApprovalMode) },
+                            set: { newValue in
+                                let prior = group?.joinApprovalMode
+                                    ?? g.joinApprovalMode
+                                // Optimistic flip on the @State shadow
+                                // copy so the UI reflects the new
+                                // state immediately.
+                                if var s = group {
+                                    s.joinApprovalMode = newValue
+                                    group = s
+                                }
+                                guard let client = session.client else { return }
+                                let jid = g.jid
+                                Task {
+                                    do {
+                                        try await Task.detached {
+                                            try client.setGroupJoinApprovalMode(
+                                                chatJID: jid, on: newValue)
+                                        }.value
+                                    } catch {
+                                        if var s = group {
+                                            s.joinApprovalMode = prior
+                                            group = s
+                                        }
+                                        toggleError = (error as NSError)
+                                            .localizedDescription
+                                    }
+                                }
+                            }
+                        ))
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+                    }
+                    if let err = toggleError {
+                        Text(err)
+                            .scaledUI(11)
+                            .foregroundStyle(Color.red.opacity(0.9))
+                            .task(id: err) {
+                                try? await Task.sleep(
+                                    nanoseconds: 6 * 1_000_000_000)
+                                toggleError = nil
+                            }
                     }
                 }
             }
