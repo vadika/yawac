@@ -197,10 +197,38 @@ struct BridgeParticipantModel: Codable {
     let jid: String
     let isAdmin: Bool
     let isSuper: Bool
+    let errorCode: Int?
+    let inviteCode: String?
+    let inviteExpiry: Int64?
+
     enum CodingKeys: String, CodingKey {
         case jid
         case isAdmin = "is_admin"
         case isSuper = "is_super_admin"
+        case errorCode = "error_code"
+        case inviteCode = "invite_code"
+        case inviteExpiry = "invite_expiry"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        jid = try c.decode(String.self, forKey: .jid)
+        isAdmin = try c.decode(Bool.self, forKey: .isAdmin)
+        isSuper = try c.decode(Bool.self, forKey: .isSuper)
+        errorCode = try c.decodeIfPresent(Int.self, forKey: .errorCode)
+        inviteCode = try c.decodeIfPresent(String.self, forKey: .inviteCode)
+        inviteExpiry = try c.decodeIfPresent(Int64.self, forKey: .inviteExpiry)
+    }
+
+    init(jid: String, isAdmin: Bool, isSuper: Bool,
+         errorCode: Int? = nil, inviteCode: String? = nil,
+         inviteExpiry: Int64? = nil) {
+        self.jid = jid
+        self.isAdmin = isAdmin
+        self.isSuper = isSuper
+        self.errorCode = errorCode
+        self.inviteCode = inviteCode
+        self.inviteExpiry = inviteExpiry
     }
 }
 
