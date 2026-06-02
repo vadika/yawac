@@ -69,7 +69,9 @@ relevant context lingers).
 - ☐ **Per-chat wallpaper**.
 - ✅ **Keyboard-shortcut help sheet** — ⌘? opens a sheet listing
   shortcuts in Compose / Find / Messages / App sections.
-- ☐ **Drafts saved per chat across restart**.
+- ✅ **Drafts saved per chat across restart** — `PersistedChat.draft`
+  with debounced 500 ms save on every `vm.draft` change, restored on
+  chat open. Shipped in v0.5.0 (commit `1fe6b8f`).
 
 ## Account / Privacy
 
