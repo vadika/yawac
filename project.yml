@@ -43,8 +43,8 @@ targets:
         NSMicrophoneUsageDescription: yawac needs the microphone to record voice messages
         LSMinimumSystemVersion: "14.0"
         CFBundleDisplayName: yawac
-        CFBundleShortVersionString: "0.7.0"
-        CFBundleVersion: "7"
+        CFBundleShortVersionString: "0.7.1"
+        CFBundleVersion: "8"
         ATSApplicationFontsPath: Fonts
         CFBundleIconName: AppIcon
   yawacTests:

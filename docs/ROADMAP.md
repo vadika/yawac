@@ -59,7 +59,7 @@ relevant context lingers).
   sub-groups, approve / reject join requests with sidebar pending
   chip, approval-mode toggle) and create-new-group /
   create-new-community / create-new-sub-group flows shipped in
-  v0.7.0.
+  v0.7.1.
 
 ## Productivity / macOS
 
