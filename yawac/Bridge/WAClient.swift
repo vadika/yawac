@@ -48,6 +48,10 @@ class WAClient: PhoneValidating, LIDResolving {
         case groupParticipantsChanged(chatJID: String, action: String,
                                       actorJID: String, jids: [String],
                                       timestamp: Int64)
+        case joinApprovalModeChanged(chatJID: String,
+                                     on: Bool,
+                                     actorJID: String,
+                                     timestamp: Int64)
         case messagePinned(chatJID: String, targetMessageID: String, senderJID: String, pinned: Bool, timestamp: Int64)
         case chatArchived(chatJID: String, archived: Bool, timestamp: Int64)
         case chatDeleted(chatJID: String, timestamp: Int64)
@@ -954,6 +958,25 @@ class WAClient: PhoneValidating, LIDResolving {
                     chatJID: g.chatJID, action: g.action,
                     actorJID: g.actorJID ?? "",
                     jids: g.jids, timestamp: g.timestamp)
+            }
+        case "JoinApprovalModeChanged":
+            struct J: Codable {
+                let chatJID: String
+                let on: Bool
+                let actorJID: String?
+                let timestamp: Int64
+                enum CodingKeys: String, CodingKey {
+                    case chatJID = "chat_jid"
+                    case on
+                    case actorJID = "actor_jid"
+                    case timestamp
+                }
+            }
+            if let j = try? dec.decode(J.self, from: data) {
+                return .joinApprovalModeChanged(chatJID: j.chatJID,
+                                                on: j.on,
+                                                actorJID: j.actorJID ?? "",
+                                                timestamp: j.timestamp)
             }
         default:
             break
