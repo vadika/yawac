@@ -5,7 +5,13 @@ struct AvatarView: View {
     let name: String
     let size: CGFloat
     @Environment(SessionViewModel.self) private var session
-    @State private var imageURL: URL?
+    /// Decoded image held as @State so the body branch never re-reads
+    /// from disk. A previous design kept @State imageURL and called
+    /// NSImage(contentsOf:) in body — that raced with bridge write
+    /// flush; NSImage occasionally returned nil right after a cold
+    /// fetch and the view stayed on the placeholder until a fresh
+    /// .task fired (e.g. user navigated away and back).
+    @State private var loadedImage: NSImage?
     /// Bumped by AvatarCache.invalidate broadcasts so `.task(id:)`
     /// re-runs and the view picks up the newly-fetched file.
     @State private var revision: Int = 0
@@ -22,7 +28,7 @@ struct AvatarView: View {
 
     var body: some View {
         Group {
-            if let url = imageURL, let img = NSImage(contentsOf: url) {
+            if let img = loadedImage {
                 Image(nsImage: img)
                     .resizable()
                     .scaledToFill()
@@ -41,24 +47,30 @@ struct AvatarView: View {
             // Fast path: skip the actor hop + bridge call when the
             // avatar is already cached on disk.
             if let cached = AvatarCache.cachedURL(for: key),
-               FileManager.default.fileExists(atPath: cached.path) {
-                imageURL = cached
+               FileManager.default.fileExists(atPath: cached.path),
+               let img = NSImage(contentsOf: cached) {
+                loadedImage = img
                 return
             }
             guard let client = session.client else {
-                imageURL = nil
+                loadedImage = nil
                 return
             }
-            imageURL = await AvatarCache.shared.ensure(jid: key, using: client)
+            if let url = await AvatarCache.shared.ensure(jid: key, using: client),
+               let img = NSImage(contentsOf: url) {
+                loadedImage = img
+            } else {
+                loadedImage = nil
+            }
         }
         .onReceive(NotificationCenter.default.publisher(
             for: .avatarCacheInvalidated)) { note in
             guard let invalid = note.userInfo?["jid"] as? String,
                   JIDNormalize.same(invalid, jid, client: session.client)
             else { return }
-            // Clear the URL so the placeholder shows during the brief
-            // re-fetch window; bumping `revision` re-runs `.task`.
-            imageURL = nil
+            // Clear so placeholder shows during the brief re-fetch
+            // window; bumping `revision` re-runs `.task`.
+            loadedImage = nil
             revision &+= 1
         }
     }

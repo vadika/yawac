@@ -8,11 +8,36 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/types"
 )
+
+var (
+	avatarLogMu      sync.Mutex
+	avatarLogEnabled = os.Getenv("YAWAC_AVATAR_LOG") == "1"
+)
+
+// avatarLog appends to /tmp/yawac-avatar.log alongside the Swift-side
+// AvatarLog when YAWAC_AVATAR_LOG=1 is set. stderr in a gomobile-bound
+// binary is captured by macOS unified logging with privacy redaction —
+// a plain file is the shortest path to readable diagnostics.
+func avatarLog(format string, args ...any) {
+	if !avatarLogEnabled {
+		return
+	}
+	avatarLogMu.Lock()
+	defer avatarLogMu.Unlock()
+	f, err := os.OpenFile("/tmp/yawac-avatar.log",
+		os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	fmt.Fprintf(f, format+"\n", args...)
+}
 
 // FetchProfilePicture downloads the preview avatar for `jidStr` to `outPath`.
 // Returns the same outPath on success. Returns "" with a nil error when the
@@ -35,30 +60,49 @@ func (c *Client) FetchProfilePicture(jidStr, outPath string) (string, error) {
 	}
 
 	info, infoErr := c.tryProfilePictureInfo(jid)
+	avatarLog("[avatar] %s primary: info=%v err=%v", jid, info != nil, infoErr)
+
 	if info == nil {
 		alt, ok := c.alternateProfileJID(jid)
 		if ok {
-			if altInfo, _ := c.tryProfilePictureInfo(alt); altInfo != nil {
+			altInfo, altErr := c.tryProfilePictureInfo(alt)
+			avatarLog("[avatar] %s alt=%s: info=%v err=%v",
+				jid, alt, altInfo != nil, altErr)
+			if altInfo != nil {
 				info = altInfo
+			}
+		} else {
+			// No mapping known yet. Force populate via GetUserInfo,
+			// which surfaces a <lid> tag the store consumes as a side
+			// effect, then retry the alt path.
+			ui, uiErr := c.wa.GetUserInfo(context.Background(),
+				[]types.JID{jid})
+			avatarLog("[avatar] %s GetUserInfo: rows=%d err=%v",
+				jid, len(ui), uiErr)
+			if uiErr == nil {
+				alt2, ok2 := c.alternateProfileJID(jid)
+				avatarLog("[avatar] %s alt2 after GetUserInfo: ok=%v jid=%s",
+					jid, ok2, alt2)
+				if ok2 {
+					altInfo, altErr := c.tryProfilePictureInfo(alt2)
+					avatarLog("[avatar] %s alt2-fetch: info=%v err=%v",
+						jid, altInfo != nil, altErr)
+					if altInfo != nil {
+						info = altInfo
+					}
+				}
 			}
 		}
 	}
 	if info == nil {
-		if infoErr != nil {
-			fmt.Fprintf(os.Stderr,
-				"[yawac/avatar] fetch %s: no picture (err: %v)\n",
-				jid, infoErr)
-		} else {
-			fmt.Fprintf(os.Stderr,
-				"[yawac/avatar] fetch %s: no picture (empty info)\n", jid)
-		}
+		avatarLog("[avatar] %s: no picture available", jid)
 		return "", nil
 	}
 	if info.URL == "" {
-		fmt.Fprintf(os.Stderr,
-			"[yawac/avatar] fetch %s: info returned but empty URL\n", jid)
+		avatarLog("[avatar] %s: info has empty URL", jid)
 		return "", nil
 	}
+	avatarLog("[avatar] %s: downloading %s", jid, info.URL)
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
 	req, err := http.NewRequest("GET", info.URL, nil)
