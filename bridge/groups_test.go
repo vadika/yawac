@@ -116,3 +116,21 @@ func TestJoinGroupViaLinkUnpaired(t *testing.T) {
 		t.Fatal("expected error on unpaired client")
 	}
 }
+
+func TestCreateCommunityUnpaired(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/cc.db")
+	defer c.Close()
+	_, err := c.CreateCommunity("Outdoor Club")
+	if err == nil {
+		t.Fatal("expected error on unpaired client")
+	}
+}
+
+func TestCreateCommunityClosed(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/cc2.db")
+	c.Close()
+	_, err := c.CreateCommunity("Outdoor Club")
+	if err == nil {
+		t.Fatal("expected error on closed client")
+	}
+}

@@ -158,6 +158,25 @@ func (c *Client) CreateGroup(name string, participantJIDs string) (string, error
 	return info.JID.String(), nil
 }
 
+// CreateCommunity creates a new community parent group. The server
+// auto-creates the default announcements sub-group, whose JID arrives
+// via a JoinedGroup event shortly after. Returns the parent's JID.
+// Surfaces the 25-char-name 406 from the server verbatim.
+func (c *Client) CreateCommunity(name string) (string, error) {
+	if c.wa == nil {
+		return "", errors.New("client closed")
+	}
+	info, err := c.wa.CreateGroup(context.Background(),
+		whatsmeow.ReqCreateGroup{
+			Name:        name,
+			GroupParent: types.GroupParent{IsParent: true},
+		})
+	if err != nil {
+		return "", fmt.Errorf("create community: %w", err)
+	}
+	return info.JID.String(), nil
+}
+
 // JSubGroup mirrors whatsmeow's types.GroupLinkTarget — a community
 // parent's child entry. Carries name + JID + the default-sub flag, no
 // participants (cheap directory listing).
