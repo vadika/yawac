@@ -120,6 +120,12 @@ struct ChatInfoView: View {
             mediaVM?.externalPathResolver = mediaPathResolver
             mediaVM?.reload(limit: nil)
         }
+        .onChange(of: session.chatList?.groupParticipantsTick ?? 0) { _, _ in
+            guard let change = session.chatList?.lastParticipantsChange,
+                  change.chatJID == chatJID || change.chatJID == JIDNormalize.canonical(chatJID, client: session.client)
+            else { return }
+            Task { @MainActor in await loadGroup() }
+        }
         .confirmationDialog("Block \(name)?", isPresented: $confirmBlock) {
             Button("Block", role: .destructive) {
                 session.setBlocked(chatJID, blocked: true)
