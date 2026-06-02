@@ -515,7 +515,10 @@ class WAClient: PhoneValidating, LIDResolving {
         return try JSONDecoder().decode(PhoneCheckResult.self, from: Data(json.utf8))
     }
 
-    func createGroup(name: String, participantJIDs: [String]) throws -> String {
+    /// Nonisolated so `NewGroupSheetModel` can call it from a detached task
+    /// — the bridge call is synchronous and a multi-second create round-trip
+    /// must not block the main actor.
+    nonisolated func createGroup(name: String, participantJIDs: [String]) throws -> String {
         let jids = try JSONEncoder().encode(participantJIDs)
         let jidsString = String(data: jids, encoding: .utf8) ?? "[]"
         var err: NSError?
