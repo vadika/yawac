@@ -389,3 +389,65 @@ func (c *Client) GetGroupInviteLink(chatJID string, reset bool) (string, error) 
 	}
 	return link, nil
 }
+
+// stripInviteCodePrefix accepts any of:
+//   https://chat.whatsapp.com/<code>, http://chat.whatsapp.com/<code>,
+//   chat.whatsapp.com/<code>, https://wa.me/<code>, wa.me/<code>,
+//   bare <code>.
+// Returns the bare code. Defence-in-depth — the Swift parser already
+// strips the prefix; we strip again here so the bridge can be called
+// directly from tests or future surfaces without the cleanup.
+func stripInviteCodePrefix(s string) string {
+	s = strings.TrimPrefix(s, "https://")
+	s = strings.TrimPrefix(s, "http://")
+	s = strings.TrimPrefix(s, "chat.whatsapp.com/")
+	s = strings.TrimPrefix(s, "wa.me/")
+	return s
+}
+
+// GroupInfoFromLink resolves an invite link (URL or bare code) into a
+// JGroup preview WITHOUT joining the group. Participants list is
+// always empty in the response. Surfaces ErrInviteLinkRevoked /
+// ErrInviteLinkInvalid verbatim.
+func (c *Client) GroupInfoFromLink(code string) (string, error) {
+	if c.wa == nil {
+		return "", errors.New("client closed")
+	}
+	info, err := c.wa.GetGroupInfoFromLink(
+		context.Background(), stripInviteCodePrefix(code))
+	if err != nil {
+		return "", fmt.Errorf("group info from link: %w", err)
+	}
+	jg := JGroup{
+		JID:               info.JID.String(),
+		Name:              info.Name,
+		Topic:             info.Topic,
+		OwnerJID:          info.OwnerJID.String(),
+		Created:           info.GroupCreated.Unix(),
+		IsParent:          info.GroupParent.IsParent,
+		LinkedParentJID:   info.GroupLinkedParent.LinkedParentJID.String(),
+		IsDefaultSubGroup: info.GroupIsDefaultSub.IsDefaultSubGroup,
+		Participants:      []JParticipant{}, // intentionally empty
+	}
+	if !strings.HasSuffix(jg.LinkedParentJID, "@g.us") {
+		jg.LinkedParentJID = ""
+	}
+	b, _ := json.Marshal(jg)
+	return string(b), nil
+}
+
+// JoinGroupViaLink joins via an invite link (URL or bare code).
+// Returns the joined JID. Dual return semantics: a bare JID alone can
+// mean the server queued a membership_approval_request — caller probes
+// via GetGroupInfo to distinguish the joined case from "pending".
+func (c *Client) JoinGroupViaLink(code string) (string, error) {
+	if c.wa == nil {
+		return "", errors.New("client closed")
+	}
+	jid, err := c.wa.JoinGroupWithLink(
+		context.Background(), stripInviteCodePrefix(code))
+	if err != nil {
+		return "", fmt.Errorf("join via link: %w", err)
+	}
+	return jid.String(), nil
+}

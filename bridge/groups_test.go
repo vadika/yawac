@@ -82,3 +82,37 @@ func TestGetGroupInviteLinkUnpaired(t *testing.T) {
 		t.Fatal("expected error on unpaired client")
 	}
 }
+
+func TestStripInviteCodePrefix(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"AbCdEfGhIjKlMn", "AbCdEfGhIjKlMn"},
+		{"chat.whatsapp.com/AbCdEfGhIjKlMn", "AbCdEfGhIjKlMn"},
+		{"https://chat.whatsapp.com/AbCdEfGhIjKlMn", "AbCdEfGhIjKlMn"},
+		{"http://chat.whatsapp.com/AbCdEfGhIjKlMn", "AbCdEfGhIjKlMn"},
+		{"wa.me/AbCdEfGhIjKlMn", "AbCdEfGhIjKlMn"},
+		{"https://wa.me/AbCdEfGhIjKlMn", "AbCdEfGhIjKlMn"},
+	}
+	for _, c := range cases {
+		if got := stripInviteCodePrefix(c.in); got != c.want {
+			t.Errorf("strip(%q)=%q want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestGroupInfoFromLinkUnpaired(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/gi.db")
+	defer c.Close()
+	_, err := c.GroupInfoFromLink("AbCdEfGhIjKlMn")
+	if err == nil {
+		t.Fatal("expected error on unpaired client")
+	}
+}
+
+func TestJoinGroupViaLinkUnpaired(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/jl.db")
+	defer c.Close()
+	_, err := c.JoinGroupViaLink("AbCdEfGhIjKlMn")
+	if err == nil {
+		t.Fatal("expected error on unpaired client")
+	}
+}
