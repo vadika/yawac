@@ -162,3 +162,25 @@ func TestCreateSubGroupBadParticipantJSON(t *testing.T) {
 		t.Fatal("expected parse error on bad participant JSON")
 	}
 }
+
+func TestLinkSubGroupUnpaired(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/ls.db")
+	defer c.Close()
+	err := c.LinkSubGroup("1111@g.us", "2222@g.us")
+	if err == nil {
+		t.Fatal("expected error on unpaired client")
+	}
+}
+
+func TestLinkSubGroupBadJID(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/ls2.db")
+	defer c.Close()
+	err := c.LinkSubGroup("not a jid", "2222@g.us")
+	if err == nil {
+		t.Fatal("expected parse error on bad parent JID")
+	}
+	err = c.LinkSubGroup("1111@g.us", "not a jid")
+	if err == nil {
+		t.Fatal("expected parse error on bad sub JID")
+	}
+}

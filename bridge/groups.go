@@ -222,6 +222,26 @@ func (c *Client) CreateSubGroup(
 	return info.JID.String(), nil
 }
 
+// LinkSubGroup attaches a child group to a community parent. Both JIDs
+// must be admin-controlled. Surfaces whatsmeow errors verbatim.
+func (c *Client) LinkSubGroup(parentJIDStr, subJIDStr string) error {
+	if c.wa == nil {
+		return errors.New("client closed")
+	}
+	parent, err := types.ParseJID(parentJIDStr)
+	if err != nil {
+		return fmt.Errorf("parse parent: %w", err)
+	}
+	sub, err := types.ParseJID(subJIDStr)
+	if err != nil {
+		return fmt.Errorf("parse sub: %w", err)
+	}
+	if err := c.wa.LinkGroup(context.Background(), parent, sub); err != nil {
+		return fmt.Errorf("link group: %w", err)
+	}
+	return nil
+}
+
 // JSubGroup mirrors whatsmeow's types.GroupLinkTarget — a community
 // parent's child entry. Carries name + JID + the default-sub flag, no
 // participants (cheap directory listing).
