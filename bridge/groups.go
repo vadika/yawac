@@ -263,3 +263,75 @@ func (c *Client) SetGroupDescription(chatJID, description string) error {
 	}
 	return c.wa.SetGroupTopic(context.Background(), jid, "", "", description)
 }
+
+func participantChangeFromString(s string) (whatsmeow.ParticipantChange, error) {
+	switch s {
+	case "add":
+		return whatsmeow.ParticipantChangeAdd, nil
+	case "remove":
+		return whatsmeow.ParticipantChangeRemove, nil
+	case "promote":
+		return whatsmeow.ParticipantChangePromote, nil
+	case "demote":
+		return whatsmeow.ParticipantChangeDemote, nil
+	default:
+		return "", fmt.Errorf("unknown participant action %q", s)
+	}
+}
+
+// UpdateGroupParticipants applies one of "add" / "remove" / "promote" /
+// "demote" to a batch of participant JIDs in `chatJID`. participantJIDsJSON
+// is a JSON `[]string`. Returns a JSON `[]JParticipant` of the server's
+// response (the changed rows only — caller merges into the local roster).
+// Per-row failures (privacy block, invalid JID) surface via JParticipant
+// ErrorCode + InviteCode + InviteExpiry rather than a method-level error.
+func (c *Client) UpdateGroupParticipants(
+	chatJID, action, participantJIDsJSON string,
+) (string, error) {
+	if c.wa == nil {
+		return "", errors.New("client closed")
+	}
+	chat, err := types.ParseJID(chatJID)
+	if err != nil {
+		return "", fmt.Errorf("parse chat jid: %w", err)
+	}
+	act, err := participantChangeFromString(action)
+	if err != nil {
+		return "", err
+	}
+	var raw []string
+	if err := json.Unmarshal([]byte(participantJIDsJSON), &raw); err != nil {
+		return "", fmt.Errorf("parse jids: %w", err)
+	}
+	parsed := make([]types.JID, 0, len(raw))
+	for _, s := range raw {
+		j, err := types.ParseJID(s)
+		if err != nil {
+			return "", fmt.Errorf("parse %q: %w", s, err)
+		}
+		parsed = append(parsed, j)
+	}
+	resp, err := c.wa.UpdateGroupParticipants(context.Background(),
+		chat, parsed, act)
+	if err != nil {
+		return "", fmt.Errorf("update participants: %w", err)
+	}
+	out := make([]JParticipant, 0, len(resp))
+	for _, p := range resp {
+		jp := JParticipant{
+			JID:     p.JID.String(),
+			IsAdmin: p.IsAdmin,
+			IsSuper: p.IsSuperAdmin,
+		}
+		if p.Error != 0 {
+			jp.ErrorCode = p.Error
+			if p.AddRequest != nil {
+				jp.InviteCode = p.AddRequest.Code
+				jp.InviteExpiry = p.AddRequest.Expiration.Unix()
+			}
+		}
+		out = append(out, jp)
+	}
+	b, _ := json.Marshal(out)
+	return string(b), nil
+}
