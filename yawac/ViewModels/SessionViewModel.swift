@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Observation
 
@@ -13,6 +14,14 @@ final class SessionViewModel {
     var state: State = .loading
     var qrCode: String?
     var client: WAClient?
+    /// Pending join-request counts per group, surfaced in the chat list
+    /// badge and admin panel header. Recreated when the WAClient is built
+    /// in `boot()` so the store can fan out queue refreshes via the bridge.
+    private(set) var joinRequestStore: JoinRequestStore = JoinRequestStore(client: nil)
+    /// Throttle for `didBecomeActive` refresh fan-out (30s).
+    private var lastForegroundRefresh: Date?
+    @ObservationIgnored
+    nonisolated(unsafe) private var didBecomeActiveObserver: NSObjectProtocol?
     /// Back-ref to the chat list VM so views (e.g. ConversationView) can
     /// invoke side-effects like `markRead` without threading it through
     /// every constructor. Set once from ContentView's boot path.
@@ -265,11 +274,39 @@ final class SessionViewModel {
         }
     }
 
+    init() {
+        // App foreground → opportunistic refresh of admin approval queues,
+        // throttled to one fan-out per 30s so a rapid window-cycle doesn't
+        // hammer the bridge.
+        didBecomeActiveObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification,
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            Task { @MainActor in
+                let now = Date()
+                if let last = self.lastForegroundRefresh,
+                   now.timeIntervalSince(last) < 30 { return }
+                self.lastForegroundRefresh = now
+                await self.refreshAllAdminApprovalGroups()
+            }
+        }
+    }
+
+    deinit {
+        if let token = didBecomeActiveObserver {
+            NotificationCenter.default.removeObserver(token)
+        }
+    }
+
     func boot() async {
         do {
             let url = try AppPaths.databaseURL()
             let c = try WAClient(dbPath: url.path)
             self.client = c
+            // Rebind the join-request store now that the bridge client exists.
+            // `JoinRequestStore.client` is immutable, so we swap the instance.
+            self.joinRequestStore = JoinRequestStore(client: c)
             try c.connect()
             self.state = c.isLoggedIn ? .ready : .needsPair
             hydratePushNamesFromStore()
@@ -348,6 +385,16 @@ final class SessionViewModel {
             // with companions that look offline. Best-effort: errors
             // here mean we'll just not see online dots.
             try? client?.sendPresence(available: true)
+            // Seed pending join-request counts for every admin approval
+            // group so the chat-list badge is correct as soon as the
+            // sidebar renders post-connect.
+            Task { await self.refreshAllAdminApprovalGroups() }
+        case .joinApprovalModeChanged(let chatJID, let on, _, _):
+            if on {
+                Task { await self.joinRequestStore.refresh(chatJID: chatJID) }
+            } else {
+                self.joinRequestStore.clear(chatJID: chatJID)
+            }
         case .historySync(let n):
             syncedConversations += n
             armSyncWatchdog()
@@ -396,5 +443,19 @@ final class SessionViewModel {
                 optionHashesJSON: json,
                 timestamp: Date())
         }
+    }
+
+    /// Fan-out refresh of pending join-request queues for every group
+    /// where the user is an admin and approval mode is on. Called on
+    /// `.connected` and on `didBecomeActive` (throttled).
+    ///
+    /// TODO(Task 29): wire to real `Chat.amAdmin` + `Chat.joinApprovalMode`
+    /// once those fields land on the `Chat` model. Until then this is a
+    /// no-op stub — the `.connected` Task launch and the foreground
+    /// throttle fire normally, they just do nothing.
+    @MainActor
+    private func refreshAllAdminApprovalGroups() async {
+        // Wiring deferred until Task 29 lands Chat.joinApprovalMode + Chat.amAdmin.
+        return
     }
 }
