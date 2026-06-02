@@ -1009,6 +1009,31 @@ final class ChatListViewModel {
                             name: name, description: description)
     }
 
+    // MARK: - Group participants
+
+    /// Snapshot of the latest GroupParticipantsChanged event seen, plus a
+    /// monotonic tick that observers can watch via `.onChange`. The Chat
+    /// model has no roster cache today — this is purely a notification
+    /// sentinel so the open inspector reloads from the server.
+    struct GroupParticipantsChange: Equatable {
+        let chatJID: String
+        let action: String  // add | remove | promote | demote
+        let jids: [String]
+        let at: Date
+    }
+
+    var groupParticipantsTick: Int = 0
+    private(set) var lastParticipantsChange: GroupParticipantsChange? = nil
+
+    func applyGroupParticipantsChange(chatJID: String,
+                                      action: String,
+                                      jids: [String],
+                                      at: Date) {
+        lastParticipantsChange = GroupParticipantsChange(
+            chatJID: chatJID, action: action, jids: jids, at: at)
+        groupParticipantsTick &+= 1
+    }
+
     // MARK: - Archive / delete / contact
 
     /// Latest persisted message metadata for `chatJID`, used to anchor the
