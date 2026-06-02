@@ -337,13 +337,21 @@ struct ChatInfoView: View {
     }
 
     private func uploadAvatar(_ data: Data) {
-        guard let client = session.client else { return }
+        guard let client = session.client else {
+            NSLog("[yawac/uploadAvatar] no client")
+            return
+        }
         let chatJID = self.chatJID
+        NSLog("[yawac/uploadAvatar] chat=%@ bytes=%d", chatJID, data.count)
         Task { @MainActor in
             do {
-                _ = try client.setGroupPhoto(chatJID: chatJID, jpeg: data)
+                let pictureID = try client.setGroupPhoto(
+                    chatJID: chatJID, jpeg: data)
+                NSLog("[yawac/uploadAvatar] ok pictureID=%@", pictureID)
                 await AvatarCache.shared.invalidate(jid: chatJID)
             } catch {
+                NSLog("[yawac/uploadAvatar] failed: %@",
+                      String(describing: error))
                 avatarError = error.localizedDescription
                 scheduleAvatarErrorAutodismiss()
             }

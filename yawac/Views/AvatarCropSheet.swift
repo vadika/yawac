@@ -28,7 +28,11 @@ struct AvatarCropSheet: View {
                     .buttonStyle(.plain)
                     .foregroundStyle(Theme.textMuted)
                 Button("Apply") {
-                    if let data = render() { onApply(data) }
+                    if let data = render() {
+                        onApply(data)
+                    } else {
+                        NSLog("[yawac/avatar-crop] render returned nil — Apply no-op")
+                    }
                 }
                 .buttonStyle(.borderedProminent)
             }
@@ -67,30 +71,61 @@ struct AvatarCropSheet: View {
 
     /// Renders the on-screen cropped area into a 640×640 JPEG.
     private func render() -> Data? {
-        let outSize: CGFloat = 640
-        let scale = outSize / cropSize
+        let outSize: Int = 640
+        // hasAlpha:true / samplesPerPixel:4 is the reliable form — the
+        // 3-sample no-alpha shape can fail NSGraphicsContext init on
+        // some color spaces.
         guard let rep = NSBitmapImageRep(
             bitmapDataPlanes: nil,
-            pixelsWide: Int(outSize), pixelsHigh: Int(outSize),
-            bitsPerSample: 8, samplesPerPixel: 3, hasAlpha: false,
+            pixelsWide: outSize, pixelsHigh: outSize,
+            bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true,
             isPlanar: false, colorSpaceName: .deviceRGB,
-            bytesPerRow: 0, bitsPerPixel: 0) else { return nil }
+            bytesPerRow: 0, bitsPerPixel: 0) else {
+            NSLog("[yawac/avatar-crop] bitmap rep init failed")
+            return nil
+        }
+        rep.size = NSSize(width: outSize, height: outSize)
         NSGraphicsContext.saveGraphicsState()
         defer { NSGraphicsContext.restoreGraphicsState() }
-        guard let ctx = NSGraphicsContext(bitmapImageRep: rep) else { return nil }
+        guard let ctx = NSGraphicsContext(bitmapImageRep: rep) else {
+            NSLog("[yawac/avatar-crop] graphics ctx init failed")
+            return nil
+        }
         NSGraphicsContext.current = ctx
         NSColor.black.setFill()
         NSRect(x: 0, y: 0, width: outSize, height: outSize).fill()
+
+        // SwiftUI's preview renders `original` with .scaledToFill() inside
+        // a cropSize×cropSize frame, then .scaleEffect(zoom), then .offset(pan).
+        // Replicate that math, then upscale by (outSize/cropSize).
+        let outSizeF = CGFloat(outSize)
+        let scale = outSizeF / cropSize
         let imgSize = original.size
-        let drawW = imgSize.width * scale * zoom
-        let drawH = imgSize.height * scale * zoom
-        let originX = (outSize - drawW) / 2 + pan.width * scale
-        // NSImage origin is bottom-left; SwiftUI top-left. Invert the Y pan.
-        let originY = (outSize - drawH) / 2 - pan.height * scale
+        guard imgSize.width > 0, imgSize.height > 0 else {
+            NSLog("[yawac/avatar-crop] image size invalid: %@",
+                  NSStringFromSize(imgSize))
+            return nil
+        }
+        // scaledToFill: smaller dimension matches frame, larger overflows.
+        let base = max(cropSize / imgSize.width, cropSize / imgSize.height)
+        let drawW = imgSize.width * base * zoom * scale
+        let drawH = imgSize.height * base * zoom * scale
+        let centerX = outSizeF / 2 + pan.width * scale
+        // SwiftUI Y grows down, NSImage Y grows up — flip the pan.
+        let centerY = outSizeF / 2 - pan.height * scale
         original.draw(
-            in: NSRect(x: originX, y: originY, width: drawW, height: drawH),
+            in: NSRect(x: centerX - drawW / 2,
+                       y: centerY - drawH / 2,
+                       width: drawW, height: drawH),
             from: .zero, operation: .copy, fraction: 1.0)
-        return rep.representation(using: .jpeg,
-                                  properties: [.compressionFactor: 0.85])
+        guard let data = rep.representation(
+            using: .jpeg,
+            properties: [.compressionFactor: 0.85]) else {
+            NSLog("[yawac/avatar-crop] jpeg encode failed")
+            return nil
+        }
+        NSLog("[yawac/avatar-crop] render ok bytes=%d size=%@",
+              data.count, NSStringFromSize(imgSize))
+        return data
     }
 }
