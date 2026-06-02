@@ -544,9 +544,13 @@ class WAClient: PhoneValidating, LIDResolving {
     /// Creates a new sub-group inside the community parent identified by
     /// `parentJID`. Caller must be admin of the parent (server enforces).
     /// Returns the new sub-group's JID.
-    func createSubGroup(parentJID: String,
-                        name: String,
-                        participantJIDs: [String]) throws -> String {
+    ///
+    /// Nonisolated so `NewSubGroupSheetModel` can call it from a detached
+    /// task — the bridge call is synchronous and the create round-trip
+    /// must not block the main actor.
+    nonisolated func createSubGroup(parentJID: String,
+                                    name: String,
+                                    participantJIDs: [String]) throws -> String {
         let jids = try JSONEncoder().encode(participantJIDs)
         let jidsString = String(data: jids, encoding: .utf8) ?? "[]"
         var err: NSError?
