@@ -546,6 +546,14 @@ struct ConversationView: View {
                 .environment(session)
             }
         }
+        .sheet(isPresented: Binding(
+            get: { vm?.showPollComposer ?? false },
+            set: { vm?.showPollComposer = $0 })
+        ) {
+            if let vm {
+                PollComposerView(vm: vm)
+            }
+        }
         .onDrop(of: [.fileURL], isTargeted: nil) { providers in
             guard let vm else { return false }
             for p in providers {

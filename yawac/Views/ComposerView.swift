@@ -152,16 +152,27 @@ struct ComposerView: View {
 
     private var inputRow: some View {
         HStack(spacing: 8) {
-            Button {
-                attachFile()
+            Menu {
+                Button {
+                    attachFile()
+                } label: {
+                    Label("Attach file…", systemImage: "paperclip")
+                }
+                Button {
+                    vm.showPollComposer = true
+                } label: {
+                    Label("New poll…", systemImage: "chart.bar.doc.horizontal")
+                }
             } label: {
                 Image(systemName: "paperclip")
                     .scaledIcon(15, weight: .regular)
                     .foregroundStyle(Theme.textMuted)
                     .padding(4)
             }
-            .buttonStyle(.plain)
-            .help("Attach file")
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("Attach")
 
             TextField(vm.pendingAttachments.isEmpty ? "Message…" : "Caption…",
                       text: $vm.draft, axis: .vertical)

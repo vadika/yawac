@@ -58,6 +58,11 @@ final class ConversationViewModel {
     /// Forward selection mode. `forwardSelection` holds the chosen message ids.
     var forwardSelecting = false
     var forwardSelection: Set<String> = []
+
+    /// Drives the PollComposerView modal sheet. Toggled by the composer's
+    /// "+" menu and by Cancel / on-success inside the sheet.
+    var showPollComposer: Bool = false
+
     /// Inbound message ids that still owe a read receipt — populated
     /// from `PersistedChat.unread` (last-N inbound rows) at history
     /// load and from `ingest` on the fly. `markVisibleAsRead` drains
@@ -1453,6 +1458,59 @@ final class ConversationViewModel {
         MessageIndex.shared.upsert(row.indexFields)
     }
 
+    func sendPoll(question: String,
+                  options: [String],
+                  allowMultiple: Bool) async {
+        let q = question.trimmingCharacters(in: .whitespacesAndNewlines)
+        let opts = options
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard !q.isEmpty, opts.count >= 2, opts.count <= 12 else { return }
+
+        let selectable = allowMultiple ? 0 : 1
+        do {
+            let res = try client.sendPollCreation(
+                chatJID,
+                question: q,
+                options: opts,
+                selectableCount: selectable)
+
+            let m = UIMessage(
+                id: res.messageID,
+                chatJID: chatJID,
+                senderJID: "me",
+                fromMe: true,
+                timestamp: Date(
+                    timeIntervalSince1970: TimeInterval(res.timestamp)),
+                body: .poll(question: res.poll.question,
+                            options: res.poll.options,
+                            selectableCount: res.poll.selectableCount))
+
+            messages.append(m)
+            receiptStatus[m.id] = .sent
+            persistOutgoingPoll(m, pollJSON: res.poll.json ?? "")
+        } catch {
+            transientError =
+                "Couldn't create poll: \(error.localizedDescription)"
+        }
+    }
+
+    private func persistOutgoingPoll(_ m: UIMessage, pollJSON: String) {
+        guard let context else { return }
+        let row = PersistedMessage(
+            id: m.id,
+            chatJID: m.chatJID,
+            senderJID: m.senderJID,
+            fromMe: m.fromMe,
+            timestamp: m.timestamp,
+            kind: "poll",
+            text: nil,
+            pollJSON: pollJSON)
+        context.insert(row)
+        try? context.save()
+        MessageIndex.shared.upsert(row.indexFields)
+    }
+
     /// Outbound-media persistence. Carries the local file path so the
     /// bubble survives chat switches / app restarts and the audio /
     /// image / video keeps rendering from disk without re-download.
@@ -1731,11 +1789,17 @@ final class ConversationViewModel {
                   pollFromMe: Bool) {
         Task { @MainActor [weak self] in
             guard let self else { return }
+            // For our own polls UIMessage.senderJID is the "me" sentinel,
+            // but whatsmeow's vote-encryption needs the real bare JID
+            // (that's the key it stored the message-secret under in
+            // PutMessageSecret). Resolve fromMe → ownJID before crossing
+            // the bridge.
+            let resolvedSender = pollFromMe ? self.client.ownJID : pollSenderJID
             do {
                 _ = try self.client.sendPollVote(
                     chatJID: self.chatJID,
                     pollMsgID: messageID,
-                    pollSenderJID: pollSenderJID,
+                    pollSenderJID: resolvedSender,
                     pollFromMe: pollFromMe,
                     optionHashes: hashes,
                     pollOptions: options)

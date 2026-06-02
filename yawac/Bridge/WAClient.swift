@@ -23,7 +23,7 @@ protocol PhoneValidating: AnyObject {
 }
 
 @MainActor
-final class WAClient: PhoneValidating, LIDResolving {
+class WAClient: PhoneValidating, LIDResolving {
     enum Event {
         case qr(String)
         case pairSuccess
@@ -340,6 +340,24 @@ final class WAClient: PhoneValidating, LIDResolving {
         }
         let decoded = (try? JSONDecoder().decode([E].self, from: Data(json.utf8))) ?? []
         return decoded.map { ($0.chatJID, $0.mutedUntilMs) }
+    }
+
+    func sendPollCreation(_ chatJID: String,
+                          question: String,
+                          options: [String],
+                          selectableCount: Int) throws -> BridgeSendPollResult {
+        let optsJSON = (try? JSONEncoder().encode(options))
+            .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+        var err: NSError?
+        let json = go.sendPollCreation(
+            chatJID,
+            question: question,
+            optionsJSON: optsJSON,
+            selectableCount: Int32(selectableCount),
+            error: &err)
+        if let err { throw err }
+        return try JSONDecoder().decode(BridgeSendPollResult.self,
+                                        from: Data(json.utf8))
     }
 
     func sendPollVote(chatJID: String,

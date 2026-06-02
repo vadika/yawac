@@ -525,7 +525,18 @@ struct MessageRow: View {
                     .map { mentionResolver($0) }
                 VStack(alignment: .leading, spacing: 2) {
                     Button {
-                        onCastVote?([opt.hash], options)
+                        // Multi-select polls (selectable == 0 OR > 1) submit
+                        // the full picked-set on each tap (WhatsApp wire
+                        // semantics: every PollUpdate replaces the prior).
+                        // Single-select polls just send the tapped hash.
+                        let multi = selectableCount == 0 || selectableCount > 1
+                        if multi {
+                            var next = mySelections
+                            if picked { next.remove(opt.hash) } else { next.insert(opt.hash) }
+                            onCastVote?(Array(next), options)
+                        } else {
+                            onCastVote?([opt.hash], options)
+                        }
                     } label: {
                         HStack(spacing: 8) {
                             Image(systemName: pollIconName(selectable: selectableCount, picked: picked))
@@ -557,7 +568,7 @@ struct MessageRow: View {
                 .padding(.vertical, 2)
             }
             HStack(spacing: 6) {
-                Text(selectableCount > 1 ? "Multiple choices" : "Single choice")
+                Text((selectableCount == 0 || selectableCount > 1) ? "Multiple choices" : "Single choice")
                 if totalVotes > 0 {
                     Text("·")
                     Text("\(totalVotes) vote\(totalVotes == 1 ? "" : "s")")
@@ -878,7 +889,9 @@ struct MessageRow: View {
     }
 
     private func pollIconName(selectable: Int, picked: Bool) -> String {
-        let multi = selectable > 1
+        // selectable == 0 is WhatsApp's wire encoding for "unlimited" (multi);
+        // > 1 is "pick up to N" (also multi); 1 is single.
+        let multi = selectable == 0 || selectable > 1
         switch (multi, picked) {
         case (true, true):   return "checkmark.square.fill"
         case (true, false):  return "square"
