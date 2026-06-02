@@ -43,6 +43,7 @@ struct ChatListView: View {
         case archivedHeader(count: Int)
         case messageSection(count: Int)
         case messageHit(hit: MessageIndex.Hit, chatName: String)
+        case invitePreview
         var id: String {
             switch self {
             case .section(let id, _, _): return "sec:" + id
@@ -51,6 +52,7 @@ struct ChatListView: View {
             case .archivedHeader:        return "sec:archived-header"
             case .messageSection:        return "sec:messages"
             case .messageHit(let h, _):  return "mhit:\(h.messageID)"
+            case .invitePreview:         return "sec:invite-preview"
             }
         }
     }
@@ -63,6 +65,9 @@ struct ChatListView: View {
     private func displayRows() -> [Row] {
         let chats = search.query.isEmpty ? vm.chats : search.filteredChats
         var out: [Row] = []
+        if vm.inviteLinkPreview != nil {
+            out.append(.invitePreview)
+        }
         if let s = search.suggestion {
             out.append(.suggestion(s))
         }
@@ -292,6 +297,12 @@ struct ChatListView: View {
                             sectionLabel("Messages", count: count)
                         case .messageHit(let hit, let chatName):
                             messageHitRowButton(hit: hit, chatName: chatName)
+                        case .invitePreview:
+                            if let state = vm.inviteLinkPreview {
+                                InvitePreviewRow(state: state) { code in
+                                    Task { @MainActor in await joinPreview(code: code) }
+                                }
+                            }
                         }
                     }
                 }
@@ -509,6 +520,26 @@ struct ChatListView: View {
         return f.string(from: d)
     }
 
+    @MainActor
+    private func joinPreview(code: String) async {
+        guard let client = vm.clientRef else { return }
+        vm.inviteLinkPreview = .joining(code: code)
+        do {
+            let joinedJID = try client.joinGroupViaLink(code: code)
+            // Probe to distinguish "joined" from "pending approval".
+            if let info = try? client.getGroupInfo(jid: joinedJID) {
+                vm.mergeGroups([info])
+                vm.inviteLinkPreview = nil
+                search.clear()
+                session.requestSelectChat(joinedJID)
+            } else {
+                vm.inviteLinkPreview = .pending(code: code, joinedJID: joinedJID)
+            }
+        } catch {
+            vm.inviteLinkPreview = .error(message: error.localizedDescription)
+        }
+    }
+
     @ViewBuilder
     private func chatRowBody(_ chat: Chat, indent: CGFloat) -> some View {
         let isSelected = (selection == chat.id)
@@ -584,6 +615,62 @@ struct ChatListView: View {
             }
         }
         .contentShape(Rectangle())
+    }
+}
+
+private struct InvitePreviewRow: View {
+    let state: ChatListViewModel.InviteLinkPreviewState
+    var onJoin: (String) -> Void
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "link")
+                .scaledIcon(13)
+                .foregroundStyle(Theme.accent)
+                .frame(width: 26, height: 26)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .scaledUI(12.5, weight: .medium)
+                    .foregroundStyle(Theme.text)
+                    .lineLimit(1)
+                Text(subtitle)
+                    .scaledUI(11)
+                    .foregroundStyle(detailColor)
+                    .lineLimit(1)
+            }
+            Spacer()
+            if case .loading = state { ProgressView().controlSize(.small) }
+            if case .joining = state { ProgressView().controlSize(.small) }
+            if case .ready(_, let code) = state {
+                Button("Join") { onJoin(code) }
+                    .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding(.horizontal, 10).padding(.vertical, 8)
+        .background(Theme.surface)
+    }
+
+    private var title: String {
+        switch state {
+        case .loading: return "Resolving invite link…"
+        case .ready(let g, _): return "Join group: \(g.name)"
+        case .joining: return "Joining…"
+        case .pending: return "Request sent"
+        case .error: return "Couldn't resolve link"
+        }
+    }
+    private var subtitle: String {
+        switch state {
+        case .ready(let g, _):
+            return g.topic.isEmpty ? g.jid : g.topic
+        case .pending: return "Waiting for admin approval"
+        case .error(let m): return m
+        default: return ""
+        }
+    }
+    private var detailColor: Color {
+        if case .error = state { return Color.red.opacity(0.9) }
+        return Theme.textMuted
     }
 }
 
