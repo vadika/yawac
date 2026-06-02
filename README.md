@@ -27,6 +27,7 @@ A native macOS SwiftUI client backed by [tulir/whatsmeow](https://github.com/tul
 - **@-mention autocomplete** — type `@` in any chat to pick a participant (or `@everyone` in groups); recipients see proper highlighted mentions + ping notifications
 - **Mute chats** — 8h / 1 week / Always submenu; bell-slash badge + dimmed unread; suppresses banner + dock badge + reaction notifications; @-mentions pierce mute; cross-device sync
 - **Edit group name + description** — admin-only inline-pencil edit from the chat inspector; URLs auto-linked; phone-side edits land via `events.GroupInfo`
+- **Group management** — admins can add (from contacts or by phone), remove, promote, and demote members from the chat inspector; edit the group photo with a crop sheet; share or revoke the public invite link with a QR code. ⌘K also recognises pasted `chat.whatsapp.com` / `wa.me` links and offers a one-tap join.
 - **Community sub-groups directory** — browse every group linked under a community from the inspector; best-effort Join chip (surfaces approval-pending state when the server queues the request)
 - **Per-chat drafts** — typed-but-unsent text persists across restarts, per chat
 - **Composer ergonomics** — ⌘V stages files / pasted screenshots as attachments; ⇧Return inserts a newline

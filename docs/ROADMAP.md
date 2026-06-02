@@ -36,11 +36,14 @@ relevant context lingers).
 
 ## Groups
 
-- ◐ **Group management** — create + edit name + edit description
-  (admin-only) shipped in v0.4.0. Missing: live participant
-  add/remove/promote/demote, edit avatar.
-- ☐ **Invite link / QR** — generate.
-- ☐ **Group description**.
+- ✅ **Group management** — create + edit name + edit description
+  (admin-only) shipped in v0.4.0; live participant add (contacts +
+  +phone fallback with `AddRequest` privacy-block surfacing) /
+  remove / promote / demote and avatar edit (with crop sheet)
+  shipped 2026-06-02.
+- ✅ **Invite link / QR** — generate, copy, share, admin-only revoke
+  with cooldown; ⌘K paste-to-join with preview + pending-approval
+  state. Shipped 2026-06-02.
 - ✅ **Mention autocomplete** — strip above composer with participants +
   `@everyone`; ↑↓/Tab/Enter/Esc; encodes `ContextInfo.MentionedJID`
   on send + edit. Shipped in v0.3.0.
