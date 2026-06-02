@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	waE2E "go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/types"
@@ -183,4 +184,75 @@ func (c *Client) dispatchPollVote(evt *events.Message) {
 	}
 	b, _ := json.Marshal(payload)
 	c.dispatch("PollVote", string(b))
+}
+
+// SendPollCreation builds a poll creation message and sends it. optionsJSON
+// is a JSON array of option-name strings. selectableCount must be in
+// 0..len(options); 0 means multi-select (WhatsApp convention), 1 means
+// single. Returns JSON of JSendPollResult.
+//
+// Validation is strict because whatsmeow.BuildPollCreation silently clamps
+// an out-of-range selectableOptionCount to 0 (msgsecret.go:326), which
+// would hide programmer errors.
+func (c *Client) SendPollCreation(
+	chatJID, question, optionsJSON string,
+	selectableCount int32,
+) (string, error) {
+	if c.wa == nil {
+		return "", errors.New("client closed")
+	}
+	jid, err := types.ParseJID(chatJID)
+	if err != nil {
+		return "", fmt.Errorf("parse jid: %w", err)
+	}
+	if jid.User == "" || jid.Server == "" {
+		return "", fmt.Errorf("parse jid: %q is not a valid jid", chatJID)
+	}
+
+	var rawOpts []string
+	if err := json.Unmarshal([]byte(optionsJSON), &rawOpts); err != nil {
+		return "", fmt.Errorf("parse options: %w", err)
+	}
+	q := strings.TrimSpace(question)
+	if q == "" {
+		return "", errors.New("question is empty")
+	}
+	opts := make([]string, 0, len(rawOpts))
+	for _, o := range rawOpts {
+		t := strings.TrimSpace(o)
+		if t == "" {
+			return "", errors.New("option is empty")
+		}
+		opts = append(opts, t)
+	}
+	if len(opts) < 2 {
+		return "", fmt.Errorf("options: want 2..12, got %d", len(opts))
+	}
+	if len(opts) > 12 {
+		return "", fmt.Errorf("options: want 2..12, got %d", len(opts))
+	}
+	if selectableCount < 0 || int(selectableCount) > len(opts) {
+		return "", fmt.Errorf("selectable count: want 0..%d, got %d",
+			len(opts), selectableCount)
+	}
+
+	msg := c.wa.BuildPollCreation(q, opts, int(selectableCount))
+	resp, err := c.wa.SendMessage(context.Background(), jid, msg)
+	if err != nil {
+		fmt.Fprintf(os.Stderr,
+			"[yawac/poll-create] chat=%s opts=%d sel=%d err=%v\n",
+			chatJID, len(opts), selectableCount, err)
+		return "", fmt.Errorf("send: %w", err)
+	}
+
+	jp := extractPoll(msg)
+	if jp == nil {
+		return "", errors.New("internal: built message is not a poll")
+	}
+	out, _ := json.Marshal(JSendPollResult{
+		MessageID: resp.ID,
+		Timestamp: resp.Timestamp.Unix(),
+		Poll:      *jp,
+	})
+	return string(out), nil
 }
