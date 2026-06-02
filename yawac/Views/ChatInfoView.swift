@@ -348,7 +348,8 @@ struct ChatInfoView: View {
                 let pictureID = try client.setGroupPhoto(
                     chatJID: chatJID, jpeg: data)
                 NSLog("[yawac/uploadAvatar] ok pictureID=%@", pictureID)
-                await AvatarCache.shared.invalidate(jid: chatJID)
+                await AvatarCache.shared.invalidate(
+                    jid: JIDNormalize.key(chatJID, client: client))
             } catch {
                 NSLog("[yawac/uploadAvatar] failed: %@",
                       String(describing: error))
@@ -366,7 +367,8 @@ struct ChatInfoView: View {
                 try await Task.detached {
                     try client.removeGroupPhoto(chatJID: chatJID)
                 }.value
-                await AvatarCache.shared.invalidate(jid: chatJID)
+                await AvatarCache.shared.invalidate(
+                    jid: JIDNormalize.key(chatJID, client: client))
             } catch {
                 avatarError = error.localizedDescription
                 scheduleAvatarErrorAutodismiss()

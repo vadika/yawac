@@ -56,6 +56,14 @@ actor AvatarCache {
     /// `AvatarView`s for the same JID re-run their fetch task — without
     /// it, every on-screen avatar holding a stale URL would fall back to
     /// the initials placeholder (file deleted, NSImage(contentsOf:) nil).
+    ///
+    /// **Caller contract**: pass the canonical key (`JIDNormalize.key(jid,
+    /// client:)`). On-screen `AvatarView`s file their bytes under the
+    /// canonical key; invalidating the raw `@lid` form when the canonical
+    /// stored form is `@s.whatsapp.net` would leave the file in place.
+    /// The notification matcher uses `JIDNormalize.same`, so subscriber
+    /// matching is forgiving — but the file deletion is byte-keyed and
+    /// requires the canonical form.
     func invalidate(jid: String) {
         let url = file(for: jid)
         try? FileManager.default.removeItem(at: url)
