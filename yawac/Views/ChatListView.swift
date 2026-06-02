@@ -646,8 +646,11 @@ struct ChatListView: View {
                         .foregroundStyle(Theme.textMuted)
                         .lineLimit(1)
                     Spacer(minLength: 0)
-                    // Pending join-request chip (admin gate added in T29 once Chat.amAdmin lands).
-                    if let pending = session.joinRequestStore.counts[chat.jid], pending > 0 {
+                    // Pending join-request chip — admin-gated via the VM
+                    // helper so non-admins never see the badge even when
+                    // the store happens to hold a count (e.g. stale entry
+                    // after demote).
+                    if let pending = vm.pendingRequestsChip(for: chat) {
                         HStack(spacing: 2) {
                             Image(systemName: "checkmark.circle")
                                 .scaledIcon(10, weight: .semibold)

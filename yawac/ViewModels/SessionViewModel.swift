@@ -449,13 +449,19 @@ final class SessionViewModel {
     /// where the user is an admin and approval mode is on. Called on
     /// `.connected` and on `didBecomeActive` (throttled).
     ///
-    /// TODO(Task 29): wire to real `Chat.amAdmin` + `Chat.joinApprovalMode`
-    /// once those fields land on the `Chat` model. Until then this is a
-    /// no-op stub — the `.connected` Task launch and the foreground
-    /// throttle fire normally, they just do nothing.
+    /// The candidate set is derived from the in-memory `chatList.chats`
+    /// — `mergeGroups` populates `joinApprovalMode` + `amAdmin` from
+    /// the server roster, so by the time `.connected` fires after
+    /// `ContentView.task` has run, this set reflects reality.
     @MainActor
     private func refreshAllAdminApprovalGroups() async {
-        // Wiring deferred until Task 29 lands Chat.joinApprovalMode + Chat.amAdmin.
-        return
+        guard let chats = chatList?.chats else { return }
+        let candidates: [String] = chats.compactMap { chat in
+            guard chat.isGroup, chat.joinApprovalMode, chat.amAdmin
+            else { return nil }
+            return chat.jid
+        }
+        guard !candidates.isEmpty else { return }
+        await joinRequestStore.refreshAllAdmin(chatJIDs: candidates)
     }
 }

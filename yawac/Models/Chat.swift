@@ -17,6 +17,15 @@ struct Chat: Identifiable, Hashable {
     var archivedAt: Date? = nil
     var mutedUntil: Date? = nil
     var groupDescription: String? = nil
+    /// Runtime-only: server-synced "approve new members" flag. Mirrors
+    /// `BridgeGroupModel.joinApprovalMode`. Populated by `mergeGroups`
+    /// and live `joinApprovalModeChanged` events. Not persisted — a
+    /// fresh ListGroups on connect repopulates it.
+    var joinApprovalMode: Bool = false
+    /// Runtime-only: whether the paired account is an admin (or super
+    /// admin) of this group. Populated by `mergeGroups` against the
+    /// `BridgeGroupModel.participants` roster. Not persisted.
+    var amAdmin: Bool = false
     var id: String { jid }
 }
 

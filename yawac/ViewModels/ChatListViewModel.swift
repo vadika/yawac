@@ -503,6 +503,7 @@ final class ChatListViewModel {
                       p.hasSuffix("@g.us") else { return nil }
                 return p
             }()
+            let amAdmin = isCurrentUserAdmin(group: g)
             if let idx = chats.firstIndex(where: { $0.jid == jid }) {
                 // Refresh community fields on existing chats so a previously
                 // synced regular-group row gets promoted to a community
@@ -511,13 +512,15 @@ final class ChatListViewModel {
                 c.isCommunityParent = g.isParent
                 c.communityParentJID = parentJID
                 c.isDefaultSubGroup = g.isDefaultSubGroup
+                c.joinApprovalMode = g.joinApprovalMode
+                c.amAdmin = amAdmin
                 if c.name == jid && !g.name.isEmpty { c.name = g.name }
                 chats[idx] = c
                 upsertPersisted(c)
                 continue
             }
             if isTombstoned(jid) { continue }
-            chats.append(Chat(
+            var fresh = Chat(
                 jid: jid,
                 name: g.name.isEmpty ? jid : g.name,
                 lastMessage: g.topic,
@@ -525,10 +528,26 @@ final class ChatListViewModel {
                 unread: 0,
                 isCommunityParent: g.isParent,
                 communityParentJID: parentJID,
-                isDefaultSubGroup: g.isDefaultSubGroup))
+                isDefaultSubGroup: g.isDefaultSubGroup)
+            fresh.joinApprovalMode = g.joinApprovalMode
+            fresh.amAdmin = amAdmin
+            chats.append(fresh)
             upsertPersisted(chats[chats.count - 1])
         }
         sortChats()
+    }
+
+    /// True when the paired account participates in `group` as an admin
+    /// or super-admin. Matches the inspector's gate (see
+    /// `ChatInfoView.isCurrentUserAdmin`) so badge visibility and admin
+    /// affordances stay in lockstep.
+    private func isCurrentUserAdmin(group g: BridgeGroupModel) -> Bool {
+        let rawOwn = client?.ownJID ?? ""
+        guard !rawOwn.isEmpty else { return false }
+        return g.participants.contains { p in
+            guard p.isAdmin || p.isSuper else { return false }
+            return JIDNormalize.same(p.jid, rawOwn, client: client)
+        }
     }
 
     func mergeContacts(_ cs: [BridgeContact]) {
@@ -1007,6 +1026,29 @@ final class ChatListViewModel {
                                 at _: Date) {
         applyLocalGroupInfo(chatJID: chatJID,
                             name: name, description: description)
+    }
+
+    /// Apply a live `joinApprovalModeChanged` event onto the in-memory
+    /// `Chat.joinApprovalMode` flag so the sidebar admin-chip gate flips
+    /// without waiting for the next `mergeGroups`. Runtime-only —
+    /// `joinApprovalMode` is not persisted (a fresh ListGroups on the
+    /// next connect repopulates it).
+    func applyIncomingJoinApprovalMode(chatJID: String, on: Bool) {
+        guard let idx = chats.firstIndex(where: { $0.jid == chatJID }) else {
+            return
+        }
+        chats[idx].joinApprovalMode = on
+    }
+
+    /// Pending join-request count to render in the sidebar chip for
+    /// `chat`. Returns `nil` when the user is not an admin or there is
+    /// nothing to show. Centralises the (amAdmin && count > 0) gate so
+    /// `ChatListView` stays declarative.
+    func pendingRequestsChip(for chat: Chat) -> Int? {
+        guard chat.amAdmin else { return nil }
+        guard let n = session?.joinRequestStore.counts[chat.jid],
+              n > 0 else { return nil }
+        return n
     }
 
     // MARK: - Group participants

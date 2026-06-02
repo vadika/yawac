@@ -58,4 +58,70 @@ final class ChatListViewModelGroupInfoTests: XCTestCase {
         vm.applyLocalGroupInfo(chatJID: "g@g.us", name: nil, description: "")
         XCTAssertNil(vm.chats.first?.groupDescription)
     }
+
+    // MARK: - T29: joinApprovalMode wire-up
+
+    func testApplyIncomingJoinApprovalModeOnFlipsFlag() {
+        let vm = makeVM()
+        var c = chat("g@g.us")
+        c.joinApprovalMode = false
+        vm.chats = [c]
+        vm.applyIncomingJoinApprovalMode(chatJID: "g@g.us", on: true)
+        XCTAssertTrue(vm.chats.first?.joinApprovalMode ?? false)
+    }
+
+    func testApplyIncomingJoinApprovalModeOffFlipsFlag() {
+        let vm = makeVM()
+        var c = chat("g@g.us")
+        c.joinApprovalMode = true
+        vm.chats = [c]
+        vm.applyIncomingJoinApprovalMode(chatJID: "g@g.us", on: false)
+        XCTAssertFalse(vm.chats.first?.joinApprovalMode ?? true)
+    }
+
+    func testApplyIncomingJoinApprovalModeUnknownChatNoop() {
+        let vm = makeVM()
+        vm.chats = [chat("g@g.us")]
+        // Should not crash or grow `chats` for an unknown JID.
+        vm.applyIncomingJoinApprovalMode(chatJID: "other@g.us", on: true)
+        XCTAssertEqual(vm.chats.count, 1)
+        XCTAssertFalse(vm.chats[0].joinApprovalMode)
+    }
+
+    func testPendingRequestsChipGatedByAmAdmin() {
+        let vm = makeVM()
+        let session = SessionViewModel()
+        vm.session = session
+        var c = chat("g@g.us")
+        c.amAdmin = false
+        vm.chats = [c]
+        session.joinRequestStore.set(chatJID: "g@g.us", count: 3)
+        // Non-admin: no chip even with a non-zero count.
+        XCTAssertNil(vm.pendingRequestsChip(for: vm.chats[0]))
+    }
+
+    func testPendingRequestsChipShownForAdminWithPending() {
+        let vm = makeVM()
+        let session = SessionViewModel()
+        vm.session = session
+        var c = chat("g@g.us")
+        c.amAdmin = true
+        vm.chats = [c]
+        session.joinRequestStore.set(chatJID: "g@g.us", count: 2)
+        XCTAssertEqual(vm.pendingRequestsChip(for: vm.chats[0]), 2)
+    }
+
+    func testPendingRequestsChipHiddenWhenAdminButZeroPending() {
+        let vm = makeVM()
+        let session = SessionViewModel()
+        vm.session = session
+        var c = chat("g@g.us")
+        c.amAdmin = true
+        vm.chats = [c]
+        // No entry in the store at all → nil.
+        XCTAssertNil(vm.pendingRequestsChip(for: vm.chats[0]))
+        // Explicit zero → still nil.
+        session.joinRequestStore.set(chatJID: "g@g.us", count: 0)
+        XCTAssertNil(vm.pendingRequestsChip(for: vm.chats[0]))
+    }
 }
