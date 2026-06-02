@@ -112,6 +112,15 @@ type JSendResult struct {
 	Timestamp int64  `json:"timestamp"`
 }
 
+// JSendPollResult is returned by SendPollCreation. Carries the canonical
+// JPoll (built from the wire-form message) so the caller's local copy of
+// the option hashes matches what peers will use for vote tallies.
+type JSendPollResult struct {
+	MessageID string `json:"message_id"`
+	Timestamp int64  `json:"timestamp"`
+	Poll      JPoll  `json:"poll"`
+}
+
 type JReaction struct {
 	ChatJID         string `json:"chat_jid"`
 	TargetMessageID string `json:"target_message_id"`
