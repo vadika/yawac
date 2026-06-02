@@ -1789,11 +1789,17 @@ final class ConversationViewModel {
                   pollFromMe: Bool) {
         Task { @MainActor [weak self] in
             guard let self else { return }
+            // For our own polls UIMessage.senderJID is the "me" sentinel,
+            // but whatsmeow's vote-encryption needs the real bare JID
+            // (that's the key it stored the message-secret under in
+            // PutMessageSecret). Resolve fromMe → ownJID before crossing
+            // the bridge.
+            let resolvedSender = pollFromMe ? self.client.ownJID : pollSenderJID
             do {
                 _ = try self.client.sendPollVote(
                     chatJID: self.chatJID,
                     pollMsgID: messageID,
-                    pollSenderJID: pollSenderJID,
+                    pollSenderJID: resolvedSender,
                     pollFromMe: pollFromMe,
                     optionHashes: hashes,
                     pollOptions: options)
