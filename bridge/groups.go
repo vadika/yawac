@@ -25,11 +25,18 @@ type JGroup struct {
 	Participants      []JParticipant `json:"participants"`
 }
 
-// JParticipant represents a single member of a group.
+// JParticipant represents a single member of a group, optionally
+// carrying a per-row error code returned by UpdateGroupParticipants.
+// When ErrorCode is non-zero and the server queued an invite-via-DM
+// as fallback (privacy-block case), InviteCode + InviteExpiry are
+// populated so the caller can render "invite sent, pending acceptance".
 type JParticipant struct {
-	JID     string `json:"jid"`
-	IsAdmin bool   `json:"is_admin"`
-	IsSuper bool   `json:"is_super_admin"`
+	JID          string `json:"jid"`
+	IsAdmin      bool   `json:"is_admin"`
+	IsSuper      bool   `json:"is_super_admin"`
+	ErrorCode    int    `json:"error_code,omitempty"`
+	InviteCode   string `json:"invite_code,omitempty"`
+	InviteExpiry int64  `json:"invite_expiry,omitempty"`
 }
 
 // ListGroups returns the JSON-encoded array of groups the user has joined.
