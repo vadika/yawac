@@ -1,18 +1,24 @@
 import SwiftUI
 
-/// Modal sheet for creating a plain (non-community) WhatsApp group.
-/// Shows a name field with a live 0/25 counter (server-enforced limit),
-/// a chip + suggestion picker for selecting initial participants, and a
-/// confirm button that calls `model.create()` then forwards the new
-/// group JID via `onCreated` before dismissing.
-struct NewGroupSheet: View {
-    @Bindable var model: NewGroupSheetModel
+/// Modal sheet for creating a sub-group inside an existing community
+/// parent. Mirrors `NewGroupSheet` — same name field with the 0/25
+/// counter, same shared `ParticipantChipPicker`. Title quotes the
+/// parent name so the user sees which community they're adding to.
+/// Confirm calls `model.create()` then forwards the new sub-group JID
+/// via `onCreated` before dismissing.
+struct NewSubGroupSheet: View {
+    @Bindable var model: NewSubGroupSheetModel
+    /// Display name of the parent community, rendered in the sheet
+    /// title. Pure presentation — the bridge call uses
+    /// `model.parentJID` which is fixed at init.
+    let parentName: String
     /// Full contact list to drive the suggestion picker. The picker
     /// filters this in-memory; loading the list itself is the caller's
     /// concern (typically `ChatListViewModel.contacts`).
     var contacts: [BridgeContact]
     /// Invoked once the bridge returns a JID. Caller is expected to
-    /// dismiss any container sheet binding and navigate to the new chat.
+    /// dismiss any container sheet binding and navigate to the new
+    /// sub-group chat.
     var onCreated: (String) -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -39,10 +45,12 @@ struct NewGroupSheet: View {
 
     @ViewBuilder
     private var header: some View {
-        HStack {
-            Text("New group")
+        HStack(alignment: .firstTextBaseline) {
+            Text("New sub-group in \u{201C}\(parentName)\u{201D}")
                 .scaledUI(15, weight: .semibold)
                 .foregroundStyle(Theme.text)
+                .lineLimit(1)
+                .truncationMode(.tail)
             Spacer()
             Text("\(model.name.count) / 25")
                 .scaledMono(10)
@@ -60,7 +68,7 @@ struct NewGroupSheet: View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Name")
                 .scaledUI(11).foregroundStyle(Theme.textFaint)
-            TextField("Group name", text: $model.name)
+            TextField("Sub-group name", text: $model.name)
                 .textFieldStyle(.roundedBorder)
         }
     }
