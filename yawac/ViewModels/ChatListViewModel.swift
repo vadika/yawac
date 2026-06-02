@@ -1025,6 +1025,32 @@ final class ChatListViewModel {
     var groupParticipantsTick: Int = 0
     private(set) var lastParticipantsChange: GroupParticipantsChange? = nil
 
+    // MARK: - Invite link preview
+
+    enum InviteLinkPreviewState: Equatable {
+        case loading(code: String)
+        case ready(BridgeGroupModel, code: String)
+        case joining(code: String)
+        case pending(code: String, joinedJID: String)
+        case error(message: String)
+
+        static func == (lhs: InviteLinkPreviewState,
+                        rhs: InviteLinkPreviewState) -> Bool {
+            switch (lhs, rhs) {
+            case (.loading(let a), .loading(let b)): return a == b
+            case (.ready(let a, let b), .ready(let c, let d)):
+                return a.jid == c.jid && b == d
+            case (.joining(let a), .joining(let b)): return a == b
+            case (.pending(let a, let b), .pending(let c, let d)):
+                return a == c && b == d
+            case (.error(let a), .error(let b)): return a == b
+            default: return false
+            }
+        }
+    }
+
+    var inviteLinkPreview: InviteLinkPreviewState? = nil
+
     func applyGroupParticipantsChange(chatJID: String,
                                       action: String,
                                       jids: [String],
