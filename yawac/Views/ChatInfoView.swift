@@ -64,6 +64,13 @@ struct ChatInfoView: View {
     @State private var pickedImage: NSImage? = nil
     @State private var confirmRemovePhoto: Bool = false
     @State private var inviteSheetOpen: Bool = false
+    // Community-admin link/create/unlink — surfaced from the LINKED
+    // GROUPS section header (+ menu) and per-row context menu. Sheets
+    // and the unlink confirmation are attached at the body level.
+    @State private var showingLinkSheet: Bool = false
+    @State private var showingNewSubGroupSheet: Bool = false
+    @State private var unlinkSubGroupTarget: BridgeSubGroup?
+    @State private var sectionError: String?
 
     private var isGroup: Bool { chatJID.hasSuffix("@g.us") }
     private var name: String { session.displayName(for: chatJID) }
@@ -180,6 +187,79 @@ struct ChatInfoView: View {
                                 client: client,
                                 onClose: { inviteSheetOpen = false })
             }
+        }
+        .sheet(isPresented: $showingLinkSheet) {
+            if let g = group, let client = session.client {
+                // Bridge listGroups is synchronous; let the sheet render
+                // with an empty candidate set on failure rather than
+                // refusing to present.
+                let allGroups: [BridgeGroupModel] = (try? client.listGroups()) ?? []
+                let model = LinkSubGroupSheetModel(
+                    parentChatJID: g.jid,
+                    myJID: client.ownJID,
+                    availableGroups: allGroups,
+                    linker: client)
+                LinkSubGroupSheet(
+                    model: model,
+                    parentName: g.name,
+                    resolveCommunityName: { jid in
+                        session.chatList?.chats.first(where: { $0.jid == jid })?.name ?? jid
+                    },
+                    onLinked: {
+                        showingLinkSheet = false
+                        Task { await loadGroup() }
+                    }
+                )
+            }
+        }
+        .sheet(isPresented: $showingNewSubGroupSheet) {
+            if let g = group, let client = session.client {
+                let model = NewSubGroupSheetModel(parentJID: g.jid, creator: client)
+                NewSubGroupSheet(
+                    model: model,
+                    parentName: g.name,
+                    contacts: contactsForPicker,
+                    onCreated: { _ in
+                        showingNewSubGroupSheet = false
+                        Task { await loadGroup() }
+                    }
+                )
+            }
+        }
+        .confirmationDialog(
+            "Unlink \u{201C}\(unlinkSubGroupTarget?.name ?? "")\u{201D} from community?",
+            isPresented: Binding(
+                get: { unlinkSubGroupTarget != nil },
+                set: { if !$0 { unlinkSubGroupTarget = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button("Unlink", role: .destructive) {
+                if let sub = unlinkSubGroupTarget,
+                   let g = group,
+                   let client = session.client {
+                    let parentJID = g.jid
+                    let subJID = sub.jid
+                    Task { @MainActor in
+                        do {
+                            try await Task.detached {
+                                try client.unlinkSubGroup(parentJID: parentJID,
+                                                          subJID: subJID)
+                            }.value
+                            await loadGroup()
+                        } catch {
+                            sectionError = (error as NSError).localizedDescription
+                        }
+                        unlinkSubGroupTarget = nil
+                    }
+                } else {
+                    unlinkSubGroupTarget = nil
+                }
+            }
+            Button("Cancel", role: .cancel) {
+                unlinkSubGroupTarget = nil
+            }
+        } message: {
+            Text("It will become a standalone group. You can re-link it later.")
         }
     }
 
@@ -660,9 +740,42 @@ struct ChatInfoView: View {
         // either we ARE the parent, or we're a sub-group with a known
         // parent. Skip the current chat (no self-row in its own list).
         let directory = subGroups.filter { $0.jid != chatJID }
-        if !directory.isEmpty {
+        let showLinkedSection = !directory.isEmpty || (isCurrentUserAdmin(g) && g.isParent)
+        if showLinkedSection {
             let label = g.isParent ? "LINKED GROUPS" : "COMMUNITY GROUPS"
-            sectionLabel(label, trailing: "\(directory.count)")
+            HStack(spacing: 8) {
+                sectionLabel(label, trailing: "\(directory.count)")
+                if isCurrentUserAdmin(g) && g.isParent {
+                    Menu {
+                        Button("Link existing group…") {
+                            showingLinkSheet = true
+                        }
+                        Button("Create new sub-group…") {
+                            showingNewSubGroupSheet = true
+                        }
+                    } label: {
+                        Image(systemName: "plus.circle")
+                            .scaledIcon(12, weight: .semibold)
+                            .foregroundStyle(Theme.accentText)
+                            .frame(width: 22, height: 22)
+                            .contentShape(Rectangle())
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    .help("Link or create a sub-group")
+                }
+            }
+            if let err = sectionError {
+                Text(err)
+                    .scaledUI(11)
+                    .foregroundStyle(Color.red.opacity(0.9))
+                    .padding(.bottom, 4)
+                    .task(id: err) {
+                        try? await Task.sleep(nanoseconds: 6 * 1_000_000_000)
+                        sectionError = nil
+                    }
+            }
             VStack(spacing: 0) {
                 ForEach(directory, id: \.jid) { sub in
                     subGroupRow(sub)
@@ -969,6 +1082,24 @@ struct ChatInfoView: View {
             guard joined else { return }
             session.requestSelectChat(sub.jid)
         }
+        .contextMenu {
+            Button("Copy JID") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(sub.jid, forType: .string)
+            }
+            // Unlink is gated on the *current* inspected group being a
+            // community parent that the user admins. Default sub-groups
+            // (the announcement sub) can't be unlinked individually.
+            if let g = group,
+               g.isParent,
+               isCurrentUserAdmin(g),
+               !sub.isDefaultSubGroup {
+                Divider()
+                Button("Unlink from community", role: .destructive) {
+                    unlinkSubGroupTarget = sub
+                }
+            }
+        }
     }
 
     @MainActor
@@ -1168,6 +1299,32 @@ struct ChatInfoView: View {
                 .localizedCaseInsensitiveCompare(session.displayName(for: rhs.jid))
                 == .orderedAscending
         }
+    }
+
+    /// Contact list passed to `NewSubGroupSheet`'s participant picker.
+    /// Mirrors the dedup pattern from `ChatListView.contactsForPicker`:
+    /// walk `session.contactNames`, prefer the PN form over `@lid` when
+    /// both are known, and drop self.
+    private var contactsForPicker: [BridgeContact] {
+        guard let client = session.client else { return [] }
+        let selfKey = JIDNormalize.key(client.ownJID, client: client)
+        var byKey: [String: BridgeContact] = [:]
+        for (jid, name) in session.contactNames {
+            let key = JIDNormalize.key(jid, client: client)
+            if key == selfKey { continue }
+            if let existing = byKey[key] {
+                if existing.jid.hasSuffix("@lid"), !key.hasSuffix("@lid") {
+                    byKey[key] = BridgeContact(
+                        jid: key, name: name,
+                        pushName: nil, fullName: nil, businessName: nil)
+                }
+                continue
+            }
+            byKey[key] = BridgeContact(
+                jid: key, name: name,
+                pushName: nil, fullName: nil, businessName: nil)
+        }
+        return Array(byKey.values)
     }
 
     @MainActor
