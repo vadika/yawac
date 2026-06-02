@@ -137,6 +137,17 @@ struct BridgeSendResult: Codable {
     }
 }
 
+struct BridgeSendPollResult: Codable {
+    let messageID: String
+    let timestamp: Int64
+    let poll: BridgePoll
+
+    enum CodingKeys: String, CodingKey {
+        case messageID = "message_id"
+        case timestamp, poll
+    }
+}
+
 struct BridgeGroupModel: Codable, Identifiable {
     var id: String { jid }
     let jid: String
