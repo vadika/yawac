@@ -202,3 +202,34 @@ func TestUnlinkSubGroupBadJID(t *testing.T) {
 		t.Fatal("expected parse error on bad parent JID")
 	}
 }
+
+func TestGetGroupJoinRequestsUnpaired(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/gjr.db")
+	defer c.Close()
+	_, err := c.GetGroupJoinRequests("1234@g.us")
+	if err == nil {
+		t.Fatal("expected error on unpaired client")
+	}
+}
+
+func TestGetGroupJoinRequestsBadJID(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/gjr2.db")
+	defer c.Close()
+	_, err := c.GetGroupJoinRequests("not a jid")
+	if err == nil {
+		t.Fatal("expected parse error")
+	}
+}
+
+func TestJJoinRequestJSONShape(t *testing.T) {
+	in := JJoinRequest{JID: "1111@s.whatsapp.net", RequestedAt: 1234567890}
+	b, err := json.Marshal(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(b)
+	want := `{"jid":"1111@s.whatsapp.net","requested_at":1234567890}`
+	if got != want {
+		t.Fatalf("JSON mismatch:\ngot:  %s\nwant: %s", got, want)
+	}
+}

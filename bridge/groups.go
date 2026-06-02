@@ -556,3 +556,36 @@ func (c *Client) JoinGroupViaLink(code string) (string, error) {
 	}
 	return jid.String(), nil
 }
+
+// JJoinRequest is one pending membership-approval request row.
+type JJoinRequest struct {
+	JID         string `json:"jid"`
+	RequestedAt int64  `json:"requested_at"` // unix seconds
+}
+
+// GetGroupJoinRequests returns JSON []JJoinRequest for `chatJIDStr`.
+// Returns "[]" when the queue is empty or approval-mode is off
+// (the two are indistinguishable at this layer; callers consult
+// BridgeGroupModel.joinApprovalMode for the mode flag).
+func (c *Client) GetGroupJoinRequests(chatJIDStr string) (string, error) {
+	if c.wa == nil {
+		return "", errors.New("client closed")
+	}
+	jid, err := types.ParseJID(chatJIDStr)
+	if err != nil {
+		return "", fmt.Errorf("parse jid: %w", err)
+	}
+	parts, err := c.wa.GetGroupRequestParticipants(context.Background(), jid)
+	if err != nil {
+		return "", fmt.Errorf("get join requests: %w", err)
+	}
+	out := make([]JJoinRequest, 0, len(parts))
+	for _, p := range parts {
+		out = append(out, JJoinRequest{
+			JID:         p.JID.String(),
+			RequestedAt: p.RequestedAt.Unix(),
+		})
+	}
+	b, _ := json.Marshal(out)
+	return string(b), nil
+}
