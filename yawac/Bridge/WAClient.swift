@@ -45,6 +45,9 @@ final class WAClient: PhoneValidating {
         case chatPinned(chatJID: String, pinned: Bool, timestamp: Int64)
         case chatMuted(chatJID: String, mutedUntilMs: Int64, timestamp: Int64)
         case groupInfoChanged(chatJID: String, name: String, description: String, timestamp: Int64)
+        case groupParticipantsChanged(chatJID: String, action: String,
+                                      actorJID: String, jids: [String],
+                                      timestamp: Int64)
         case messagePinned(chatJID: String, targetMessageID: String, senderJID: String, pinned: Bool, timestamp: Int64)
         case chatArchived(chatJID: String, archived: Bool, timestamp: Int64)
         case chatDeleted(chatJID: String, timestamp: Int64)
@@ -533,6 +536,55 @@ final class WAClient: PhoneValidating {
         }
     }
 
+    func updateGroupParticipants(chatJID: String,
+                                 action: String,
+                                 participantJIDs: [String])
+        throws -> [BridgeParticipantModel] {
+        let jids = try JSONEncoder().encode(participantJIDs)
+        let jidsString = String(data: jids, encoding: .utf8) ?? "[]"
+        var err: NSError?
+        let json = go.updateGroupParticipants(chatJID,
+                                              action: action,
+                                              participantJIDsJSON: jidsString,
+                                              error: &err)
+        if let err { throw err }
+        return try JSONDecoder().decode([BridgeParticipantModel].self,
+                                        from: Data(json.utf8))
+    }
+
+    func setGroupPhoto(chatJID: String, jpeg: Data) throws -> String {
+        var err: NSError?
+        let pictureID = go.setGroupPhoto(chatJID, jpeg: jpeg, error: &err)
+        if let err { throw err }
+        return pictureID
+    }
+
+    nonisolated func removeGroupPhoto(chatJID: String) throws {
+        try go.removeGroupPhoto(chatJID)
+    }
+
+    func getGroupInviteLink(chatJID: String, reset: Bool) throws -> String {
+        var err: NSError?
+        let link = go.getGroupInviteLink(chatJID, reset: reset, error: &err)
+        if let err { throw err }
+        return link
+    }
+
+    func groupInfoFromLink(code: String) throws -> BridgeGroupModel {
+        var err: NSError?
+        let json = go.groupInfo(fromLink: code, error: &err)
+        if let err { throw err }
+        return try JSONDecoder().decode(BridgeGroupModel.self,
+                                        from: Data(json.utf8))
+    }
+
+    func joinGroupViaLink(code: String) throws -> String {
+        var err: NSError?
+        let jid = go.joinGroup(viaLink: code, error: &err)
+        if let err { throw err }
+        return jid
+    }
+
     nonisolated static func decode(kind: String, payload: String) -> Event {
         let data = Data(payload.utf8)
         let dec = JSONDecoder()
@@ -776,6 +828,26 @@ final class WAClient: PhoneValidating {
             if let b = try? dec.decode(B.self, from: data) {
                 return .blocklistChanged(action: b.action,
                                          changes: b.changes.map { ($0.jid, $0.action) })
+            }
+        case "GroupParticipantsChanged":
+            struct GP: Codable {
+                let chatJID: String
+                let action: String
+                let actorJID: String?
+                let jids: [String]
+                let timestamp: Int64
+                enum CodingKeys: String, CodingKey {
+                    case chatJID = "chat_jid"
+                    case action
+                    case actorJID = "actor_jid"
+                    case jids, timestamp
+                }
+            }
+            if let g = try? dec.decode(GP.self, from: data) {
+                return .groupParticipantsChanged(
+                    chatJID: g.chatJID, action: g.action,
+                    actorJID: g.actorJID ?? "",
+                    jids: g.jids, timestamp: g.timestamp)
             }
         default:
             break
