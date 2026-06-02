@@ -229,9 +229,19 @@ struct ChatInfoView: View {
                     model: model,
                     parentName: g.name,
                     contacts: contactsForPicker,
-                    onCreated: { _ in
+                    onCreated: { newJID in
                         showingNewSubGroupSheet = false
-                        Task { await loadGroup() }
+                        // Reload the parent's sub-group directory and
+                        // merge the new sub-group into the sidebar
+                        // chat list. whatsmeow's JoinedGroup event
+                        // isn't wired through WAClient.Event yet, so
+                        // an explicit fetch keeps the sidebar in sync.
+                        Task {
+                            if let info = try? client.getGroupInfo(jid: newJID) {
+                                session.chatList?.mergeGroups([info])
+                            }
+                            await loadGroup()
+                        }
                     }
                 )
             }

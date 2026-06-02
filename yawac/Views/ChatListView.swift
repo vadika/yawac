@@ -362,7 +362,7 @@ struct ChatListView: View {
                     model: NewGroupSheetModel(creator: client),
                     contacts: contactsForPicker,
                     onCreated: { newJID in
-                        session.requestSelectChat(newJID)
+                        mergeNewlyCreatedChat(jid: newJID, client: client)
                     }
                 )
             }
@@ -372,7 +372,7 @@ struct ChatListView: View {
                 NewCommunitySheet(
                     model: NewCommunitySheetModel(creator: client),
                     onCreated: { newJID in
-                        session.requestSelectChat(newJID)
+                        mergeNewlyCreatedChat(jid: newJID, client: client)
                     }
                 )
             }
@@ -578,6 +578,20 @@ struct ChatListView: View {
                 pushName: nil, fullName: nil, businessName: nil)
         }
         return Array(byKey.values)
+    }
+
+    /// Newly-created groups don't arrive via an inbound event yet
+    /// (whatsmeow's JoinedGroup isn't wired into WAClient.Event),
+    /// so explicitly fetch the new chat's info and merge it into
+    /// ChatListViewModel, then queue selection. Mirrors joinPreview.
+    @MainActor
+    private func mergeNewlyCreatedChat(jid: String, client: WAClient) {
+        Task {
+            if let info = try? client.getGroupInfo(jid: jid) {
+                vm.mergeGroups([info])
+            }
+            session.requestSelectChat(jid)
+        }
     }
 
     @MainActor
