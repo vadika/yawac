@@ -604,8 +604,13 @@ struct ChatInfoView: View {
         actionRow(actions: [
             .init(label: "Mute", icon: "speaker.slash"),
             .init(label: "Search", icon: "magnifyingglass"),
+            // Server-side: most groups require admin to fetch the invite
+            // link (the default policy). Some groups allow all members,
+            // but whatsmeow doesn't surface that flag on GroupInfo today,
+            // so we gate on admin to avoid handing the user a "permission
+            // denied" sheet they can't recover from.
             .init(label: "Invite", icon: "link",
-                  action: { inviteSheetOpen = true }),
+                  action: admin ? { inviteSheetOpen = true } : nil),
             .init(label: "Leave", icon: "rectangle.portrait.and.arrow.right",
                   destructive: true, action: { confirmLeave = true }),
         ])

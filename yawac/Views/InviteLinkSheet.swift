@@ -74,6 +74,8 @@ struct InviteLinkSheet: View {
                 Text(err)
                     .scaledUI(12)
                     .foregroundStyle(Color.red.opacity(0.9))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .multilineTextAlignment(.leading)
             } else if let link {
                 Text(link)
                     .scaledMono(11)
@@ -87,15 +89,18 @@ struct InviteLinkSheet: View {
                     )
                     .textSelection(.enabled)
             }
-            Button("Copy link") { copy() }
-                .buttonStyle(.bordered)
-                .disabled(link == nil)
-            ShareButton(link: link)
-            if isAdmin {
-                Button("Revoke link") { confirmRevoke = true }
+            // Hide all action buttons when there's no link — disabled
+            // outlines clutter the error state and Share would publish nil.
+            if link != nil {
+                Button("Copy link") { copy() }
                     .buttonStyle(.bordered)
-                    .tint(.red)
-                    .disabled(link == nil || revokeOnCooldown())
+                ShareButton(link: link)
+                if isAdmin {
+                    Button("Revoke link") { confirmRevoke = true }
+                        .buttonStyle(.bordered)
+                        .tint(.red)
+                        .disabled(revokeOnCooldown())
+                }
             }
         }
     }
