@@ -44,22 +44,30 @@ struct AvatarView: View {
         .clipShape(.circle)
         .task(id: "\(cacheKey)#\(revision)") {
             let key = cacheKey
+            AvatarLog.write("[avatar-view size=\(Int(size))] task jid=\(jid) key=\(key)")
             // Fast path: skip the actor hop + bridge call when the
             // avatar is already cached on disk.
             if let cached = AvatarCache.cachedURL(for: key),
-               FileManager.default.fileExists(atPath: cached.path),
-               let img = NSImage(contentsOf: cached) {
-                loadedImage = img
+               FileManager.default.fileExists(atPath: cached.path) {
+                if let img = NSImage(contentsOf: cached) {
+                    AvatarLog.write("[avatar-view size=\(Int(size))] disk hit key=\(key)")
+                    loadedImage = img
+                } else {
+                    AvatarLog.write("[avatar-view size=\(Int(size))] disk file exists but NSImage nil key=\(key)")
+                }
                 return
             }
             guard let client = session.client else {
+                AvatarLog.write("[avatar-view size=\(Int(size))] no client key=\(key)")
                 loadedImage = nil
                 return
             }
             if let url = await AvatarCache.shared.ensure(jid: key, using: client),
                let img = NSImage(contentsOf: url) {
+                AvatarLog.write("[avatar-view size=\(Int(size))] ensure ok key=\(key)")
                 loadedImage = img
             } else {
+                AvatarLog.write("[avatar-view size=\(Int(size))] ensure empty key=\(key)")
                 loadedImage = nil
             }
         }
@@ -68,10 +76,14 @@ struct AvatarView: View {
             guard let invalid = note.userInfo?["jid"] as? String,
                   JIDNormalize.same(invalid, jid, client: session.client)
             else { return }
+            AvatarLog.write("[avatar-view size=\(Int(size))] invalidated by \(invalid) → reset jid=\(jid)")
             // Clear so placeholder shows during the brief re-fetch
             // window; bumping `revision` re-runs `.task`.
             loadedImage = nil
             revision &+= 1
+        }
+        .onChange(of: loadedImage == nil) { _, isNil in
+            AvatarLog.write("[avatar-view size=\(Int(size))] loadedImage=\(isNil ? "nil" : "set") jid=\(jid)")
         }
     }
 
