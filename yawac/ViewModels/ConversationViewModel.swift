@@ -1458,6 +1458,59 @@ final class ConversationViewModel {
         MessageIndex.shared.upsert(row.indexFields)
     }
 
+    func sendPoll(question: String,
+                  options: [String],
+                  allowMultiple: Bool) async {
+        let q = question.trimmingCharacters(in: .whitespacesAndNewlines)
+        let opts = options
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard !q.isEmpty, opts.count >= 2, opts.count <= 12 else { return }
+
+        let selectable = allowMultiple ? 0 : 1
+        do {
+            let res = try client.sendPollCreation(
+                chatJID,
+                question: q,
+                options: opts,
+                selectableCount: selectable)
+
+            let m = UIMessage(
+                id: res.messageID,
+                chatJID: chatJID,
+                senderJID: "me",
+                fromMe: true,
+                timestamp: Date(
+                    timeIntervalSince1970: TimeInterval(res.timestamp)),
+                body: .poll(question: res.poll.question,
+                            options: res.poll.options,
+                            selectableCount: res.poll.selectableCount))
+
+            messages.append(m)
+            receiptStatus[m.id] = .sent
+            persistOutgoingPoll(m, pollJSON: res.poll.json ?? "")
+        } catch {
+            transientError =
+                "Couldn't create poll: \(error.localizedDescription)"
+        }
+    }
+
+    private func persistOutgoingPoll(_ m: UIMessage, pollJSON: String) {
+        guard let context else { return }
+        let row = PersistedMessage(
+            id: m.id,
+            chatJID: m.chatJID,
+            senderJID: m.senderJID,
+            fromMe: m.fromMe,
+            timestamp: m.timestamp,
+            kind: "poll",
+            text: nil,
+            pollJSON: pollJSON)
+        context.insert(row)
+        try? context.save()
+        MessageIndex.shared.upsert(row.indexFields)
+    }
+
     /// Outbound-media persistence. Carries the local file path so the
     /// bubble survives chat switches / app restarts and the audio /
     /// image / video keeps rendering from disk without re-download.
