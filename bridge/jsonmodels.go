@@ -143,10 +143,22 @@ type JChatMuted struct {
 }
 
 type JGroupInfoChanged struct {
-	ChatJID     string `json:"chat_jid"`
-	Name        string `json:"name"`        // empty = unchanged this event
-	Description string `json:"description"` // empty = unchanged this event
-	Timestamp   int64  `json:"timestamp"`
+	ChatJID           string `json:"chat_jid"`
+	Name              string `json:"name"`        // empty = unchanged this event
+	Description       string `json:"description"` // empty = unchanged this event
+	LinkedParentJID   string `json:"linked_parent_jid,omitempty"`
+	IsDefaultSubGroup bool   `json:"is_default_subgroup,omitempty"`
+	Timestamp         int64  `json:"timestamp"`
+}
+
+// JJoinApprovalModeChanged carries a community/group's
+// require-admin-approval-to-join toggle. Mode "request_required" → on=true.
+// Anything else → on=false.
+type JJoinApprovalModeChanged struct {
+	ChatJID   string `json:"chat_jid"`
+	On        bool   `json:"on"`
+	ActorJID  string `json:"actor_jid,omitempty"`
+	Timestamp int64  `json:"timestamp"`
 }
 
 // JGroupParticipantsChanged carries a single action verb (add / remove /

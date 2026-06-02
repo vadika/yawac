@@ -224,10 +224,14 @@ func (c *Client) dispatchMute(evt *events.Mute) {
 }
 
 // dispatchGroupInfo surfaces app-level group metadata changes
-// (name + description). Other GroupInfo fields (locked, announce,
-// ephemeral, membership-approval, participant changes) are ignored
-// here — they belong on separate handlers. When neither name nor
-// description carried a value in this event, we don't dispatch.
+// (name, description, linked-parent / default-sub flags) and
+// additionally fans out a JoinApprovalModeChanged event when the
+// membership-approval gate flipped. Other GroupInfo fields (locked,
+// announce, ephemeral, participant changes) are ignored here — they
+// belong on separate handlers. When this event carried no
+// metadata-changed field at all (no name, description, link, default-sub
+// flag), we skip the GroupInfoChanged dispatch but still emit the
+// approval-mode event if MembershipApprovalMode was set.
 func (c *Client) dispatchGroupInfo(evt *events.GroupInfo) {
 	var name, description string
 	if evt.Name != nil {
@@ -236,19 +240,59 @@ func (c *Client) dispatchGroupInfo(evt *events.GroupInfo) {
 	if evt.Topic != nil {
 		description = evt.Topic.Topic
 	}
-	if name == "" && description == "" {
-		return
+
+	// Pull linked-parent / default-sub from the link change, if any. A
+	// GroupInfo for a freshly-linked sub-group carries Link with
+	// Type==parent_group; the linked target is the parent.
+	var linkedParent string
+	var isDefaultSub bool
+	if evt.Link != nil && evt.Link.Type == types.GroupLinkChangeTypeParent {
+		linkedParent = normalizeGroupJID(evt.Link.Group.JID.String())
+		isDefaultSub = evt.Link.Group.IsDefaultSubGroup
 	}
-	fmt.Fprintf(os.Stderr,
-		"[yawac/groupInfo] dispatch jid=%s name=%q desc_len=%d\n",
-		evt.JID.String(), name, len(description))
-	b, _ := json.Marshal(JGroupInfoChanged{
-		ChatJID:     evt.JID.String(),
-		Name:        name,
-		Description: description,
-		Timestamp:   evt.Timestamp.Unix(),
-	})
-	c.dispatch("GroupInfoChanged", string(b))
+
+	// Emit GroupInfoChanged when any of the metadata fields carried a value.
+	if name != "" || description != "" || linkedParent != "" || isDefaultSub {
+		fmt.Fprintf(os.Stderr,
+			"[yawac/groupInfo] dispatch jid=%s name=%q desc_len=%d parent=%q defSub=%v\n",
+			evt.JID.String(), name, len(description), linkedParent, isDefaultSub)
+		b, _ := json.Marshal(JGroupInfoChanged{
+			ChatJID:           evt.JID.String(),
+			Name:              name,
+			Description:       description,
+			LinkedParentJID:   linkedParent,
+			IsDefaultSubGroup: isDefaultSub,
+			Timestamp:         evt.Timestamp.Unix(),
+		})
+		c.dispatch("GroupInfoChanged", string(b))
+	}
+
+	// Additionally surface a join-approval-mode toggle. whatsmeow exposes
+	// this as a bool IsJoinApprovalRequired; map true → on=true.
+	if evt.MembershipApprovalMode != nil {
+		actor := ""
+		if evt.Sender != nil {
+			actor = evt.Sender.String()
+		}
+		b, _ := json.Marshal(JJoinApprovalModeChanged{
+			ChatJID:   evt.JID.String(),
+			On:        evt.MembershipApprovalMode.IsJoinApprovalRequired,
+			ActorJID:  actor,
+			Timestamp: evt.Timestamp.Unix(),
+		})
+		c.dispatch("JoinApprovalModeChanged", string(b))
+	}
+}
+
+// normalizeGroupJID treats anything that isn't a `@g.us` JID as the
+// empty string. Mirrors the logic in ListGroups for the LinkedParentJID
+// promotion — whatsmeow returns the zero JID as a bare default server
+// suffix when no parent is set.
+func normalizeGroupJID(jid string) string {
+	if jid != "" && len(jid) >= 5 && jid[len(jid)-5:] != "@g.us" {
+		return ""
+	}
+	return jid
 }
 
 // dispatchDeleteChat surfaces app-state delete-chat events (a conversation
