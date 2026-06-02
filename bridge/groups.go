@@ -651,3 +651,20 @@ func (c *Client) UpdateGroupJoinRequests(
 	b, _ := json.Marshal(out)
 	return string(b), nil
 }
+
+// SetGroupJoinApprovalMode flips the require-admin-approval gate
+// on a group on or off. Admin only.
+func (c *Client) SetGroupJoinApprovalMode(chatJIDStr string, on bool) error {
+	if c.wa == nil {
+		return errors.New("client closed")
+	}
+	jid, err := types.ParseJID(chatJIDStr)
+	if err != nil {
+		return fmt.Errorf("parse jid: %w", err)
+	}
+	if err := c.wa.SetGroupJoinApprovalMode(
+		context.Background(), jid, on); err != nil {
+		return fmt.Errorf("set approval mode: %w", err)
+	}
+	return nil
+}

@@ -286,3 +286,21 @@ func TestJJoinRequestResultJSONShape(t *testing.T) {
 		t.Fatalf("got %s want %s", b, want)
 	}
 }
+
+func TestSetGroupJoinApprovalModeUnpaired(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/sm.db")
+	defer c.Close()
+	err := c.SetGroupJoinApprovalMode("1234@g.us", true)
+	if err == nil {
+		t.Fatal("expected error on unpaired client")
+	}
+}
+
+func TestSetGroupJoinApprovalModeBadJID(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/sm2.db")
+	defer c.Close()
+	err := c.SetGroupJoinApprovalMode("not a jid", true)
+	if err == nil {
+		t.Fatal("expected parse error")
+	}
+}
