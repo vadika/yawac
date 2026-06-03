@@ -224,3 +224,21 @@ func TestWrapForChatBothEphemeralOutside(t *testing.T) {
 			out.EphemeralMessage.Message)
 	}
 }
+
+func TestSendLocationUnpaired(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/sl.db")
+	defer c.Close()
+	_, err := c.SendLocation("1234@s.whatsapp.net", 60.17, 24.94, "Senate Square", "Helsinki", 0)
+	if err == nil {
+		t.Fatal("expected error on unpaired client")
+	}
+}
+
+func TestSendLocationBadJID(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/sl2.db")
+	defer c.Close()
+	_, err := c.SendLocation("not a jid", 60.17, 24.94, "", "", 0)
+	if err == nil {
+		t.Fatal("expected parse error")
+	}
+}

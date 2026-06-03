@@ -805,6 +805,42 @@ func (c *Client) SendTextReply(
 	return string(out), nil
 }
 
+// SendLocation sends a static LocationMessage. lat/lng in decimal
+// degrees. name + address may be empty. When ephemeralSec > 0,
+// wraps in EphemeralMessage. Returns JSON of JSendResult.
+func (c *Client) SendLocation(
+	chatJIDStr string,
+	lat, lng float64,
+	name, address string,
+	ephemeralSec int32,
+) (string, error) {
+	if c.wa == nil {
+		return "", errors.New("client closed")
+	}
+	jid, err := types.ParseJID(chatJIDStr)
+	if err != nil {
+		return "", fmt.Errorf("parse jid: %w", err)
+	}
+	if jid.User == "" || jid.Server == "" {
+		return "", fmt.Errorf("parse jid: %q is not a valid jid", chatJIDStr)
+	}
+	inner := &waE2E.Message{
+		LocationMessage: &waE2E.LocationMessage{
+			DegreesLatitude:  proto.Float64(lat),
+			DegreesLongitude: proto.Float64(lng),
+			Name:             proto.String(name),
+			Address:          proto.String(address),
+		},
+	}
+	msg := wrapForChat(inner, ephemeralSec, false)
+	resp, err := c.wa.SendMessage(context.Background(), jid, msg)
+	if err != nil {
+		return "", fmt.Errorf("send: %w", err)
+	}
+	out, _ := json.Marshal(JSendResult{MessageID: resp.ID, Timestamp: resp.Timestamp.Unix()})
+	return string(out), nil
+}
+
 func stubQuoted(kind, snippet string) *waE2E.Message {
 	switch kind {
 	case "image":
