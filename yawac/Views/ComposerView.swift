@@ -533,6 +533,23 @@ struct ComposerView: View {
             .buttonStyle(.plain)
             .padding(2)
             .help("Remove")
+
+            // View-once toggle — only meaningful for image/video.
+            if att.kind == "image" || att.kind == "video" {
+                Button {
+                    vm.toggleViewOnce(att.id)
+                } label: {
+                    Image(systemName: att.viewOnce ? "eye.fill" : "eye")
+                        .scaledIcon(12)
+                        .foregroundStyle(att.viewOnce ? Theme.accent : .white,
+                                         .black.opacity(0.55))
+                }
+                .buttonStyle(.plain)
+                .padding(2)
+                .frame(maxWidth: .infinity, maxHeight: .infinity,
+                       alignment: .bottomTrailing)
+                .help(att.viewOnce ? "View once: on" : "Send as view once")
+            }
         }
     }
 

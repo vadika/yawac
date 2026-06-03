@@ -9,6 +9,7 @@ struct PendingAttachment: Identifiable, Equatable {
     let id = UUID()
     let url: URL
     let kind: String   // image | video | audio | document
+    var viewOnce: Bool = false
 }
 
 @Observable @MainActor
@@ -1319,6 +1320,15 @@ final class ConversationViewModel {
         pendingAttachments.removeAll { $0.id == id }
     }
 
+    /// Toggle the view-once flag on a staged image/video attachment. No-op
+    /// for non-media kinds (audio/document don't support view-once in WA).
+    func toggleViewOnce(_ id: PendingAttachment.ID) {
+        guard let idx = pendingAttachments.firstIndex(where: { $0.id == id }) else { return }
+        let kind = pendingAttachments[idx].kind
+        guard kind == "image" || kind == "video" else { return }
+        pendingAttachments[idx].viewOnce.toggle()
+    }
+
     /// Stage a chosen location in the composer. Filled in T22 — will append
     /// a `.location` case to `pendingAttachments` once the staging surface
     /// supports non-file kinds.
@@ -1345,16 +1355,20 @@ final class ConversationViewModel {
         draft = ""
         for (i, item) in items.enumerated() {
             await sendOneAttachment(url: item.url, kind: item.kind,
-                                    caption: i == 0 ? caption : "")
+                                    caption: i == 0 ? caption : "",
+                                    viewOnce: item.viewOnce)
         }
     }
 
-    private func sendOneAttachment(url: URL, kind: String, caption: String) async {
+    private func sendOneAttachment(url: URL, kind: String, caption: String,
+                                   viewOnce: Bool = false) async {
         do {
             let res: BridgeSendResult
             switch kind {
-            case "image": res = try client.sendImage(chatJID, path: url.path, caption: caption)
-            case "video": res = try client.sendVideo(chatJID, path: url.path, caption: caption)
+            case "image": res = try client.sendImage(chatJID, path: url.path, caption: caption,
+                                                     viewOnce: viewOnce)
+            case "video": res = try client.sendVideo(chatJID, path: url.path, caption: caption,
+                                                     viewOnce: viewOnce)
             case "audio": res = try client.sendAudio(chatJID, path: url.path)
             default:      res = try client.sendDocument(chatJID, path: url.path, caption: caption)
             }
