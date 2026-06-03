@@ -1,5 +1,21 @@
 import Foundation
 
+struct LocationPayload: Hashable {
+    let lat: Double
+    let lng: Double
+    let name: String
+    let address: String
+}
+
+struct ContactPayload: Hashable {
+    let jid: String
+    let displayName: String
+    let phone: String
+    // TODO Task 14: switch to computed `var vcard: String { VCardBuilder.build(...) }`
+    // once VCardBuilder lands; for now we accept a prebuilt vCard string.
+    let vcard: String
+}
+
 struct UIMessage: Identifiable, Hashable {
     let id: String
     let chatJID: String
@@ -19,11 +35,20 @@ struct UIMessage: Identifiable, Hashable {
     var starredAt: Date? = nil
     var pinnedAt: Date? = nil
     var isForwarded: Bool = false
+    var isViewOnce: Bool = false
+    /// Mirrors PersistedMessage.viewOnceLocked — set once the user has
+    /// revealed the view-once envelope so we permanently render the
+    /// "You viewed this once" lock instead of the reveal CTA. Default
+    /// false; populated from the persisted row in loadHistory + after
+    /// ViewOnceReveal.reveal(_:) flips it.
+    var viewOnceLocked: Bool = false
 
     enum Body: Hashable {
         case text(String)
         case media(kind: String, caption: String?, fileName: String?, localPath: String?)
         case poll(question: String, options: [BridgePollOption], selectableCount: Int)
+        case location(LocationPayload, isLive: Bool, sequence: Int64?)
+        case contact(ContactPayload)
         case system(String)
     }
 }
@@ -60,6 +85,37 @@ extension UIMessage {
             } else {
                 self.body = .system(b.kind)
             }
+        case "location":
+            if let loc = b.location {
+                self.body = .location(
+                    LocationPayload(lat: loc.lat, lng: loc.lng,
+                                    name: loc.name, address: loc.address),
+                    isLive: false, sequence: nil)
+            } else {
+                self.body = .system("(location)")
+            }
+        case "location_live":
+            if let loc = b.location {
+                self.body = .location(
+                    LocationPayload(lat: loc.lat, lng: loc.lng,
+                                    name: loc.name, address: loc.address),
+                    isLive: true, sequence: b.locationSequence)
+            } else {
+                self.body = .system("(live location)")
+            }
+        case "contact":
+            if let c = b.contact {
+                let waid = VCardBuilder.parseWAID(c.vcard) ?? ""
+                let jid = waid.isEmpty ? "" : "\(waid)@s.whatsapp.net"
+                let phone = waid.isEmpty ? "" : "+\(waid)"
+                self.body = .contact(ContactPayload(
+                    jid: jid,
+                    displayName: c.displayName,
+                    phone: phone,
+                    vcard: c.vcard))
+            } else {
+                self.body = .system("(contact)")
+            }
         default:
             self.body = .system(b.kind)
         }
@@ -71,5 +127,6 @@ extension UIMessage {
             self.quotedKind = q.kind
         }
         self.isForwarded = b.isForwarded ?? false
+        self.isViewOnce = b.isViewOnce ?? false
     }
 }

@@ -373,6 +373,26 @@ final class ChatListViewModel {
             if let p = m.media?.filePath, !p.isEmpty { existing.mediaPath = p }
             if let c = m.media?.caption, !c.isEmpty { existing.mediaCaption = c }
             if let f = m.media?.fileName, !f.isEmpty { existing.mediaFileName = f }
+            // T12 fields: re-merge live-location sequence updates and pick up
+            // view-once / contact metadata that a later replay may carry. The
+            // initial insert path below threads these on first ingest; this
+            // branch keeps them in sync on subsequent updates (e.g.
+            // live-location stream sequence bumps).
+            if let v = m.isViewOnce { existing.isViewOnce = v }
+            if let loc = m.location {
+                existing.locationLat = loc.lat
+                existing.locationLng = loc.lng
+                if !loc.name.isEmpty { existing.locationName = loc.name }
+                if !loc.address.isEmpty { existing.locationAddress = loc.address }
+            }
+            if m.kind == "location_live" {
+                existing.locationIsLive = true
+                if let seq = m.locationSequence { existing.locationSequence = seq }
+            }
+            if let card = m.contact {
+                existing.contactVCard = card.vcard
+                existing.contactDisplayName = card.displayName
+            }
             try? context.save()
             return
         }
@@ -390,6 +410,16 @@ final class ChatListViewModel {
             mediaFileName: m.media?.fileName,
             mediaRefJSON: m.media?.ref?.json,
             pollJSON: m.poll?.json,
+            isViewOnce: m.isViewOnce ?? false,
+            viewOnceLocked: false,
+            locationLat: m.location?.lat,
+            locationLng: m.location?.lng,
+            locationName: m.location?.name,
+            locationAddress: m.location?.address,
+            locationIsLive: m.kind == "location_live",
+            locationSequence: m.locationSequence,
+            contactVCard: m.contact?.vcard,
+            contactDisplayName: m.contact?.displayName,
             quotedMessageID: m.quoted?.messageID,
             quotedSenderJID: m.quoted?.senderJID,
             quotedFromMe: m.quoted?.fromMe ?? false,
@@ -514,6 +544,7 @@ final class ChatListViewModel {
                 c.isDefaultSubGroup = g.isDefaultSubGroup
                 c.joinApprovalMode = g.joinApprovalMode
                 c.amAdmin = amAdmin
+                c.ephemeralExpirationSeconds = g.ephemeralExpirationSeconds
                 if c.name == jid && !g.name.isEmpty { c.name = g.name }
                 chats[idx] = c
                 upsertPersisted(c)
@@ -531,6 +562,7 @@ final class ChatListViewModel {
                 isDefaultSubGroup: g.isDefaultSubGroup)
             fresh.joinApprovalMode = g.joinApprovalMode
             fresh.amAdmin = amAdmin
+            fresh.ephemeralExpirationSeconds = g.ephemeralExpirationSeconds
             chats.append(fresh)
             upsertPersisted(chats[chats.count - 1])
         }
@@ -1038,6 +1070,19 @@ final class ChatListViewModel {
             return
         }
         chats[idx].joinApprovalMode = on
+    }
+
+    /// Apply a live `ephemeralTimerChanged` event (or an optimistic local
+    /// edit) onto `Chat.ephemeralExpirationSeconds` so the inspector
+    /// picker and any future composer banner reflect the new timer
+    /// without waiting for the next `mergeGroups`. Runtime-only — the
+    /// field is not persisted (a fresh ListGroups on the next connect
+    /// repopulates it for groups; 1:1 chats hydrate only via this event).
+    func applyEphemeralTimer(chatJID: String, seconds: Int32) {
+        guard let idx = chats.firstIndex(where: { $0.jid == chatJID }) else {
+            return
+        }
+        chats[idx].ephemeralExpirationSeconds = seconds
     }
 
     /// Pending join-request count to render in the sidebar chip for

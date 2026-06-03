@@ -8,7 +8,7 @@ import (
 func TestSendVideoMissingFile(t *testing.T) {
 	c, _ := NewClient(t.TempDir() + "/sv.db")
 	defer c.Close()
-	_, err := c.SendVideo("1@s.whatsapp.net", "/no/such.mp4", "")
+	_, err := c.SendVideo("1@s.whatsapp.net", "/no/such.mp4", "", 0, false)
 	if err == nil || !strings.Contains(err.Error(), "read file") {
 		t.Fatalf("got %v", err)
 	}
@@ -17,7 +17,7 @@ func TestSendVideoMissingFile(t *testing.T) {
 func TestSendAudioMissingFile(t *testing.T) {
 	c, _ := NewClient(t.TempDir() + "/sa.db")
 	defer c.Close()
-	_, err := c.SendAudio("1@s.whatsapp.net", "/no/such.mp3")
+	_, err := c.SendAudio("1@s.whatsapp.net", "/no/such.mp3", 0)
 	if err == nil || !strings.Contains(err.Error(), "read file") {
 		t.Fatalf("got %v", err)
 	}
@@ -26,7 +26,7 @@ func TestSendAudioMissingFile(t *testing.T) {
 func TestSendDocumentMissingFile(t *testing.T) {
 	c, _ := NewClient(t.TempDir() + "/sd.db")
 	defer c.Close()
-	_, err := c.SendDocument("1@s.whatsapp.net", "/no/such.pdf", "")
+	_, err := c.SendDocument("1@s.whatsapp.net", "/no/such.pdf", "", 0)
 	if err == nil || !strings.Contains(err.Error(), "read file") {
 		t.Fatalf("got %v", err)
 	}

@@ -189,7 +189,9 @@ func (c *Client) dispatchPollVote(evt *events.Message) {
 // SendPollCreation builds a poll creation message and sends it. optionsJSON
 // is a JSON array of option-name strings. selectableCount must be in
 // 0..len(options); 0 means multi-select (WhatsApp convention), 1 means
-// single. Returns JSON of JSendPollResult.
+// single. When ephemeralSec > 0, wraps in EphemeralMessage so the poll
+// inherits the chat's disappearing-message retention. Returns JSON of
+// JSendPollResult.
 //
 // Validation is strict because whatsmeow.BuildPollCreation silently clamps
 // an out-of-range selectableOptionCount to 0 (msgsecret.go:326), which
@@ -197,6 +199,7 @@ func (c *Client) dispatchPollVote(evt *events.Message) {
 func (c *Client) SendPollCreation(
 	chatJID, question, optionsJSON string,
 	selectableCount int32,
+	ephemeralSec int32,
 ) (string, error) {
 	if c.wa == nil {
 		return "", errors.New("client closed")
@@ -236,18 +239,21 @@ func (c *Client) SendPollCreation(
 			len(opts), selectableCount)
 	}
 
-	msg := c.wa.BuildPollCreation(q, opts, int(selectableCount))
+	inner := c.wa.BuildPollCreation(q, opts, int(selectableCount))
+	// extractPoll runs on the inner (unwrapped) message because the
+	// PollCreationMessage* fields live on the immediate Message, not
+	// inside any Ephemeral wrap envelope.
+	jp := extractPoll(inner)
+	if jp == nil {
+		return "", errors.New("internal: built message is not a poll")
+	}
+	msg := wrapForChat(inner, ephemeralSec, false)
 	resp, err := c.wa.SendMessage(context.Background(), jid, msg)
 	if err != nil {
 		fmt.Fprintf(os.Stderr,
 			"[yawac/poll-create] chat=%s opts=%d sel=%d err=%v\n",
 			chatJID, len(opts), selectableCount, err)
 		return "", fmt.Errorf("send: %w", err)
-	}
-
-	jp := extractPoll(msg)
-	if jp == nil {
-		return "", errors.New("internal: built message is not a poll")
 	}
 	out, _ := json.Marshal(JSendPollResult{
 		MessageID: resp.ID,

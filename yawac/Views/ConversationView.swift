@@ -327,6 +327,10 @@ struct ConversationView: View {
             default:         return kind
             }
         case .poll(let q, _, _): return q
+        case .location(let loc, let isLive, _):
+            let label = isLive ? "Live location" : "Location"
+            return loc.name.isEmpty ? label : "\(label): \(loc.name)"
+        case .contact(let c):    return "Contact: \(c.displayName)"
         case .system(let s):     return s
         }
     }
@@ -408,6 +412,7 @@ struct ConversationView: View {
                                             onStar: { m in vm.starMessage(m, starred: m.starredAt == nil) },
                                             onPin: { m in vm.pinMessage(m, pinned: m.pinnedAt == nil) },
                                             onForward: { m in vm.beginForward(m) },
+                                            onRevealViewOnce: { m in vm.revealViewOnce(messageID: m.id) },
                                             onJumpToQuoted: { id in vm.jumpToQuoted(id: id) },
                                             isHighlighted: vm.highlightedID == msg.id,
                                             selecting: vm.forwardSelecting,

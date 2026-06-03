@@ -226,6 +226,15 @@ struct ContentView: View {
                     // store update.
                     let canonical = JIDNormalize.canonical(chatJID, client: client)
                     vm.applyIncomingJoinApprovalMode(chatJID: canonical, on: on)
+                case .ephemeralTimerChanged(let chatJID, let seconds, _, _):
+                    // Server-side timer change (either side of a 1:1 or a
+                    // group admin). Refresh the in-memory Chat row so the
+                    // inspector picker and any composer banner reflect it.
+                    // 1:1 chats hydrate their timer only on the first
+                    // EphemeralSetting event — whatsmeow doesn't expose
+                    // a cold-read API for 1:1 ephemeral state.
+                    let canonical = JIDNormalize.canonical(chatJID, client: client)
+                    vm.applyEphemeralTimer(chatJID: canonical, seconds: seconds)
                 default:
                     break
                 }

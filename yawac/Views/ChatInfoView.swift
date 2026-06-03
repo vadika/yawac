@@ -75,6 +75,9 @@ struct ChatInfoView: View {
     // join" toggle (T25). Cleared after a short delay so the row
     // doesn't grow a permanent error tail across re-renders.
     @State private var toggleError: String?
+    /// Transient error from `setDisappearingTimer` — surfaced under the
+    /// timer picker for ~6s and then cleared. Nil otherwise.
+    @State private var disappearingError: String?
     /// Drives the in-info pending-requests admin queue (T27). Created
     /// lazily in `loadGroup()` once we know the user admins this group
     /// and approval-mode is on; nilled out otherwise so a non-admin or
@@ -294,6 +297,35 @@ struct ChatInfoView: View {
             } catch {
                 NSLog("[yawac/leaveGroup] failed jid=%@ err=%@",
                       jid, String(describing: error))
+            }
+        }
+    }
+
+    /// Apply a new disappearing-messages timer on `chatJID`. Optimistic:
+    /// flips the local `group` shadow before the bridge call so the
+    /// picker reflects the change immediately. On failure reverts and
+    /// surfaces the error. The server-side success path emits
+    /// `EphemeralTimerChanged`, which the ContentView event arm routes
+    /// into `Chat.ephemeralExpirationSeconds` for the canonical refresh.
+    private func applyDisappearingTimer(_ seconds: Int32, chatJID: String) {
+        guard let client = session.client, !chatJID.isEmpty else { return }
+        let priorGroup = group?.ephemeralExpirationSeconds
+        if var s = group {
+            s.ephemeralExpirationSeconds = seconds
+            group = s
+        }
+        Task {
+            do {
+                try await Task.detached {
+                    try client.setDisappearingTimer(
+                        chatJID: chatJID, seconds: seconds)
+                }.value
+            } catch {
+                if var s = group, let prior = priorGroup {
+                    s.ephemeralExpirationSeconds = prior
+                    group = s
+                }
+                disappearingError = (error as NSError).localizedDescription
             }
         }
     }
@@ -538,6 +570,53 @@ struct ChatInfoView: View {
                 : .init(label: "Block", icon: "hand.raised", destructive: true,
                         action: { confirmBlock = true }),
         ])
+
+        // DISAPPEARING MESSAGES — 1:1. Ungated (either party may set
+        // the timer). Hydrates from `Chat.ephemeralExpirationSeconds`;
+        // live `EphemeralTimerChanged` events refresh it.
+        let currentSeconds: Int32 = session.chatList?.chats
+            .first(where: { $0.jid == chatJID })?
+            .ephemeralExpirationSeconds ?? 0
+        sectionCard(label: "DISAPPEARING MESSAGES") {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .top, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Auto-delete new messages")
+                            .scaledUI(13)
+                            .foregroundStyle(Theme.text)
+                        Text("Applies to messages sent after the timer changes.")
+                            .scaledUI(11)
+                            .foregroundStyle(Theme.textMuted)
+                    }
+                    Spacer()
+                    Picker("", selection: Binding<Int32>(
+                        get: { currentSeconds },
+                        set: { newValue in
+                            applyDisappearingTimer(newValue, chatJID: chatJID)
+                        }
+                    )) {
+                        Text("Off").tag(Int32(0))
+                        Text("24 hours").tag(Int32(86_400))
+                        Text("7 days").tag(Int32(604_800))
+                        Text("90 days").tag(Int32(7_776_000))
+                    }
+                    .pickerStyle(.menu)
+                    .labelsHidden()
+                    .controlSize(.small)
+                }
+                if let err = disappearingError {
+                    Text(err)
+                        .scaledUI(11)
+                        .foregroundStyle(Color.red.opacity(0.9))
+                        .task(id: err) {
+                            try? await Task.sleep(
+                                nanoseconds: 6 * 1_000_000_000)
+                            disappearingError = nil
+                        }
+                }
+            }
+        }
+
         starredSection
         sharedMediaSection
         filesSection
@@ -691,6 +770,58 @@ struct ChatInfoView: View {
                         }
                         .buttonStyle(.plain)
                         .help("Edit description")
+                    }
+                }
+            }
+        }
+
+        // DISAPPEARING MESSAGES — group-admin only. Server-side change
+        // emits an `EphemeralTimerChanged` event back; the live route
+        // refreshes Chat.ephemeralExpirationSeconds. We also flip the
+        // local @State shadow optimistically so the picker reflects the
+        // selection immediately, and revert + surface the error on
+        // failure (mirrors the JOIN APPROVAL pattern).
+        if isCurrentUserAdmin(g) {
+            sectionCard(label: "DISAPPEARING MESSAGES") {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(alignment: .top, spacing: 8) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Auto-delete new messages")
+                                .scaledUI(13)
+                                .foregroundStyle(Theme.text)
+                            Text("Applies to messages sent after the timer changes.")
+                                .scaledUI(11)
+                                .foregroundStyle(Theme.textMuted)
+                        }
+                        Spacer()
+                        Picker("", selection: Binding<Int32>(
+                            get: {
+                                group?.ephemeralExpirationSeconds
+                                    ?? g.ephemeralExpirationSeconds
+                            },
+                            set: { newValue in
+                                applyDisappearingTimer(newValue,
+                                                       chatJID: g.jid)
+                            }
+                        )) {
+                            Text("Off").tag(Int32(0))
+                            Text("24 hours").tag(Int32(86_400))
+                            Text("7 days").tag(Int32(604_800))
+                            Text("90 days").tag(Int32(7_776_000))
+                        }
+                        .pickerStyle(.menu)
+                        .labelsHidden()
+                        .controlSize(.small)
+                    }
+                    if let err = disappearingError {
+                        Text(err)
+                            .scaledUI(11)
+                            .foregroundStyle(Color.red.opacity(0.9))
+                            .task(id: err) {
+                                try? await Task.sleep(
+                                    nanoseconds: 6 * 1_000_000_000)
+                                disappearingError = nil
+                            }
                     }
                 }
             }

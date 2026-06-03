@@ -211,46 +211,65 @@ func (c *Client) dispatchWebMessage(chatJID string, wm *waWeb.WebMessageInfo) {
 		}
 		return
 	}
-	kind := classifyMessage(msg)
+	// Hydrate the 1:1 disappearing-messages timer opportunistically from
+	// the historical message's ContextInfo.Expiration. Same rationale as
+	// dispatchMessage: whatsmeow populates this on every regular message
+	// in a disappearing chat, and history sync is often the first time
+	// yawac sees the chat.
+	if exp := extractContextInfoExpiration(msg); exp > 0 {
+		b, _ := json.Marshal(JEphemeralTimerChanged{
+			ChatJID:   chatJID,
+			Seconds:   int32(exp),
+			Timestamp: int64(wm.GetMessageTimestamp()),
+		})
+		c.dispatch("EphemeralTimerChanged", string(b))
+	}
+	kind, loc, locSeq, contact, isViewOnce := classifyMessage(msg)
 	if kind == "protocol" || kind == "system" {
 		return // skip noise
 	}
 	jm := JMessage{
-		ID:             key.GetID(),
-		ChatJID:        chatJID,
-		SenderJID:      senderJID,
-		SenderPushName: wm.GetPushName(),
-		FromMe:         key.GetFromMe(),
-		Timestamp:      int64(wm.GetMessageTimestamp()),
-		Kind:           kind,
+		ID:               key.GetID(),
+		ChatJID:          chatJID,
+		SenderJID:        senderJID,
+		SenderPushName:   wm.GetPushName(),
+		FromMe:           key.GetFromMe(),
+		Timestamp:        int64(wm.GetMessageTimestamp()),
+		Kind:             kind,
+		Location:         loc,
+		LocationSequence: locSeq,
+		Contact:          contact,
+		IsViewOnce:       isViewOnce,
 	}
+	inner := unwrapViewOnce(msg)
 	switch {
-	case msg.GetConversation() != "":
-		jm.Text = msg.GetConversation()
-	case msg.GetExtendedTextMessage() != nil:
-		jm.Text = msg.GetExtendedTextMessage().GetText()
+	case inner.GetConversation() != "":
+		jm.Text = inner.GetConversation()
+	case inner.GetExtendedTextMessage() != nil:
+		jm.Text = inner.GetExtendedTextMessage().GetText()
 	}
-	if ctx := contextInfoFromMessage(msg); ctx != nil && ctx.GetStanzaID() != "" {
+	if ctx := contextInfoFromMessage(inner); ctx != nil && ctx.GetStanzaID() != "" {
+		qKind, _, _, _, _ := classifyMessage(ctx.GetQuotedMessage())
 		jm.Quoted = &JQuoted{
 			MessageID: ctx.GetStanzaID(),
 			SenderJID: ctx.GetParticipant(),
 			FromMe:    isFromMe(c, ctx.GetParticipant()),
-			Kind:      classifyMessage(ctx.GetQuotedMessage()),
+			Kind:      qKind,
 			Snippet:   extractSnippet(ctx.GetQuotedMessage()),
 		}
 	}
-	if im := msg.GetImageMessage(); im != nil {
+	if im := inner.GetImageMessage(); im != nil {
 		jm.Media = mediaFromImage(im)
-	} else if vm := msg.GetVideoMessage(); vm != nil {
+	} else if vm := inner.GetVideoMessage(); vm != nil {
 		jm.Media = mediaFromVideo(vm)
-	} else if am := msg.GetAudioMessage(); am != nil {
+	} else if am := inner.GetAudioMessage(); am != nil {
 		jm.Media = mediaFromAudio(am)
-	} else if dm := msg.GetDocumentMessage(); dm != nil {
+	} else if dm := inner.GetDocumentMessage(); dm != nil {
 		jm.Media = mediaFromDocument(dm)
-	} else if sm := msg.GetStickerMessage(); sm != nil {
+	} else if sm := inner.GetStickerMessage(); sm != nil {
 		jm.Media = mediaFromSticker(sm)
 	}
-	if p := extractPoll(msg); p != nil {
+	if p := extractPoll(inner); p != nil {
 		jm.Poll = p
 	}
 	b, _ := json.Marshal(jm)

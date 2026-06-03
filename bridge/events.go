@@ -282,6 +282,23 @@ func (c *Client) dispatchGroupInfo(evt *events.GroupInfo) {
 		})
 		c.dispatch("JoinApprovalModeChanged", string(b))
 	}
+
+	// Disappearing-messages timer change. types.GroupEphemeral carries
+	// IsEphemeral + DisappearingTimer; we forward the timer regardless of
+	// IsEphemeral (timer==0 already encodes "off" on the Swift side).
+	if evt.Ephemeral != nil {
+		actor := ""
+		if evt.Sender != nil {
+			actor = evt.Sender.String()
+		}
+		b, _ := json.Marshal(JEphemeralTimerChanged{
+			ChatJID:   evt.JID.String(),
+			Seconds:   int32(evt.Ephemeral.DisappearingTimer),
+			ActorJID:  actor,
+			Timestamp: evt.Timestamp.Unix(),
+		})
+		c.dispatch("EphemeralTimerChanged", string(b))
+	}
 }
 
 // normalizeGroupJID treats anything that isn't a `@g.us` JID as the

@@ -19,7 +19,7 @@ func TestSendTextRejectsBadJID(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer c.Close()
-	_, err = c.SendText("not-a-jid", "hi", "")
+	_, err = c.SendText("not-a-jid", "hi", "", 0)
 	if err == nil || !strings.Contains(err.Error(), "jid") {
 		t.Fatalf("want jid error, got %v", err)
 	}
@@ -168,5 +168,242 @@ func TestDispatchReplyPopulatesQuoted(t *testing.T) {
 	}
 	if got.Quoted.Snippet != "dinner at 7?" {
 		t.Errorf("Snippet = %q", got.Quoted.Snippet)
+	}
+}
+
+func TestWrapForChatNoWrap(t *testing.T) {
+	inner := &waE2E.Message{
+		Conversation: proto.String("hello"),
+	}
+	out := wrapForChat(inner, 0, false)
+	if out != inner {
+		t.Fatal("expected unchanged inner when no wrapping requested")
+	}
+}
+
+func TestWrapForChatEphemeralOnly(t *testing.T) {
+	inner := &waE2E.Message{
+		Conversation: proto.String("hi"),
+	}
+	out := wrapForChat(inner, 86400, false)
+	if out.EphemeralMessage == nil {
+		t.Fatal("expected EphemeralMessage wrap")
+	}
+	if out.EphemeralMessage.Message == nil {
+		t.Fatal("inner should still be set on wrapper")
+	}
+	if out.ViewOnceMessageV2 != nil {
+		t.Fatal("unexpected ViewOnce wrap")
+	}
+}
+
+func TestWrapForChatViewOnceOnly(t *testing.T) {
+	inner := &waE2E.Message{
+		ImageMessage: &waE2E.ImageMessage{},
+	}
+	out := wrapForChat(inner, 0, true)
+	if out.ViewOnceMessageV2 == nil {
+		t.Fatal("expected ViewOnceMessageV2 wrap")
+	}
+	if out.EphemeralMessage != nil {
+		t.Fatal("unexpected Ephemeral wrap")
+	}
+}
+
+func TestWrapForChatBothEphemeralOutside(t *testing.T) {
+	inner := &waE2E.Message{
+		ImageMessage: &waE2E.ImageMessage{},
+	}
+	out := wrapForChat(inner, 86400, true)
+	if out.EphemeralMessage == nil {
+		t.Fatal("expected outer EphemeralMessage wrap")
+	}
+	if out.EphemeralMessage.Message == nil ||
+		out.EphemeralMessage.Message.ViewOnceMessageV2 == nil {
+		t.Fatalf("expected ViewOnceMessageV2 inside EphemeralMessage; got %+v",
+			out.EphemeralMessage.Message)
+	}
+}
+
+func TestSendLocationUnpaired(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/sl.db")
+	defer c.Close()
+	_, err := c.SendLocation("1234@s.whatsapp.net", 60.17, 24.94, "Senate Square", "Helsinki", 0)
+	if err == nil {
+		t.Fatal("expected error on unpaired client")
+	}
+}
+
+func TestSendLocationBadJID(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/sl2.db")
+	defer c.Close()
+	_, err := c.SendLocation("not a jid", 60.17, 24.94, "", "", 0)
+	if err == nil {
+		t.Fatal("expected parse error")
+	}
+}
+
+func TestSendContactUnpaired(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/sc.db")
+	defer c.Close()
+	vcard := "BEGIN:VCARD\nVERSION:3.0\nFN:Anna\nTEL;type=CELL;waid=12345:+12345\nEND:VCARD"
+	_, err := c.SendContact("1234@s.whatsapp.net", vcard, "Anna", 0)
+	if err == nil {
+		t.Fatal("expected error on unpaired client")
+	}
+}
+
+func TestSendContactBadJID(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/sc2.db")
+	defer c.Close()
+	_, err := c.SendContact("not a jid", "BEGIN:VCARD\nEND:VCARD", "X", 0)
+	if err == nil {
+		t.Fatal("expected parse error")
+	}
+}
+
+func TestClassifyInboundLocation(t *testing.T) {
+	m := &waE2E.Message{
+		LocationMessage: &waE2E.LocationMessage{
+			DegreesLatitude:  proto.Float64(60.17),
+			DegreesLongitude: proto.Float64(24.94),
+			Name:             proto.String("Senate Square"),
+			Address:          proto.String("Helsinki"),
+		},
+	}
+	kind, loc, _, _, _ := classifyMessage(m)
+	if kind != "location" {
+		t.Fatalf("kind=%s", kind)
+	}
+	if loc == nil || loc.Lat != 60.17 || loc.Lng != 24.94 {
+		t.Fatalf("loc=%+v", loc)
+	}
+	if loc.Name != "Senate Square" || loc.Address != "Helsinki" {
+		t.Fatalf("loc name/address mismatch: %+v", loc)
+	}
+}
+
+func TestClassifyInboundLiveLocation(t *testing.T) {
+	m := &waE2E.Message{
+		LiveLocationMessage: &waE2E.LiveLocationMessage{
+			DegreesLatitude:  proto.Float64(60.17),
+			DegreesLongitude: proto.Float64(24.94),
+			SequenceNumber:   proto.Int64(42),
+		},
+	}
+	kind, loc, seq, _, _ := classifyMessage(m)
+	if kind != "location_live" || seq != 42 {
+		t.Fatalf("kind=%s seq=%d", kind, seq)
+	}
+	if loc == nil || loc.Lat != 60.17 || loc.Lng != 24.94 {
+		t.Fatalf("loc=%+v", loc)
+	}
+}
+
+func TestClassifyInboundContact(t *testing.T) {
+	m := &waE2E.Message{
+		ContactMessage: &waE2E.ContactMessage{
+			DisplayName: proto.String("Anna"),
+			Vcard:       proto.String("BEGIN:VCARD\nEND:VCARD"),
+		},
+	}
+	kind, _, _, contact, _ := classifyMessage(m)
+	if kind != "contact" {
+		t.Fatalf("kind=%s", kind)
+	}
+	if contact == nil || contact.DisplayName != "Anna" {
+		t.Fatalf("contact=%+v", contact)
+	}
+	if contact.Vcard != "BEGIN:VCARD\nEND:VCARD" {
+		t.Fatalf("vcard mismatch: %q", contact.Vcard)
+	}
+}
+
+func TestClassifyInboundViewOnce(t *testing.T) {
+	m := &waE2E.Message{
+		ViewOnceMessageV2: &waE2E.FutureProofMessage{
+			Message: &waE2E.Message{
+				ImageMessage: &waE2E.ImageMessage{},
+			},
+		},
+	}
+	kind, _, _, _, isViewOnce := classifyMessage(m)
+	if kind != "image" {
+		t.Fatalf("expected unwrap to image, got %s", kind)
+	}
+	if !isViewOnce {
+		t.Fatal("expected isViewOnce=true after unwrap")
+	}
+}
+
+func TestExtractContextInfoExpirationFromExtendedText(t *testing.T) {
+	m := &waE2E.Message{
+		ExtendedTextMessage: &waE2E.ExtendedTextMessage{
+			Text: proto.String("hi"),
+			ContextInfo: &waE2E.ContextInfo{
+				Expiration: proto.Uint32(86400),
+			},
+		},
+	}
+	if got := extractContextInfoExpiration(m); got != 86400 {
+		t.Fatalf("want 86400 got %d", got)
+	}
+}
+
+func TestExtractContextInfoExpirationFromImage(t *testing.T) {
+	m := &waE2E.Message{
+		ImageMessage: &waE2E.ImageMessage{
+			ContextInfo: &waE2E.ContextInfo{
+				Expiration: proto.Uint32(604800),
+			},
+		},
+	}
+	if got := extractContextInfoExpiration(m); got != 604800 {
+		t.Fatalf("want 604800 got %d", got)
+	}
+}
+
+func TestExtractContextInfoExpirationZeroWhenAbsent(t *testing.T) {
+	m := &waE2E.Message{
+		Conversation: proto.String("plain text, no context info"),
+	}
+	if got := extractContextInfoExpiration(m); got != 0 {
+		t.Fatalf("want 0 got %d", got)
+	}
+}
+
+func TestDispatchEmitsEphemeralTimerOnInboundWithExpiration(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/exp.db")
+	defer c.Close()
+	sink := newRecSink()
+	c.SetEventSink(sink)
+	chat, _ := types.ParseJID("79215925086@s.whatsapp.net")
+	sender, _ := types.ParseJID("79215925086@s.whatsapp.net")
+	evt := &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{Chat: chat, Sender: sender},
+			ID:            "EXP-HINT-1",
+			Timestamp:     time.Unix(1700000200, 0),
+		},
+		Message: &waE2E.Message{
+			ExtendedTextMessage: &waE2E.ExtendedTextMessage{
+				Text: proto.String("disappearing hello"),
+				ContextInfo: &waE2E.ContextInfo{
+					Expiration: proto.Uint32(86400),
+				},
+			},
+		},
+	}
+	c.dispatchMessage(evt)
+	e := sink.wait(t, "EphemeralTimerChanged", time.Second)
+	var got JEphemeralTimerChanged
+	if err := json.Unmarshal([]byte(e.payload), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.ChatJID != chat.String() {
+		t.Errorf("ChatJID = %q", got.ChatJID)
+	}
+	if got.Seconds != 86400 {
+		t.Errorf("Seconds = %d", got.Seconds)
 	}
 }

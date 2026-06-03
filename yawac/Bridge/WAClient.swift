@@ -52,6 +52,10 @@ class WAClient: PhoneValidating, LIDResolving {
                                      on: Bool,
                                      actorJID: String,
                                      timestamp: Int64)
+        case ephemeralTimerChanged(chatJID: String,
+                                   seconds: Int32,
+                                   actorJID: String,
+                                   timestamp: Int64)
         case messagePinned(chatJID: String, targetMessageID: String, senderJID: String, pinned: Bool, timestamp: Int64)
         case chatArchived(chatJID: String, archived: Bool, timestamp: Int64)
         case chatDeleted(chatJID: String, timestamp: Int64)
@@ -121,32 +125,47 @@ class WAClient: PhoneValidating, LIDResolving {
     }
 
     func sendText(_ chatJID: String, _ body: String,
-                  mentionedJIDs: [String] = []) throws -> BridgeSendResult {
+                  mentionedJIDs: [String] = [],
+                  ephemeralSeconds: Int32 = 0) throws -> BridgeSendResult {
         var err: NSError?
         let json = go.sendText(chatJID, body: body,
                                mentionedJIDsJSON: encodeMentionsJSON(mentionedJIDs),
+                               ephemeralSec: ephemeralSeconds,
                                error: &err)
         if let err { throw err }
         return try JSONDecoder().decode(BridgeSendResult.self, from: Data(json.utf8))
     }
 
-    func sendImage(_ chatJID: String, path: String, caption: String) throws -> BridgeSendResult {
+    func sendImage(_ chatJID: String, path: String, caption: String,
+                   ephemeralSeconds: Int32 = 0,
+                   viewOnce: Bool = false) throws -> BridgeSendResult {
         var err: NSError?
-        let json = go.sendImage(chatJID, filePath: path, caption: caption, error: &err)
+        let json = go.sendImage(chatJID, filePath: path, caption: caption,
+                                ephemeralSec: ephemeralSeconds,
+                                viewOnce: viewOnce,
+                                error: &err)
         if let err { throw err }
         return try JSONDecoder().decode(BridgeSendResult.self, from: Data(json.utf8))
     }
 
-    func sendVideo(_ chatJID: String, path: String, caption: String) throws -> BridgeSendResult {
+    func sendVideo(_ chatJID: String, path: String, caption: String,
+                   ephemeralSeconds: Int32 = 0,
+                   viewOnce: Bool = false) throws -> BridgeSendResult {
         var err: NSError?
-        let json = go.sendVideo(chatJID, filePath: path, caption: caption, error: &err)
+        let json = go.sendVideo(chatJID, filePath: path, caption: caption,
+                                ephemeralSec: ephemeralSeconds,
+                                viewOnce: viewOnce,
+                                error: &err)
         if let err { throw err }
         return try JSONDecoder().decode(BridgeSendResult.self, from: Data(json.utf8))
     }
 
-    func sendAudio(_ chatJID: String, path: String) throws -> BridgeSendResult {
+    func sendAudio(_ chatJID: String, path: String,
+                   ephemeralSeconds: Int32 = 0) throws -> BridgeSendResult {
         var err: NSError?
-        let json = go.sendAudio(chatJID, filePath: path, error: &err)
+        let json = go.sendAudio(chatJID, filePath: path,
+                                ephemeralSec: ephemeralSeconds,
+                                error: &err)
         if let err { throw err }
         return try JSONDecoder().decode(BridgeSendResult.self, from: Data(json.utf8))
     }
@@ -154,22 +173,63 @@ class WAClient: PhoneValidating, LIDResolving {
     func sendVoiceNote(_ chatJID: String,
                        path: String,
                        duration: Int32,
-                       waveform: Data) throws -> BridgeSendResult {
+                       waveform: Data,
+                       ephemeralSeconds: Int32 = 0) throws -> BridgeSendResult {
         var err: NSError?
         let json = go.sendVoiceNote(chatJID,
                                     filePath: path,
                                     durationSec: duration,
                                     waveformB64: waveform.base64EncodedString(),
+                                    ephemeralSec: ephemeralSeconds,
                                     error: &err)
         if let err { throw err }
         return try JSONDecoder().decode(BridgeSendResult.self, from: Data(json.utf8))
     }
 
-    func sendDocument(_ chatJID: String, path: String, caption: String) throws -> BridgeSendResult {
+    func sendDocument(_ chatJID: String, path: String, caption: String,
+                      ephemeralSeconds: Int32 = 0) throws -> BridgeSendResult {
         var err: NSError?
-        let json = go.sendDocument(chatJID, filePath: path, caption: caption, error: &err)
+        let json = go.sendDocument(chatJID, filePath: path, caption: caption,
+                                   ephemeralSec: ephemeralSeconds,
+                                   error: &err)
         if let err { throw err }
         return try JSONDecoder().decode(BridgeSendResult.self, from: Data(json.utf8))
+    }
+
+    func sendLocation(chatJID: String,
+                      latitude: Double,
+                      longitude: Double,
+                      name: String,
+                      address: String,
+                      ephemeralSeconds: Int32 = 0) throws -> BridgeSendResult {
+        var err: NSError?
+        let json = go.sendLocation(chatJID,
+                                   lat: latitude,
+                                   lng: longitude,
+                                   name: name,
+                                   address: address,
+                                   ephemeralSec: ephemeralSeconds,
+                                   error: &err)
+        if let err { throw err }
+        return try JSONDecoder().decode(BridgeSendResult.self, from: Data(json.utf8))
+    }
+
+    func sendContact(chatJID: String,
+                     vcard: String,
+                     displayName: String,
+                     ephemeralSeconds: Int32 = 0) throws -> BridgeSendResult {
+        var err: NSError?
+        let json = go.sendContact(chatJID,
+                                  vcard: vcard,
+                                  displayName: displayName,
+                                  ephemeralSec: ephemeralSeconds,
+                                  error: &err)
+        if let err { throw err }
+        return try JSONDecoder().decode(BridgeSendResult.self, from: Data(json.utf8))
+    }
+
+    func setDisappearingTimer(chatJID: String, seconds: Int32) throws {
+        try go.setDisappearingTimer(chatJID, seconds: seconds)
     }
 
     func sendReaction(chatJID: String,
@@ -349,7 +409,8 @@ class WAClient: PhoneValidating, LIDResolving {
     func sendPollCreation(_ chatJID: String,
                           question: String,
                           options: [String],
-                          selectableCount: Int) throws -> BridgeSendPollResult {
+                          selectableCount: Int,
+                          ephemeralSeconds: Int32 = 0) throws -> BridgeSendPollResult {
         let optsJSON = (try? JSONEncoder().encode(options))
             .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
         var err: NSError?
@@ -358,6 +419,7 @@ class WAClient: PhoneValidating, LIDResolving {
             question: question,
             optionsJSON: optsJSON,
             selectableCount: Int32(selectableCount),
+            ephemeralSec: ephemeralSeconds,
             error: &err)
         if let err { throw err }
         return try JSONDecoder().decode(BridgeSendPollResult.self,
@@ -992,6 +1054,25 @@ class WAClient: PhoneValidating, LIDResolving {
                                                 on: j.on,
                                                 actorJID: j.actorJID ?? "",
                                                 timestamp: j.timestamp)
+            }
+        case "EphemeralTimerChanged":
+            struct E: Codable {
+                let chatJID: String
+                let seconds: Int32
+                let actorJID: String?
+                let timestamp: Int64
+                enum CodingKeys: String, CodingKey {
+                    case chatJID = "chat_jid"
+                    case seconds
+                    case actorJID = "actor_jid"
+                    case timestamp
+                }
+            }
+            if let e = try? dec.decode(E.self, from: data) {
+                return .ephemeralTimerChanged(chatJID: e.chatJID,
+                                              seconds: e.seconds,
+                                              actorJID: e.actorJID ?? "",
+                                              timestamp: e.timestamp)
             }
         default:
             break

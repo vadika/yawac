@@ -87,11 +87,11 @@ func TestExtractPollNilOnNonPoll(t *testing.T) {
 }
 
 func TestClassifyMessagePoll(t *testing.T) {
-	if got := classifyMessage(newPollMessage()); got != "poll" {
+	if got, _, _, _, _ := classifyMessage(newPollMessage()); got != "poll" {
 		t.Fatalf("classifyMessage(poll) = %q, want poll", got)
 	}
 	pu := &waE2E.Message{PollUpdateMessage: &waE2E.PollUpdateMessage{}}
-	if got := classifyMessage(pu); got != "poll_vote" {
+	if got, _, _, _, _ := classifyMessage(pu); got != "poll_vote" {
 		t.Fatalf("classifyMessage(poll_update) = %q, want poll_vote", got)
 	}
 }
@@ -103,7 +103,7 @@ func TestSendPollCreationRejectsBadJID(t *testing.T) {
 	}
 	defer c.Close()
 	_, err = c.SendPollCreation("not-a-jid", "Q",
-		`["A","B"]`, 1)
+		`["A","B"]`, 1, 0)
 	if err == nil || !strings.Contains(err.Error(), "jid") {
 		t.Fatalf("want jid error, got %v", err)
 	}
@@ -112,7 +112,7 @@ func TestSendPollCreationRejectsBadJID(t *testing.T) {
 func TestSendPollCreationClosedClient(t *testing.T) {
 	c := &Client{} // wa is nil
 	_, err := c.SendPollCreation("12345@s.whatsapp.net", "Q",
-		`["A","B"]`, 1)
+		`["A","B"]`, 1, 0)
 	if err == nil {
 		t.Fatal("expected error for closed client")
 	}
@@ -125,7 +125,7 @@ func TestSendPollCreationRejectsTooFewOptions(t *testing.T) {
 	}
 	defer c.Close()
 	_, err = c.SendPollCreation("12345@s.whatsapp.net", "Q",
-		`["only-one"]`, 1)
+		`["only-one"]`, 1, 0)
 	if err == nil || !strings.Contains(err.Error(), "options") {
 		t.Fatalf("want options error, got %v", err)
 	}
@@ -138,7 +138,7 @@ func TestSendPollCreationRejectsTooManyOptions(t *testing.T) {
 	}
 	defer c.Close()
 	opts := `["1","2","3","4","5","6","7","8","9","10","11","12","13"]`
-	_, err = c.SendPollCreation("12345@s.whatsapp.net", "Q", opts, 1)
+	_, err = c.SendPollCreation("12345@s.whatsapp.net", "Q", opts, 1, 0)
 	if err == nil || !strings.Contains(err.Error(), "options") {
 		t.Fatalf("want options error, got %v", err)
 	}
@@ -151,7 +151,7 @@ func TestSendPollCreationRejectsEmptyOption(t *testing.T) {
 	}
 	defer c.Close()
 	_, err = c.SendPollCreation("12345@s.whatsapp.net", "Q",
-		`["A","   "]`, 1)
+		`["A","   "]`, 1, 0)
 	if err == nil || !strings.Contains(err.Error(), "option") {
 		t.Fatalf("want option error, got %v", err)
 	}
@@ -164,7 +164,7 @@ func TestSendPollCreationRejectsEmptyQuestion(t *testing.T) {
 	}
 	defer c.Close()
 	_, err = c.SendPollCreation("12345@s.whatsapp.net", "   ",
-		`["A","B"]`, 1)
+		`["A","B"]`, 1, 0)
 	if err == nil || !strings.Contains(err.Error(), "question") {
 		t.Fatalf("want question error, got %v", err)
 	}
@@ -177,12 +177,12 @@ func TestSendPollCreationRejectsBadSelectableCount(t *testing.T) {
 	}
 	defer c.Close()
 	_, err = c.SendPollCreation("12345@s.whatsapp.net", "Q",
-		`["A","B"]`, -1)
+		`["A","B"]`, -1, 0)
 	if err == nil || !strings.Contains(err.Error(), "selectable") {
 		t.Fatalf("want selectable error for -1, got %v", err)
 	}
 	_, err = c.SendPollCreation("12345@s.whatsapp.net", "Q",
-		`["A","B"]`, 3)
+		`["A","B"]`, 3, 0)
 	if err == nil || !strings.Contains(err.Error(), "selectable") {
 		t.Fatalf("want selectable error for >len, got %v", err)
 	}

@@ -15,6 +15,34 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+// wrapForChat optionally wraps inner in ViewOnceMessageV2 and then
+// EphemeralMessage. ViewOnce wrap is only meaningful for
+// ImageMessage / VideoMessage; the UI gates other kinds, but if a
+// caller passes viewOnce=true on an unrelated inner we still wrap
+// (whatsmeow / WhatsApp may reject; not our enforcement layer).
+//
+// Nesting order: ViewOnce inside Ephemeral. The outer EphemeralMessage
+// is what the server uses for retention; the inner ViewOnceMessageV2
+// is what the recipient client uses to gate the reveal flow.
+func wrapForChat(inner *waE2E.Message, ephemeralSec int32, viewOnce bool) *waE2E.Message {
+	out := inner
+	if viewOnce {
+		out = &waE2E.Message{
+			ViewOnceMessageV2: &waE2E.FutureProofMessage{
+				Message: out,
+			},
+		}
+	}
+	if ephemeralSec > 0 {
+		out = &waE2E.Message{
+			EphemeralMessage: &waE2E.FutureProofMessage{
+				Message: out,
+			},
+		}
+	}
+	return out
+}
+
 // PinMessageInChat pins or unpins a target message inside its
 // chat. WhatsApp distributes the pin via a normal stanza carrying
 // a PinInChatMessage payload — every participant's client (including
@@ -154,8 +182,10 @@ func (c *Client) MarkRead(chatJID, senderJID, msgIDsJSON string) error {
 // ContextInfo whose MentionedJID array carries the pinged JIDs (matches
 // WhatsApp's wire format for @mentions). The JSON-string param shape is
 // required because gomobile silently drops methods with []string params.
-// Pass "" (or "[]") when there are no mentions. Returns JSON of JSendResult.
-func (c *Client) SendText(chatJID, body string, mentionedJIDsJSON string) (string, error) {
+// Pass "" (or "[]") when there are no mentions. When ephemeralSec > 0,
+// wraps in EphemeralMessage so disappearing-message retention applies.
+// Returns JSON of JSendResult.
+func (c *Client) SendText(chatJID, body string, mentionedJIDsJSON string, ephemeralSec int32) (string, error) {
 	if c.wa == nil {
 		return "", errors.New("client closed")
 	}
@@ -172,15 +202,16 @@ func (c *Client) SendText(chatJID, body string, mentionedJIDsJSON string) (strin
 			return "", fmt.Errorf("parse mentionedJIDs: %w", err)
 		}
 	}
-	var msg *waE2E.Message
+	var inner *waE2E.Message
 	if len(mentionedJIDs) == 0 {
-		msg = &waE2E.Message{Conversation: proto.String(body)}
+		inner = &waE2E.Message{Conversation: proto.String(body)}
 	} else {
-		msg = &waE2E.Message{ExtendedTextMessage: &waE2E.ExtendedTextMessage{
+		inner = &waE2E.Message{ExtendedTextMessage: &waE2E.ExtendedTextMessage{
 			Text:        proto.String(body),
 			ContextInfo: &waE2E.ContextInfo{MentionedJID: mentionedJIDs},
 		}}
 	}
+	msg := wrapForChat(inner, ephemeralSec, false)
 	resp, err := c.wa.SendMessage(context.Background(), jid, msg)
 	if err != nil {
 		return "", fmt.Errorf("send: %w", err)
@@ -424,6 +455,18 @@ func (c *Client) dispatchMessage(evt *events.Message) {
 			})
 			c.dispatch("MessageEdited", string(b))
 			return
+		case waE2E.ProtocolMessage_EPHEMERAL_SETTING:
+			// 1:1 disappearing-messages toggle. The wrapping Message is
+			// a control carrier; suppress the regular MessageReceived
+			// path and surface a dedicated EphemeralTimerChanged event.
+			b, _ := json.Marshal(JEphemeralTimerChanged{
+				ChatJID:   evt.Info.Chat.String(),
+				Seconds:   int32(pm.GetEphemeralExpiration()),
+				ActorJID:  evt.Info.Sender.String(),
+				Timestamp: evt.Info.Timestamp.Unix(),
+			})
+			c.dispatch("EphemeralTimerChanged", string(b))
+			return
 		}
 	}
 	// Poll updates (votes) are not displayed as chat entries — they
@@ -432,52 +475,151 @@ func (c *Client) dispatchMessage(evt *events.Message) {
 		c.dispatchPollVote(evt)
 		return
 	}
+	// Hydrate the 1:1 disappearing-messages timer opportunistically from
+	// ContextInfo.Expiration: whatsmeow populates this on every regular
+	// message in a disappearing chat. The EPHEMERAL_SETTING carrier
+	// above only fires when the timer is *changed*, so chats that were
+	// already set on the phone before yawac came online never hydrated
+	// without this hint. Treat as additive — continue to the normal
+	// classify/dispatch path below.
+	if exp := extractContextInfoExpiration(evt.Message); exp > 0 {
+		b, _ := json.Marshal(JEphemeralTimerChanged{
+			ChatJID:   evt.Info.Chat.String(),
+			Seconds:   int32(exp),
+			Timestamp: evt.Info.Timestamp.Unix(),
+		})
+		c.dispatch("EphemeralTimerChanged", string(b))
+	}
+	kind, loc, locSeq, contact, isViewOnce := classifyMessage(evt.Message)
 	jm := JMessage{
-		ID:             evt.Info.ID,
-		ChatJID:        evt.Info.Chat.String(),
-		SenderJID:      evt.Info.Sender.String(),
-		SenderPushName: evt.Info.PushName,
-		FromMe:         evt.Info.IsFromMe,
-		Timestamp:      evt.Info.Timestamp.Unix(),
-		Kind:           classifyMessage(evt.Message),
+		ID:               evt.Info.ID,
+		ChatJID:          evt.Info.Chat.String(),
+		SenderJID:        evt.Info.Sender.String(),
+		SenderPushName:   evt.Info.PushName,
+		FromMe:           evt.Info.IsFromMe,
+		Timestamp:        evt.Info.Timestamp.Unix(),
+		Kind:             kind,
+		Location:         loc,
+		LocationSequence: locSeq,
+		Contact:          contact,
+		IsViewOnce:       isViewOnce,
 	}
+	// After unwrapping view-once, media + text + quoted may live inside
+	// the wrapped Message. Resolve the effective payload once and use it
+	// for every per-kind getter below.
+	inner := unwrapViewOnce(evt.Message)
 	switch {
-	case evt.Message.GetConversation() != "":
-		jm.Text = evt.Message.GetConversation()
-	case evt.Message.GetExtendedTextMessage() != nil:
-		jm.Text = evt.Message.GetExtendedTextMessage().GetText()
+	case inner.GetConversation() != "":
+		jm.Text = inner.GetConversation()
+	case inner.GetExtendedTextMessage() != nil:
+		jm.Text = inner.GetExtendedTextMessage().GetText()
 	}
-	if ctx := contextInfoFromMessage(evt.Message); ctx != nil && ctx.GetStanzaID() != "" {
+	if ctx := contextInfoFromMessage(inner); ctx != nil && ctx.GetStanzaID() != "" {
+		qKind, _, _, _, _ := classifyMessage(ctx.GetQuotedMessage())
 		jm.Quoted = &JQuoted{
 			MessageID: ctx.GetStanzaID(),
 			SenderJID: ctx.GetParticipant(),
 			FromMe:    isFromMe(c, ctx.GetParticipant()),
-			Kind:      classifyMessage(ctx.GetQuotedMessage()),
+			Kind:      qKind,
 			Snippet:   extractSnippet(ctx.GetQuotedMessage()),
 		}
 	}
-	if ctx := contextInfoFromMessage(evt.Message); ctx != nil && ctx.GetIsForwarded() {
+	if ctx := contextInfoFromMessage(inner); ctx != nil && ctx.GetIsForwarded() {
 		jm.IsForwarded = true
 	}
-	if m := evt.Message.GetImageMessage(); m != nil {
+	if m := inner.GetImageMessage(); m != nil {
 		jm.Media = mediaFromImage(m)
-	} else if m := evt.Message.GetVideoMessage(); m != nil {
+	} else if m := inner.GetVideoMessage(); m != nil {
 		jm.Media = mediaFromVideo(m)
-	} else if m := evt.Message.GetAudioMessage(); m != nil {
+	} else if m := inner.GetAudioMessage(); m != nil {
 		jm.Media = mediaFromAudio(m)
-	} else if m := evt.Message.GetDocumentMessage(); m != nil {
+	} else if m := inner.GetDocumentMessage(); m != nil {
 		jm.Media = mediaFromDocument(m)
-	} else if m := evt.Message.GetStickerMessage(); m != nil {
+	} else if m := inner.GetStickerMessage(); m != nil {
 		jm.Media = mediaFromSticker(m)
 	}
-	if p := extractPoll(evt.Message); p != nil {
+	if p := extractPoll(inner); p != nil {
 		jm.Poll = p
 	}
 	b, _ := json.Marshal(jm)
 	c.dispatch("Message", string(b))
 }
 
-func classifyMessage(m *waE2E.Message) string {
+// unwrapViewOnce returns the inner Message of a ViewOnceMessageV2 /
+// V2Extension wrapper, or m itself when no wrapper is present.
+// classifyMessage performs the same unwrap internally; this helper is
+// for callers that also need to reach into the inner payload (media,
+// text, context-info) after asking for the kind.
+func unwrapViewOnce(m *waE2E.Message) *waE2E.Message {
+	if m == nil {
+		return nil
+	}
+	if vo := m.GetViewOnceMessageV2(); vo != nil && vo.Message != nil {
+		return vo.Message
+	}
+	if voe := m.GetViewOnceMessageV2Extension(); voe != nil && voe.Message != nil {
+		return voe.Message
+	}
+	return m
+}
+
+// classifyMessage maps an inbound *waE2E.Message to its kind +
+// any structured payload (location, contact) + the view-once flag.
+// Unwraps ViewOnceMessageV2 / V2Extension transparently and sets
+// isViewOnce=true on the envelope so downstream renderers can mark
+// the bubble without a second pass.
+func classifyMessage(m *waE2E.Message) (
+	kind string,
+	loc *JLocationPayload,
+	locSeq int64,
+	contact *JContactPayload,
+	isViewOnce bool,
+) {
+	if m == nil {
+		return "system", nil, 0, nil, false
+	}
+	// Unwrap view-once first. Both V2 and the V2Extension carry the
+	// real payload in their inner Message; classify against that.
+	if vo := m.GetViewOnceMessageV2(); vo != nil && vo.Message != nil {
+		isViewOnce = true
+		m = vo.Message
+	} else if voe := m.GetViewOnceMessageV2Extension(); voe != nil && voe.Message != nil {
+		isViewOnce = true
+		m = voe.Message
+	}
+
+	switch {
+	case m.GetLocationMessage() != nil:
+		lm := m.GetLocationMessage()
+		return "location", &JLocationPayload{
+			Lat:     lm.GetDegreesLatitude(),
+			Lng:     lm.GetDegreesLongitude(),
+			Name:    lm.GetName(),
+			Address: lm.GetAddress(),
+		}, 0, nil, isViewOnce
+	case m.GetLiveLocationMessage() != nil:
+		ll := m.GetLiveLocationMessage()
+		return "location_live", &JLocationPayload{
+			Lat: ll.GetDegreesLatitude(),
+			Lng: ll.GetDegreesLongitude(),
+		}, ll.GetSequenceNumber(), nil, isViewOnce
+	case m.GetContactMessage() != nil:
+		cm := m.GetContactMessage()
+		return "contact", nil, 0, &JContactPayload{
+			Vcard:       cm.GetVcard(),
+			DisplayName: cm.GetDisplayName(),
+		}, isViewOnce
+	}
+	return classifyKindUnwrapped(m), nil, 0, nil, isViewOnce
+}
+
+// classifyKindUnwrapped is the legacy kind-detection switch — it
+// assumes the caller has already unwrapped any view-once wrappers
+// and that the location / contact arms in classifyMessage didn't
+// fire. Kept as a helper so the quoted-message path and historical
+// dispatchers can still ask "what kind is this?" without caring
+// about the payload accessors.
+func classifyKindUnwrapped(m *waE2E.Message) string {
 	switch {
 	case m.GetConversation() != "":
 		return "text"
@@ -495,6 +637,10 @@ func classifyMessage(m *waE2E.Message) string {
 		return "sticker"
 	case m.GetLocationMessage() != nil:
 		return "location"
+	case m.GetLiveLocationMessage() != nil:
+		return "location_live"
+	case m.GetContactMessage() != nil:
+		return "contact"
 	case m.GetReactionMessage() != nil:
 		return "reaction"
 	case isPollCreation(m):
@@ -547,6 +693,86 @@ func contextInfoFromMessage(m *waE2E.Message) *waE2E.ContextInfo {
 		return sm.GetContextInfo()
 	}
 	return nil
+}
+
+// extractContextInfoExpiration scans the inner message types for a
+// non-zero ContextInfo.Expiration. Returns 0 when no expiration is
+// found (i.e. the chat is not disappearing). Whatsmeow populates this
+// field on every regular message in a disappearing chat — a simpler
+// and more reliable hydration signal than waiting for a
+// ProtocolMessage{EPHEMERAL_SETTING} carrier (which only fires when
+// the timer is *changed*).
+func extractContextInfoExpiration(m *waE2E.Message) uint32 {
+	if m == nil {
+		return 0
+	}
+	// Unwrap view-once / ephemeral wrappers first.
+	if vo := m.GetViewOnceMessageV2(); vo != nil && vo.Message != nil {
+		m = vo.Message
+	}
+	if voe := m.GetViewOnceMessageV2Extension(); voe != nil && voe.Message != nil {
+		m = voe.Message
+	}
+	if em := m.GetEphemeralMessage(); em != nil && em.Message != nil {
+		m = em.Message
+	}
+	if etm := m.GetExtendedTextMessage(); etm != nil {
+		if ci := etm.GetContextInfo(); ci != nil {
+			if e := ci.GetExpiration(); e > 0 {
+				return e
+			}
+		}
+	}
+	if im := m.GetImageMessage(); im != nil {
+		if ci := im.GetContextInfo(); ci != nil {
+			if e := ci.GetExpiration(); e > 0 {
+				return e
+			}
+		}
+	}
+	if vm := m.GetVideoMessage(); vm != nil {
+		if ci := vm.GetContextInfo(); ci != nil {
+			if e := ci.GetExpiration(); e > 0 {
+				return e
+			}
+		}
+	}
+	if am := m.GetAudioMessage(); am != nil {
+		if ci := am.GetContextInfo(); ci != nil {
+			if e := ci.GetExpiration(); e > 0 {
+				return e
+			}
+		}
+	}
+	if dm := m.GetDocumentMessage(); dm != nil {
+		if ci := dm.GetContextInfo(); ci != nil {
+			if e := ci.GetExpiration(); e > 0 {
+				return e
+			}
+		}
+	}
+	if sm := m.GetStickerMessage(); sm != nil {
+		if ci := sm.GetContextInfo(); ci != nil {
+			if e := ci.GetExpiration(); e > 0 {
+				return e
+			}
+		}
+	}
+	if cm := m.GetContactMessage(); cm != nil {
+		if ci := cm.GetContextInfo(); ci != nil {
+			if e := ci.GetExpiration(); e > 0 {
+				return e
+			}
+		}
+	}
+	if lm := m.GetLocationMessage(); lm != nil {
+		if ci := lm.GetContextInfo(); ci != nil {
+			if e := ci.GetExpiration(); e > 0 {
+				return e
+			}
+		}
+	}
+	return 0
 }
 
 func extractSnippet(m *waE2E.Message) string {
@@ -775,6 +1001,79 @@ func (c *Client) SendTextReply(
 	}
 	out, _ := json.Marshal(JSendResult{MessageID: resp.ID, Timestamp: resp.Timestamp.Unix()})
 	return string(out), nil
+}
+
+// SendLocation sends a static LocationMessage. lat/lng in decimal
+// degrees. name + address may be empty. When ephemeralSec > 0,
+// wraps in EphemeralMessage. Returns JSON of JSendResult.
+func (c *Client) SendLocation(
+	chatJIDStr string,
+	lat, lng float64,
+	name, address string,
+	ephemeralSec int32,
+) (string, error) {
+	if c.wa == nil {
+		return "", errors.New("client closed")
+	}
+	jid, err := types.ParseJID(chatJIDStr)
+	if err != nil {
+		return "", fmt.Errorf("parse jid: %w", err)
+	}
+	if jid.User == "" || jid.Server == "" {
+		return "", fmt.Errorf("parse jid: %q is not a valid jid", chatJIDStr)
+	}
+	inner := &waE2E.Message{
+		LocationMessage: &waE2E.LocationMessage{
+			DegreesLatitude:  proto.Float64(lat),
+			DegreesLongitude: proto.Float64(lng),
+			Name:             proto.String(name),
+			Address:          proto.String(address),
+		},
+	}
+	msg := wrapForChat(inner, ephemeralSec, false)
+	resp, err := c.wa.SendMessage(context.Background(), jid, msg)
+	if err != nil {
+		return "", fmt.Errorf("send: %w", err)
+	}
+	out, _ := json.Marshal(JSendResult{MessageID: resp.ID, Timestamp: resp.Timestamp.Unix()})
+	return string(out), nil
+}
+
+// SendContact sends a single-contact ContactMessage. vcard must be
+// a valid VCARD 3.0 payload (built Swift-side via VCardBuilder).
+// displayName is the human-readable name. When ephemeralSec > 0,
+// wraps in EphemeralMessage.
+func (c *Client) SendContact(
+	chatJIDStr string,
+	vcard, displayName string,
+	ephemeralSec int32,
+) (string, error) {
+	if c.wa == nil {
+		return "", errors.New("client closed")
+	}
+	jid, err := types.ParseJID(chatJIDStr)
+	if err != nil {
+		return "", fmt.Errorf("parse jid: %w", err)
+	}
+	// Empty-jid guard matches SendText / SendLocation pattern
+	// so bad inputs surface as parse errors not send errors.
+	if jid.User == "" || jid.Server == "" {
+		return "", fmt.Errorf("parse jid: empty user or server")
+	}
+	inner := &waE2E.Message{
+		ContactMessage: &waE2E.ContactMessage{
+			DisplayName: proto.String(displayName),
+			Vcard:       proto.String(vcard),
+		},
+	}
+	msg := wrapForChat(inner, ephemeralSec, false)
+	resp, err := c.wa.SendMessage(context.Background(), jid, msg)
+	if err != nil {
+		return "", fmt.Errorf("send: %w", err)
+	}
+	out := JSendResult{MessageID: resp.ID, Timestamp: resp.Timestamp.Unix()}
+	b, _ := json.Marshal(out)
+	return string(b), nil
 }
 
 func stubQuoted(kind, snippet string) *waE2E.Message {

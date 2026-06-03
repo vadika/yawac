@@ -9,6 +9,7 @@ struct PendingAttachment: Identifiable, Equatable {
     let id = UUID()
     let url: URL
     let kind: String   // image | video | audio | document
+    var viewOnce: Bool = false
 }
 
 @Observable @MainActor
@@ -23,6 +24,18 @@ final class ConversationViewModel {
     var localPaths: [String: String] = [:]
     /// Attachments staged in the composer, awaiting a caption / send.
     var pendingAttachments: [PendingAttachment] = []
+    /// Locations staged in the composer alongside files / contacts. Kept
+    /// in a parallel array (rather than folded into `PendingAttachment`)
+    /// because the file-staging struct is URL-only — locations have no
+    /// on-disk artifact.
+    var pendingLocations: [LocationPayload] = []
+    /// Contact cards staged in the composer alongside files / locations.
+    var pendingContacts: [ContactPayload] = []
+    /// Disappearing-messages timer (seconds) to thread through outbound
+    /// sends. Defaults to 0 (off); set by external wiring once the
+    /// chat-level disappearing state lands in CVM (T26-T28). Wiring it
+    /// here now lets every send call thread the field consistently.
+    var ephemeralExpirationSeconds: Int32 = 0
     // Per-message reactions: targetMessageID -> senderJID -> emoji.
     // Nested so removing/updating a sender's reaction is O(1).
     var reactionsBySender: [String: [String: String]] = [:]
@@ -189,6 +202,8 @@ final class ConversationViewModel {
         m.starredAt = p.starredAt
         m.pinnedAt = p.pinnedAt
         m.isForwarded = p.isForwarded
+        m.isViewOnce = p.isViewOnce
+        m.viewOnceLocked = p.viewOnceLocked
         m.quotedMessageID = p.quotedMessageID
         m.quotedSenderJID = p.quotedSenderJID
         m.quotedFromMe = p.quotedFromMe
@@ -215,6 +230,8 @@ final class ConversationViewModel {
         case .text:                       return "text"
         case .media(let kind, _, _, _):   return kind
         case .poll:                       return "poll"
+        case .location(_, let isLive, _): return isLive ? "location_live" : "location"
+        case .contact:                    return "contact"
         case .system:                     return "system"
         }
     }
@@ -232,6 +249,11 @@ final class ConversationViewModel {
             return "[\(kind)]"
         case .poll(let q, _, _):
             return trunc(q)
+        case .location(let loc, let isLive, _):
+            let label = isLive ? "Live location" : "Location"
+            return loc.name.isEmpty ? label : trunc("\(label): \(loc.name)")
+        case .contact(let c):
+            return trunc("Contact: \(c.displayName)")
         case .system:
             return ""
         }
@@ -274,7 +296,7 @@ final class ConversationViewModel {
         case .media(_, let caption, _, _):
             if let c = caption, !c.isEmpty { return true }
             return mediaRefJSON(for: m.id) != nil
-        case .poll, .system:
+        case .poll, .location, .contact, .system:
             return false
         }
     }
@@ -340,7 +362,7 @@ final class ConversationViewModel {
                     } else {
                         continue
                     }
-                case .poll, .system:
+                case .poll, .location, .contact, .system:
                     continue
                 }
                 persistForwarded(messageID: result.messageID, chatJID: chatJID,
@@ -496,6 +518,8 @@ final class ConversationViewModel {
                 m.starredAt = p.starredAt
         m.pinnedAt = p.pinnedAt
         m.isForwarded = p.isForwarded
+        m.isViewOnce = p.isViewOnce
+        m.viewOnceLocked = p.viewOnceLocked
                 m.quotedMessageID = p.quotedMessageID
                 m.quotedSenderJID = p.quotedSenderJID
                 m.quotedFromMe = p.quotedFromMe
@@ -1142,7 +1166,8 @@ final class ConversationViewModel {
                     mentionedJIDs: mentionedJIDs)
             } else {
                 res = try client.sendText(chatJID, body,
-                                          mentionedJIDs: mentionedJIDs)
+                                          mentionedJIDs: mentionedJIDs,
+                                          ephemeralSeconds: ephemeralExpirationSeconds)
             }
             var m = UIMessage(
                 id: res.messageID,
@@ -1253,7 +1278,8 @@ final class ConversationViewModel {
             let res = try client.sendVoiceNote(chatJID,
                                                path: result.url.path,
                                                duration: Int32(result.durationSec),
-                                               waveform: result.waveform)
+                                               waveform: result.waveform,
+                                               ephemeralSeconds: ephemeralExpirationSeconds)
             // Move the ogg from temp into the media cache under a
             // per-message filename so the local bubble keeps playing
             // after restarts (AudioPlayerView resolves the stored
@@ -1312,28 +1338,84 @@ final class ConversationViewModel {
         pendingAttachments.removeAll { $0.id == id }
     }
 
+    /// Toggle the view-once flag on a staged image/video attachment. No-op
+    /// for non-media kinds (audio/document don't support view-once in WA).
+    func toggleViewOnce(_ id: PendingAttachment.ID) {
+        guard let idx = pendingAttachments.firstIndex(where: { $0.id == id }) else { return }
+        let kind = pendingAttachments[idx].kind
+        guard kind == "image" || kind == "video" else { return }
+        pendingAttachments[idx].viewOnce.toggle()
+    }
+
+    /// Stage a chosen location in the composer. Appends to
+    /// `pendingLocations`; rendered as a chip in the composer strip and
+    /// dispatched by `sendPendingAttachments`.
+    func stageLocation(_ p: LocationPayload) {
+        pendingLocations.append(p)
+    }
+
+    /// Stage a chosen contact in the composer. Appends to
+    /// `pendingContacts`; rendered as a chip in the composer strip and
+    /// dispatched by `sendPendingAttachments`.
+    func stageContact(_ p: ContactPayload) {
+        pendingContacts.append(p)
+    }
+
+    /// Remove a staged location by index (composer chip's "x" button).
+    func removePendingLocation(at index: Int) {
+        guard pendingLocations.indices.contains(index) else { return }
+        pendingLocations.remove(at: index)
+    }
+
+    /// Remove a staged contact by index (composer chip's "x" button).
+    func removePendingContact(at index: Int) {
+        guard pendingContacts.indices.contains(index) else { return }
+        pendingContacts.remove(at: index)
+    }
+
     /// Send all staged attachments, clearing the composer. The typed caption
-    /// rides on the first attachment only; the rest send caption-less.
+    /// rides on the first file attachment only; the rest send caption-less.
+    /// Locations and contacts dispatch after files; they don't carry
+    /// captions.
     func sendPendingAttachments() async {
         let items = pendingAttachments
-        guard !items.isEmpty else { return }
+        let locs = pendingLocations
+        let cards = pendingContacts
+        guard !items.isEmpty || !locs.isEmpty || !cards.isEmpty else { return }
         let caption = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         pendingAttachments = []
+        pendingLocations = []
+        pendingContacts = []
         draft = ""
         for (i, item) in items.enumerated() {
             await sendOneAttachment(url: item.url, kind: item.kind,
-                                    caption: i == 0 ? caption : "")
+                                    caption: i == 0 ? caption : "",
+                                    viewOnce: item.viewOnce)
+        }
+        for loc in locs {
+            await sendOneLocation(loc)
+        }
+        for card in cards {
+            await sendOneContact(card)
         }
     }
 
-    private func sendOneAttachment(url: URL, kind: String, caption: String) async {
+    private func sendOneAttachment(url: URL, kind: String, caption: String,
+                                   viewOnce: Bool = false) async {
         do {
             let res: BridgeSendResult
+            let eph = ephemeralExpirationSeconds
             switch kind {
-            case "image": res = try client.sendImage(chatJID, path: url.path, caption: caption)
-            case "video": res = try client.sendVideo(chatJID, path: url.path, caption: caption)
-            case "audio": res = try client.sendAudio(chatJID, path: url.path)
-            default:      res = try client.sendDocument(chatJID, path: url.path, caption: caption)
+            case "image": res = try client.sendImage(chatJID, path: url.path, caption: caption,
+                                                     ephemeralSeconds: eph,
+                                                     viewOnce: viewOnce)
+            case "video": res = try client.sendVideo(chatJID, path: url.path, caption: caption,
+                                                     ephemeralSeconds: eph,
+                                                     viewOnce: viewOnce)
+            case "audio": res = try client.sendAudio(chatJID, path: url.path,
+                                                     ephemeralSeconds: eph)
+            default:      res = try client.sendDocument(chatJID, path: url.path, caption: caption,
+                                                        ephemeralSeconds: eph)
             }
             // Own sent messages aren't echoed back by the server, so append the
             // bubble optimistically (mirrors sendDraft / sendVoiceNote). Copy the
@@ -1354,6 +1436,69 @@ final class ConversationViewModel {
             localPaths[res.messageID] = cached
             receiptStatus[res.messageID] = .sent
             persistOutgoingMedia(m, kind: kind, localPath: cached)
+        } catch {
+            messages.append(UIMessage(
+                id: UUID().uuidString,
+                chatJID: chatJID,
+                senderJID: "system",
+                fromMe: false,
+                timestamp: .now,
+                body: .system("send failed: \(error.localizedDescription)")))
+        }
+    }
+
+    /// Dispatch a single staged location through the bridge and append an
+    /// optimistic bubble. Mirrors the file-send error path: a system row
+    /// is appended on failure so the user sees the surface.
+    private func sendOneLocation(_ loc: LocationPayload) async {
+        do {
+            let res = try client.sendLocation(
+                chatJID: chatJID,
+                latitude: loc.lat,
+                longitude: loc.lng,
+                name: loc.name,
+                address: loc.address,
+                ephemeralSeconds: ephemeralExpirationSeconds)
+            let m = UIMessage(
+                id: res.messageID,
+                chatJID: chatJID,
+                senderJID: "me",
+                fromMe: true,
+                timestamp: Date(timeIntervalSince1970: TimeInterval(res.timestamp)),
+                body: .location(loc, isLive: false, sequence: nil))
+            messages.append(m)
+            receiptStatus[res.messageID] = .sent
+            persistOutgoingLocation(m, location: loc)
+        } catch {
+            messages.append(UIMessage(
+                id: UUID().uuidString,
+                chatJID: chatJID,
+                senderJID: "system",
+                fromMe: false,
+                timestamp: .now,
+                body: .system("send failed: \(error.localizedDescription)")))
+        }
+    }
+
+    /// Dispatch a single staged contact-card through the bridge and append
+    /// an optimistic bubble.
+    private func sendOneContact(_ card: ContactPayload) async {
+        do {
+            let res = try client.sendContact(
+                chatJID: chatJID,
+                vcard: card.vcard,
+                displayName: card.displayName,
+                ephemeralSeconds: ephemeralExpirationSeconds)
+            let m = UIMessage(
+                id: res.messageID,
+                chatJID: chatJID,
+                senderJID: "me",
+                fromMe: true,
+                timestamp: Date(timeIntervalSince1970: TimeInterval(res.timestamp)),
+                body: .contact(card))
+            messages.append(m)
+            receiptStatus[res.messageID] = .sent
+            persistOutgoingContact(m, contact: card)
         } catch {
             messages.append(UIMessage(
                 id: UUID().uuidString,
@@ -1414,6 +1559,24 @@ final class ConversationViewModel {
             if let push = m.senderPushName, !push.isEmpty {
                 existing.senderPushName = push
             }
+            // T12 fields: re-merge view-once / location / contact metadata so
+            // history-sync replays (or live-location sequence bumps) don't
+            // erase what the initial insert captured.
+            if let v = m.isViewOnce { existing.isViewOnce = v }
+            if let loc = m.location {
+                existing.locationLat = loc.lat
+                existing.locationLng = loc.lng
+                if !loc.name.isEmpty { existing.locationName = loc.name }
+                if !loc.address.isEmpty { existing.locationAddress = loc.address }
+            }
+            if m.kind == "location_live" {
+                existing.locationIsLive = true
+                if let seq = m.locationSequence { existing.locationSequence = seq }
+            }
+            if let card = m.contact {
+                existing.contactVCard = card.vcard
+                existing.contactDisplayName = card.displayName
+            }
             try? context.save()
             return
         }
@@ -1431,6 +1594,16 @@ final class ConversationViewModel {
             mediaFileName: m.media?.fileName,
             mediaRefJSON: m.media?.ref?.json,
             pollJSON: m.poll?.json,
+            isViewOnce: m.isViewOnce ?? false,
+            viewOnceLocked: false,
+            locationLat: m.location?.lat,
+            locationLng: m.location?.lng,
+            locationName: m.location?.name,
+            locationAddress: m.location?.address,
+            locationIsLive: m.kind == "location_live",
+            locationSequence: m.locationSequence,
+            contactVCard: m.contact?.vcard,
+            contactDisplayName: m.contact?.displayName,
             senderPushName: m.senderPushName,
             quotedMessageID: m.quoted?.messageID,
             quotedSenderJID: m.quoted?.senderJID,
@@ -1473,7 +1646,8 @@ final class ConversationViewModel {
                 chatJID,
                 question: q,
                 options: opts,
-                selectableCount: selectable)
+                selectableCount: selectable,
+                ephemeralSeconds: ephemeralExpirationSeconds)
 
             let m = UIMessage(
                 id: res.messageID,
@@ -1506,6 +1680,39 @@ final class ConversationViewModel {
             kind: "poll",
             text: nil,
             pollJSON: pollJSON)
+        context.insert(row)
+        try? context.save()
+        MessageIndex.shared.upsert(row.indexFields)
+    }
+
+    /// Outbound-location persistence. Stores lat/lng + name/address so
+    /// the bubble survives chat switches / app restarts.
+    private func persistOutgoingLocation(_ m: UIMessage, location: LocationPayload) {
+        guard let context else { return }
+        let row = PersistedMessage(
+            id: m.id, chatJID: m.chatJID, senderJID: m.senderJID,
+            fromMe: m.fromMe, timestamp: m.timestamp, kind: "location",
+            text: nil,
+            locationLat: location.lat,
+            locationLng: location.lng,
+            locationName: location.name,
+            locationAddress: location.address,
+            locationIsLive: false)
+        context.insert(row)
+        try? context.save()
+        MessageIndex.shared.upsert(row.indexFields)
+    }
+
+    /// Outbound-contact persistence. Stores the vCard payload + parsed
+    /// display name.
+    private func persistOutgoingContact(_ m: UIMessage, contact: ContactPayload) {
+        guard let context else { return }
+        let row = PersistedMessage(
+            id: m.id, chatJID: m.chatJID, senderJID: m.senderJID,
+            fromMe: m.fromMe, timestamp: m.timestamp, kind: "contact",
+            text: nil,
+            contactVCard: contact.vcard,
+            contactDisplayName: contact.displayName)
         context.insert(row)
         try? context.save()
         MessageIndex.shared.upsert(row.indexFields)
@@ -1962,6 +2169,26 @@ final class ConversationViewModel {
         if let row = try? context.fetch(descriptor).first {
             row.starredAt = starredAt
             try? context.save()
+        }
+    }
+
+    /// View-once reveal: flip the persisted row's `viewOnceLocked` +
+    /// delete the on-disk media via `ViewOnceReveal.reveal(_:)`, then
+    /// mirror the lock onto the in-memory UIMessage so the row flips
+    /// to its locked terminal state without waiting for a reload.
+    @MainActor
+    func revealViewOnce(messageID: String) {
+        guard let context else { return }
+        let descriptor = FetchDescriptor<PersistedMessage>(
+            predicate: #Predicate { $0.id == messageID })
+        guard let row = try? context.fetch(descriptor).first else { return }
+        ViewOnceReveal.reveal(row)
+        try? context.save()
+        // Drop any cached local path so re-renders don't try to load
+        // the file we just deleted.
+        localPaths.removeValue(forKey: messageID)
+        if let idx = messages.firstIndex(where: { $0.id == messageID }) {
+            messages[idx].viewOnceLocked = true
         }
     }
 

@@ -80,6 +80,7 @@ struct MessageRow: View {
     let onStar: ((UIMessage) -> Void)?
     let onPin: ((UIMessage) -> Void)?
     let onForward: ((UIMessage) -> Void)?
+    let onRevealViewOnce: ((UIMessage) -> Void)?
     let onJumpToQuoted: ((String) -> Void)?
     let isHighlighted: Bool
     let selecting: Bool
@@ -94,6 +95,10 @@ struct MessageRow: View {
     @State private var mentionPopover: MentionTarget?
     @State private var showContextMenu: Bool = false
     @State private var contextMenuAnchor: UnitPoint = .center
+    /// View-once: transient flag covering the gap between tap and the
+    /// persisted `viewOnceLocked` flip (~100ms). Outside that window the
+    /// gate reads `message.viewOnceLocked`, which survives scroll + restart.
+    @State private var revealedLocally: Bool = false
 
     struct MentionTarget: Identifiable {
         let id = UUID()
@@ -122,6 +127,7 @@ struct MessageRow: View {
          onStar: ((UIMessage) -> Void)? = nil,
          onPin: ((UIMessage) -> Void)? = nil,
          onForward: ((UIMessage) -> Void)? = nil,
+         onRevealViewOnce: ((UIMessage) -> Void)? = nil,
          onJumpToQuoted: ((String) -> Void)? = nil,
          isHighlighted: Bool = false,
          selecting: Bool = false,
@@ -153,6 +159,7 @@ struct MessageRow: View {
         self.onStar = onStar
         self.onPin = onPin
         self.onForward = onForward
+        self.onRevealViewOnce = onRevealViewOnce
         self.onJumpToQuoted = onJumpToQuoted
         self.isHighlighted = isHighlighted
         self.selecting = selecting
@@ -448,6 +455,24 @@ struct MessageRow: View {
 
     @ViewBuilder
     private var existingBodyContent: some View {
+        if message.isViewOnce {
+            if message.viewOnceLocked {
+                viewOnceLockedStamp()
+            } else if revealedLocally {
+                // Brief in-paint reveal window — the persistence call
+                // fires ~100ms after tap and flips `viewOnceLocked`,
+                // which will rebuild this row into the locked stamp.
+                renderedBody
+            } else {
+                viewOnceReveal()
+            }
+        } else {
+            renderedBody
+        }
+    }
+
+    @ViewBuilder
+    private var renderedBody: some View {
         switch message.body {
         case .text(let s):
             translatableText(surfaceID: "\(translationSurfacePrefix):text", raw: s)
@@ -455,9 +480,123 @@ struct MessageRow: View {
             mediaView(kind: kind, caption: caption, fileName: fileName, path: path)
         case .poll(let q, let options, let selectable):
             pollView(question: q, options: options, selectableCount: selectable)
+        case .location(let loc, let isLive, _):
+            locationBubble(loc, isLive: isLive)
+        case .contact(let c):
+            contactBubble(c)
         case .system(let s):
             Text(s).font(.caption).foregroundStyle(.secondary)
         }
+    }
+
+    /// View-once reveal CTA. Tap flips `revealedLocally` so the media
+    /// paints for a brief window, then fires `onRevealViewOnce` so the
+    /// VM flips the persisted `viewOnceLocked` flag (and deletes the
+    /// on-disk media). The lock survives scroll + restart because the
+    /// next `existingBodyContent` evaluation reads `message.viewOnceLocked`.
+    @ViewBuilder
+    private func viewOnceReveal() -> some View {
+        Button {
+            revealedLocally = true
+            // Delay slightly so the media paints before the persistence
+            // call flips the row to "viewed" and deletes the file.
+            if let onReveal = onRevealViewOnce {
+                Task {
+                    try? await Task.sleep(nanoseconds: 100_000_000)
+                    onReveal(message)
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "eye")
+                Text("Tap to reveal").scaledUI(12)
+            }
+            .padding(.horizontal, 10).padding(.vertical, 6)
+            .background(Theme.surface, in: Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Terminal state for a revealed view-once message — bytes have been
+    /// deleted and the persisted row carries `viewOnceLocked = true`.
+    @ViewBuilder
+    private func viewOnceLockedStamp() -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: "eye.slash")
+            Text("You viewed this once").italic().scaledUI(12)
+        }
+        .foregroundStyle(Theme.textMuted)
+        .padding(.horizontal, 10).padding(.vertical, 6)
+    }
+
+    @ViewBuilder
+    private func locationBubble(_ loc: LocationPayload, isLive: Bool) -> some View {
+        Button {
+            if let url = URL(string: "maps://?ll=\(loc.lat),\(loc.lng)") {
+                NSWorkspace.shared.open(url)
+            }
+        } label: {
+            VStack(alignment: .leading, spacing: 0) {
+                ZStack(alignment: .topTrailing) {
+                    MapSnapshotImage(lat: loc.lat, lng: loc.lng)
+                    if isLive {
+                        Text("🔴 LIVE")
+                            .scaledMono(10, weight: .semibold)
+                            .padding(.horizontal, 4).padding(.vertical, 2)
+                            .background(.red.opacity(0.8), in: Capsule())
+                            .foregroundStyle(.white)
+                            .padding(6)
+                    }
+                }
+                .frame(width: 220, height: 120)
+                VStack(alignment: .leading, spacing: 2) {
+                    if !loc.name.isEmpty {
+                        Text(loc.name).scaledUI(13).foregroundStyle(Theme.text)
+                    }
+                    if !loc.address.isEmpty {
+                        Text(loc.address).scaledUI(11)
+                            .foregroundStyle(Theme.textMuted)
+                    }
+                }
+                .padding(8)
+            }
+            .frame(width: 220)
+            .background(Theme.surface)
+            .clipShape(RoundedRectangle(cornerRadius: Theme.bubbleRadius))
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private func contactBubble(_ card: ContactPayload) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                ZStack {
+                    Circle().fill(Theme.surface).frame(width: 36, height: 36)
+                    Text(String(card.displayName.prefix(1)))
+                        .scaledUI(15, weight: .semibold)
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(card.displayName).scaledUI(13).foregroundStyle(Theme.text)
+                    if !card.phone.isEmpty {
+                        Text(card.phone).scaledUI(11).foregroundStyle(Theme.textMuted)
+                    }
+                }
+            }
+            if let waid = VCardBuilder.parseWAID(card.vcard) {
+                Divider()
+                Button("Message on WhatsApp") {
+                    let jid = "\(waid)@s.whatsapp.net"
+                    onOpenChat?(jid)
+                }
+                .buttonStyle(.borderless)
+                .scaledUI(12, weight: .medium)
+            }
+        }
+        .padding(10)
+        .frame(width: 220, alignment: .leading)
+        .background(Theme.surface)
+        .clipShape(RoundedRectangle(cornerRadius: Theme.bubbleRadius))
     }
 
     @ViewBuilder
@@ -923,5 +1062,27 @@ struct MessageRow: View {
 
     private func statusColor(_ s: UIMessage.Status) -> Color {
         s == .read || s == .played ? Theme.accent : Theme.textFaint
+    }
+}
+
+private struct MapSnapshotImage: View {
+    let lat: Double
+    let lng: Double
+    @State private var image: NSImage?
+
+    var body: some View {
+        Group {
+            if let img = image {
+                Image(nsImage: img).resizable().aspectRatio(contentMode: .fill)
+            } else {
+                ZStack {
+                    Rectangle().fill(Theme.surface)
+                    ProgressView().controlSize(.small)
+                }
+            }
+        }
+        .task(id: "\(lat),\(lng)") {
+            image = await MapSnapshotCache.shared.snapshot(lat: lat, lng: lng)
+        }
     }
 }

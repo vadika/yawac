@@ -11,6 +11,10 @@ A native macOS SwiftUI client backed by [tulir/whatsmeow](https://github.com/tul
 - Drag-and-drop, multi-select, or `⌘V` to stage attachments with previews + caption before sending
 - Reactions, reply, edit, revoke, delete-for-me, forward (single or multi-select), star
 - `@`-mention autocomplete (and `@everyone` in groups) — recipients see proper mentions + ping notifications
+- Static location via MapKit picker (search + current location + draggable pin); inbound LiveLocation renders with a live badge
+- Single-contact share as a WhatsApp-compatible vCard with tappable "Message on WhatsApp" recipient action
+- Disappearing messages — chat-level timer (off / 24h / 7d / 90d) set from chat info; outgoing messages wrap in `EphemeralMessage` automatically
+- View-once — incoming reveals once then locks + deletes on disk; outbound has a per-attachment toggle on image/video chips
 - On-device translation (Apple Translation framework)
 
 **Chats**

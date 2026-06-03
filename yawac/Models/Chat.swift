@@ -26,6 +26,11 @@ struct Chat: Identifiable, Hashable {
     /// admin) of this group. Populated by `mergeGroups` against the
     /// `BridgeGroupModel.participants` roster. Not persisted.
     var amAdmin: Bool = false
+    /// Runtime-only: disappearing-messages timer in seconds (0 = off).
+    /// Hydrated from `BridgeGroupModel` on `mergeGroups` and updated by
+    /// live `ephemeralTimerChanged` / 1:1 `EphemeralSetting` events.
+    /// Not persisted — a fresh ListGroups on connect repopulates it.
+    var ephemeralExpirationSeconds: Int32 = 0
     var id: String { jid }
 }
 

@@ -31,6 +31,8 @@ struct ComposerView: View {
     @State private var recorder = VoiceRecorder()
     @State private var wantsCancel = false
     @State private var pasteMonitor: Any?
+    @State private var showLocationPicker = false
+    @State private var showContactPicker = false
 
     var body: some View {
         VStack(spacing: 8) {
@@ -44,6 +46,8 @@ struct ComposerView: View {
             inputRow
         }
         .animation(.easeOut(duration: 0.15), value: vm.pendingAttachments)
+        .animation(.easeOut(duration: 0.15), value: vm.pendingLocations)
+        .animation(.easeOut(duration: 0.15), value: vm.pendingContacts)
         .animation(.easeOut(duration: 0.12), value: vm.picker.isActive)
         .padding(.horizontal, 22)
         .padding(.vertical, 12)
@@ -59,6 +63,48 @@ struct ComposerView: View {
         }
         .onAppear { installPasteMonitor() }
         .onDisappear { removePasteMonitor() }
+        .sheet(isPresented: $showLocationPicker) {
+            LocationPickerSheet(
+                model: LocationPickerSheetModel(),
+                onSend: { payload in
+                    vm.stageLocation(payload)
+                }
+            )
+        }
+        .sheet(isPresented: $showContactPicker) {
+            ContactPickerSheet(
+                model: ContactPickerSheetModel(contacts: contactsForPicker),
+                onSend: { payload in
+                    vm.stageContact(payload)
+                }
+            )
+        }
+    }
+
+    /// Contact list passed to `ContactPickerSheet`. Mirrors the dedup
+    /// pattern from `ChatListView.contactsForPicker`: walk
+    /// `session.contactNames`, prefer the PN form over `@lid` when both
+    /// are known, and drop self.
+    private var contactsForPicker: [BridgeContact] {
+        guard let client = session.client else { return [] }
+        let selfKey = JIDNormalize.key(client.ownJID, client: client)
+        var byKey: [String: BridgeContact] = [:]
+        for (jid, name) in session.contactNames {
+            let key = JIDNormalize.key(jid, client: client)
+            if key == selfKey { continue }
+            if let existing = byKey[key] {
+                if existing.jid.hasSuffix("@lid"), !key.hasSuffix("@lid") {
+                    byKey[key] = BridgeContact(
+                        jid: key, name: name,
+                        pushName: nil, fullName: nil, businessName: nil)
+                }
+                continue
+            }
+            byKey[key] = BridgeContact(
+                jid: key, name: name,
+                pushName: nil, fullName: nil, businessName: nil)
+        }
+        return Array(byKey.values)
     }
 
     /// Local NSEvent monitor watching for ⌘V while the composer is
@@ -119,12 +165,18 @@ struct ComposerView: View {
         vm.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    private var hasStaged: Bool {
+        !vm.pendingAttachments.isEmpty
+            || !vm.pendingLocations.isEmpty
+            || !vm.pendingContacts.isEmpty
+    }
+
     private var showMic: Bool {
-        draftIsEmpty && vm.editTarget == nil && vm.pendingAttachments.isEmpty
+        draftIsEmpty && vm.editTarget == nil && !hasStaged
     }
 
     private func send() {
-        if !vm.pendingAttachments.isEmpty {
+        if hasStaged {
             Task { await vm.sendPendingAttachments() }
         } else if vm.editTarget != nil {
             Task { await vm.saveEdit(vm.draft); vm.draft = "" }
@@ -157,6 +209,16 @@ struct ComposerView: View {
                     attachFile()
                 } label: {
                     Label("Attach file…", systemImage: "paperclip")
+                }
+                Button {
+                    showLocationPicker = true
+                } label: {
+                    Label("Send location…", systemImage: "location")
+                }
+                Button {
+                    showContactPicker = true
+                } label: {
+                    Label("Send contact…", systemImage: "person.crop.circle")
                 }
                 Button {
                     vm.showPollComposer = true
@@ -294,7 +356,7 @@ struct ComposerView: View {
     }
 
     private var canSend: Bool {
-        if !vm.pendingAttachments.isEmpty { return true }
+        if hasStaged { return true }
         let body = vm.draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !body.isEmpty else { return false }
         if let m = vm.editTarget, case .text(let t) = m.body, body == t {
@@ -358,6 +420,11 @@ struct ComposerView: View {
             return ""
         case .poll(let q, _, _):
             return q
+        case .location(let loc, let isLive, _):
+            let label = isLive ? "Live location" : "Location"
+            return loc.name.isEmpty ? label : "\(label): \(loc.name)"
+        case .contact(let c):
+            return "Contact: \(c.displayName)"
         case .system(let s):
             return s
         }
@@ -425,16 +492,82 @@ struct ComposerView: View {
     // ─── Staged-attachment preview strip ─────────────────────────────
     @ViewBuilder
     private var attachmentStrip: some View {
-        if !vm.pendingAttachments.isEmpty {
+        if hasStaged {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     ForEach(vm.pendingAttachments) { att in
                         attachmentChip(att)
                     }
+                    ForEach(Array(vm.pendingLocations.enumerated()), id: \.offset) { idx, loc in
+                        locationChip(loc, index: idx)
+                    }
+                    ForEach(Array(vm.pendingContacts.enumerated()), id: \.offset) { idx, card in
+                        contactChip(card, index: idx)
+                    }
                 }
                 .padding(.vertical, 2)
             }
             .transition(.move(edge: .bottom).combined(with: .opacity))
+        }
+    }
+
+    private func locationChip(_ loc: LocationPayload, index: Int) -> some View {
+        ZStack(alignment: .topTrailing) {
+            VStack(spacing: 4) {
+                Image(systemName: "location.fill")
+                    .scaledIcon(18)
+                    .foregroundStyle(Theme.textMuted)
+                Text(loc.name.isEmpty ? "Location" : loc.name)
+                    .scaledUI(8)
+                    .foregroundStyle(Theme.textFaint)
+                    .lineLimit(1)
+                    .frame(width: 48)
+            }
+            .frame(width: 56, height: 56)
+            .background(Theme.surfaceAlt, in: RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.border, lineWidth: 1))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+
+            Button {
+                vm.removePendingLocation(at: index)
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .scaledIcon(14)
+                    .foregroundStyle(.white, .black.opacity(0.55))
+            }
+            .buttonStyle(.plain)
+            .padding(2)
+            .help("Remove")
+        }
+    }
+
+    private func contactChip(_ card: ContactPayload, index: Int) -> some View {
+        ZStack(alignment: .topTrailing) {
+            VStack(spacing: 4) {
+                Image(systemName: "person.crop.circle.fill")
+                    .scaledIcon(18)
+                    .foregroundStyle(Theme.textMuted)
+                Text(card.displayName.isEmpty ? "Contact" : card.displayName)
+                    .scaledUI(8)
+                    .foregroundStyle(Theme.textFaint)
+                    .lineLimit(1)
+                    .frame(width: 48)
+            }
+            .frame(width: 56, height: 56)
+            .background(Theme.surfaceAlt, in: RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.border, lineWidth: 1))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+
+            Button {
+                vm.removePendingContact(at: index)
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .scaledIcon(14)
+                    .foregroundStyle(.white, .black.opacity(0.55))
+            }
+            .buttonStyle(.plain)
+            .padding(2)
+            .help("Remove")
         }
     }
 
@@ -474,6 +607,27 @@ struct ComposerView: View {
             .buttonStyle(.plain)
             .padding(2)
             .help("Remove")
+
+            // View-once toggle — only meaningful for image/video.
+            // Pinned to the chip's bottom-trailing corner via a fixed
+            // 56×56 frame; previously used .frame(maxWidth:.infinity,
+            // maxHeight:.infinity, alignment:.bottomTrailing) which made
+            // the ZStack expand to fill its parent, bloating the chip
+            // (and the whole composer) beyond its 56×56 footprint.
+            if att.kind == "image" || att.kind == "video" {
+                Button {
+                    vm.toggleViewOnce(att.id)
+                } label: {
+                    Image(systemName: att.viewOnce ? "eye.fill" : "eye")
+                        .scaledIcon(12)
+                        .foregroundStyle(att.viewOnce ? Theme.accent : .white,
+                                         .black.opacity(0.55))
+                }
+                .buttonStyle(.plain)
+                .padding(2)
+                .frame(width: 56, height: 56, alignment: .bottomTrailing)
+                .help(att.viewOnce ? "View once: on" : "Send as view once")
+            }
         }
     }
 

@@ -74,7 +74,10 @@ extension BridgeGroupModel {
                      isCommunityParent: Bool = false,
                      linkedParent: String? = nil,
                      amAdmin: Bool = false,
-                     meJID: String = "me@s.whatsapp.net") -> BridgeGroupModel {
+                     meJID: String = "me@s.whatsapp.net",
+                     ephemeralExpirationSeconds: Int32 = 0)
+        -> BridgeGroupModel
+    {
         let participants: [BridgeParticipantModel] = [
             BridgeParticipantModel(jid: meJID, isAdmin: amAdmin, isSuper: false)
         ]
@@ -88,7 +91,8 @@ extension BridgeGroupModel {
             isParent: isCommunityParent,
             linkedParentJID: linkedParent,
             isDefaultSubGroup: false,
-            joinApprovalMode: false
+            joinApprovalMode: false,
+            ephemeralExpirationSeconds: ephemeralExpirationSeconds
         )
     }
 }

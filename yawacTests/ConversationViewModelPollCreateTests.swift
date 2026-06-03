@@ -19,7 +19,8 @@ final class FakeWAClient: WAClient {
     override func sendPollCreation(_ chatJID: String,
                                    question: String,
                                    options: [String],
-                                   selectableCount: Int) throws
+                                   selectableCount: Int,
+                                   ephemeralSeconds: Int32 = 0) throws
         -> BridgeSendPollResult
     {
         lastPollQuestion = question
