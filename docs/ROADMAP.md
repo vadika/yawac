@@ -18,21 +18,48 @@ relevant context lingers).
   via existing `PersistedMessage.pollJSON`. Shipped 2026-06-02.
 - ◐ **Stickers** — incoming render works; need pack browsing + send from
   pack.
-- ✅ **Location sharing** — static MapKit picker (search + current
-  location + drag pin) shipped in v0.8.0. Inbound LiveLocation
-  renders with last known coord + "LIVE" badge. Live-location send
-  remains deferred.
-- ✅ **Contact-card share (vCard)** — WhatsApp-formatted vCard with
-  `waid` extension parameter so recipients see a tappable "Message on
-  WhatsApp" affordance. Single-contact only; macOS Contacts.app
-  integration deferred. Shipped in v0.8.0.
-- ✅ **Disappearing messages — outbound** — chat-level timer (off /
-  24h / 7d / 90d) set from ChatInfoView; outgoing messages wrap in
-  `EphemeralMessage`. Shipped in v0.8.0. (whatsmeow does NOT
-  auto-wrap; yawac wraps explicitly.)
-- ✅ **View-once enforce** — incoming view-once reveal once, then
-  locks + deletes the on-disk media; outbound per-attachment toggle
-  on image/video chips. Shipped in v0.8.0.
+- ◐ **Location sharing** — static MapKit picker (search + current
+  location via delegate one-shot) shipped in v0.8.0. Inbound
+  LiveLocation renders with last known coord + "LIVE" badge.
+  Gaps:
+    - ☐ Live-location SEND (CoreLocation continuous updates +
+      LiveLocationMessage protocol). Receive-only today.
+    - ☐ Pin-drag re-geocode — model has `onPinDrag(to:)` wired but
+      the legacy `MapAnnotation` API doesn't expose drag; needs a
+      switch to the new `Map { Annotation { ... } }` shape.
+- ◐ **Contact-card share (vCard)** — WhatsApp-formatted vCard with
+  `waid` extension parameter, tappable "Message on WhatsApp"
+  recipient action. Single-contact only. Shipped in v0.8.0.
+  Gaps:
+    - ☐ Multi-contact share (`ContactsArrayMessage`).
+    - ☐ macOS Contacts.app source via `CNContactPickerViewController`
+      (WA-contacts only today).
+    - ☐ Inbound contacts missing the `waid` param (non-WA exports)
+      render without the "Message on WhatsApp" button. Document only.
+- ◐ **Disappearing messages — outbound** — chat-level timer (off /
+  24h / 7d / 90d) set from ChatInfoView; outgoing wraps in
+  `EphemeralMessage`. 1:1 hydration via inbound
+  `ProtocolMessage{EPHEMERAL_SETTING}` carriers OR
+  `ContextInfo.Expiration` on any regular inbound message (v0.8.0
+  fix). Shipped in v0.8.0.
+  Gaps:
+    - ☐ Reply send (`sendTextReply`) doesn't thread
+      `ephemeralSeconds` — replies in disappearing chats arrive
+      unwrapped on the recipient.
+    - ☐ Edit / Forward / Reaction send paths likewise un-threaded.
+    - ☐ 1:1 cold-read still unavailable upstream (whatsmeow has no
+      `GetChatEphemeralSetting(jid)` API); fresh chats default to
+      Off until any inbound message arrives.
+- ◐ **View-once enforce** — incoming view-once renders "Tap to reveal"
+  → reveals media once → locks + deletes on-disk file; outbound
+  per-attachment toggle on image/video chips. `viewOnceLocked`
+  survives scroll + restart. Shipped in v0.8.0.
+  Gaps:
+    - ☐ Existing pre-v0.8.0 view-once messages persisted as regular
+      images — no migration to detect them. Forward-only fix.
+    - ☐ Forward / Quote already hidden from context menu, but
+      screenshot / copy-image is uncatchable. Same posture as
+      WhatsApp; document only.
 - ☐ **GIF picker** (tenor / giphy).
 - ✅ **Mute chat** — 8h/1w/Always submenu in sidebar + header context
   menus; bell-slash badge + dimmed unread chip; banner/dock/reaction
