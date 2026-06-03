@@ -13,6 +13,10 @@ struct BridgeMessage: Codable, Identifiable {
     let poll: BridgePoll?
     let quoted: Quoted?
     let isForwarded: Bool?
+    let location: BridgeLocationPayload?
+    let locationSequence: Int64?
+    let contact: BridgeContactPayload?
+    let isViewOnce: Bool?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -22,6 +26,10 @@ struct BridgeMessage: Codable, Identifiable {
         case fromMe = "from_me"
         case timestamp, kind, text, media, poll, quoted
         case isForwarded = "is_forwarded"
+        case location
+        case locationSequence = "location_sequence"
+        case contact
+        case isViewOnce = "is_view_once"
     }
 
     struct Quoted: Codable, Hashable, Equatable {
@@ -163,6 +171,7 @@ struct BridgeGroupModel: Codable, Identifiable {
     // without re-building the whole struct. The decoder still treats
     // missing/false payloads as `false`.
     var joinApprovalMode: Bool
+    let ephemeralExpirationSeconds: Int32
 
     enum CodingKeys: String, CodingKey {
         case jid, name, topic
@@ -172,13 +181,15 @@ struct BridgeGroupModel: Codable, Identifiable {
         case linkedParentJID = "linked_parent_jid"
         case isDefaultSubGroup = "is_default_sub_group"
         case joinApprovalMode = "join_approval_mode"
+        case ephemeralExpirationSeconds = "ephemeral_expiration_seconds"
     }
 
     init(jid: String, name: String, topic: String, ownerJID: String,
          created: Int64, participants: [BridgeParticipantModel],
          isParent: Bool = false, linkedParentJID: String? = nil,
          isDefaultSubGroup: Bool = false,
-         joinApprovalMode: Bool = false) {
+         joinApprovalMode: Bool = false,
+         ephemeralExpirationSeconds: Int32 = 0) {
         self.jid = jid
         self.name = name
         self.topic = topic
@@ -189,6 +200,7 @@ struct BridgeGroupModel: Codable, Identifiable {
         self.linkedParentJID = linkedParentJID
         self.isDefaultSubGroup = isDefaultSubGroup
         self.joinApprovalMode = joinApprovalMode
+        self.ephemeralExpirationSeconds = ephemeralExpirationSeconds
     }
 
     init(from decoder: Decoder) throws {
@@ -209,6 +221,8 @@ struct BridgeGroupModel: Codable, Identifiable {
         }
         isDefaultSubGroup = try c.decodeIfPresent(Bool.self, forKey: .isDefaultSubGroup) ?? false
         joinApprovalMode = try c.decodeIfPresent(Bool.self, forKey: .joinApprovalMode) ?? false
+        ephemeralExpirationSeconds =
+            try c.decodeIfPresent(Int32.self, forKey: .ephemeralExpirationSeconds) ?? 0
     }
 }
 
@@ -300,6 +314,23 @@ struct BridgeContact: Codable, Identifiable {
 struct BridgeUserInfo: Codable {
     let jid: String
     let status: String?
+}
+
+struct BridgeLocationPayload: Codable, Hashable {
+    let lat: Double
+    let lng: Double
+    let name: String
+    let address: String
+}
+
+struct BridgeContactPayload: Codable, Hashable {
+    let vcard: String
+    let displayName: String
+
+    enum CodingKeys: String, CodingKey {
+        case vcard
+        case displayName = "display_name"
+    }
 }
 
 struct BridgeJoinRequest: Decodable, Hashable {
