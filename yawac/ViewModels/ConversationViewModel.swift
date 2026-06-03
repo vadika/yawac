@@ -202,6 +202,8 @@ final class ConversationViewModel {
         m.starredAt = p.starredAt
         m.pinnedAt = p.pinnedAt
         m.isForwarded = p.isForwarded
+        m.isViewOnce = p.isViewOnce
+        m.viewOnceLocked = p.viewOnceLocked
         m.quotedMessageID = p.quotedMessageID
         m.quotedSenderJID = p.quotedSenderJID
         m.quotedFromMe = p.quotedFromMe
@@ -516,6 +518,8 @@ final class ConversationViewModel {
                 m.starredAt = p.starredAt
         m.pinnedAt = p.pinnedAt
         m.isForwarded = p.isForwarded
+        m.isViewOnce = p.isViewOnce
+        m.viewOnceLocked = p.viewOnceLocked
                 m.quotedMessageID = p.quotedMessageID
                 m.quotedSenderJID = p.quotedSenderJID
                 m.quotedFromMe = p.quotedFromMe
@@ -2137,6 +2141,26 @@ final class ConversationViewModel {
         if let row = try? context.fetch(descriptor).first {
             row.starredAt = starredAt
             try? context.save()
+        }
+    }
+
+    /// View-once reveal: flip the persisted row's `viewOnceLocked` +
+    /// delete the on-disk media via `ViewOnceReveal.reveal(_:)`, then
+    /// mirror the lock onto the in-memory UIMessage so the row flips
+    /// to its locked terminal state without waiting for a reload.
+    @MainActor
+    func revealViewOnce(messageID: String) {
+        guard let context else { return }
+        let descriptor = FetchDescriptor<PersistedMessage>(
+            predicate: #Predicate { $0.id == messageID })
+        guard let row = try? context.fetch(descriptor).first else { return }
+        ViewOnceReveal.reveal(row)
+        try? context.save()
+        // Drop any cached local path so re-renders don't try to load
+        // the file we just deleted.
+        localPaths.removeValue(forKey: messageID)
+        if let idx = messages.firstIndex(where: { $0.id == messageID }) {
+            messages[idx].viewOnceLocked = true
         }
     }
 

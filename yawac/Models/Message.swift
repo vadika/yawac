@@ -36,6 +36,12 @@ struct UIMessage: Identifiable, Hashable {
     var pinnedAt: Date? = nil
     var isForwarded: Bool = false
     var isViewOnce: Bool = false
+    /// Mirrors PersistedMessage.viewOnceLocked — set once the user has
+    /// revealed the view-once envelope so we permanently render the
+    /// "You viewed this once" lock instead of the reveal CTA. Default
+    /// false; populated from the persisted row in loadHistory + after
+    /// ViewOnceReveal.reveal(_:) flips it.
+    var viewOnceLocked: Bool = false
 
     enum Body: Hashable {
         case text(String)
@@ -99,13 +105,13 @@ extension UIMessage {
             }
         case "contact":
             if let c = b.contact {
-                // TODO Task 14: derive jid/phone from vCard `waid` via
-                // VCardBuilder.parseWAID. For now we forward the raw vCard +
-                // display name and leave jid/phone empty.
+                let waid = VCardBuilder.parseWAID(c.vcard) ?? ""
+                let jid = waid.isEmpty ? "" : "\(waid)@s.whatsapp.net"
+                let phone = waid.isEmpty ? "" : "+\(waid)"
                 self.body = .contact(ContactPayload(
-                    jid: "",
+                    jid: jid,
                     displayName: c.displayName,
-                    phone: "",
+                    phone: phone,
                     vcard: c.vcard))
             } else {
                 self.body = .system("(contact)")

@@ -80,6 +80,7 @@ struct MessageRow: View {
     let onStar: ((UIMessage) -> Void)?
     let onPin: ((UIMessage) -> Void)?
     let onForward: ((UIMessage) -> Void)?
+    let onRevealViewOnce: ((UIMessage) -> Void)?
     let onJumpToQuoted: ((String) -> Void)?
     let isHighlighted: Bool
     let selecting: Bool
@@ -94,12 +95,9 @@ struct MessageRow: View {
     @State private var mentionPopover: MentionTarget?
     @State private var showContextMenu: Bool = false
     @State private var contextMenuAnchor: UnitPoint = .center
-    /// View-once: local reveal latch. Flipped on tap so the body renders
-    /// for the duration of this row's lifetime. T26+ will wire a persisted
-    /// `viewOnceLocked` flip through `ViewOnceReveal.reveal(_:)` at the
-    /// ConversationView level (where the persisted row is in scope).
-    // TODO: persist reveal state — pipe a closure from ConversationView
-    // that calls `ViewOnceReveal.reveal(_:)` on the persisted row.
+    /// View-once: transient flag covering the gap between tap and the
+    /// persisted `viewOnceLocked` flip (~100ms). Outside that window the
+    /// gate reads `message.viewOnceLocked`, which survives scroll + restart.
     @State private var revealedLocally: Bool = false
 
     struct MentionTarget: Identifiable {
@@ -129,6 +127,7 @@ struct MessageRow: View {
          onStar: ((UIMessage) -> Void)? = nil,
          onPin: ((UIMessage) -> Void)? = nil,
          onForward: ((UIMessage) -> Void)? = nil,
+         onRevealViewOnce: ((UIMessage) -> Void)? = nil,
          onJumpToQuoted: ((String) -> Void)? = nil,
          isHighlighted: Bool = false,
          selecting: Bool = false,
@@ -160,6 +159,7 @@ struct MessageRow: View {
         self.onStar = onStar
         self.onPin = onPin
         self.onForward = onForward
+        self.onRevealViewOnce = onRevealViewOnce
         self.onJumpToQuoted = onJumpToQuoted
         self.isHighlighted = isHighlighted
         self.selecting = selecting
@@ -455,8 +455,17 @@ struct MessageRow: View {
 
     @ViewBuilder
     private var existingBodyContent: some View {
-        if message.isViewOnce, !revealedLocally {
-            viewOnceReveal()
+        if message.isViewOnce {
+            if message.viewOnceLocked {
+                viewOnceLockedStamp()
+            } else if revealedLocally {
+                // Brief in-paint reveal window — the persistence call
+                // fires ~100ms after tap and flips `viewOnceLocked`,
+                // which will rebuild this row into the locked stamp.
+                renderedBody
+            } else {
+                viewOnceReveal()
+            }
         } else {
             renderedBody
         }
@@ -480,13 +489,23 @@ struct MessageRow: View {
         }
     }
 
-    /// View-once reveal CTA. Tap flips `revealedLocally`; the bytes-gone
-    /// persistence happens via `ViewOnceReveal.reveal(_:)` at the
-    /// ConversationView level once that wiring lands (T26+).
+    /// View-once reveal CTA. Tap flips `revealedLocally` so the media
+    /// paints for a brief window, then fires `onRevealViewOnce` so the
+    /// VM flips the persisted `viewOnceLocked` flag (and deletes the
+    /// on-disk media). The lock survives scroll + restart because the
+    /// next `existingBodyContent` evaluation reads `message.viewOnceLocked`.
     @ViewBuilder
     private func viewOnceReveal() -> some View {
         Button {
             revealedLocally = true
+            // Delay slightly so the media paints before the persistence
+            // call flips the row to "viewed" and deletes the file.
+            if let onReveal = onRevealViewOnce {
+                Task {
+                    try? await Task.sleep(nanoseconds: 100_000_000)
+                    onReveal(message)
+                }
+            }
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: "eye")
@@ -496,6 +515,18 @@ struct MessageRow: View {
             .background(Theme.surface, in: Capsule())
         }
         .buttonStyle(.plain)
+    }
+
+    /// Terminal state for a revealed view-once message — bytes have been
+    /// deleted and the persisted row carries `viewOnceLocked = true`.
+    @ViewBuilder
+    private func viewOnceLockedStamp() -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: "eye.slash")
+            Text("You viewed this once").italic().scaledUI(12)
+        }
+        .foregroundStyle(Theme.textMuted)
+        .padding(.horizontal, 10).padding(.vertical, 6)
     }
 
     @ViewBuilder
