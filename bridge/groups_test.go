@@ -324,3 +324,36 @@ func TestMapGroupInfoCarriesJoinApprovalMode(t *testing.T) {
 		t.Fatalf("expected JoinApprovalMode false, got %+v", got)
 	}
 }
+
+func TestSetDisappearingTimerUnpaired(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/sd.db")
+	defer c.Close()
+	err := c.SetDisappearingTimer("1234@g.us", 86400)
+	if err == nil {
+		t.Fatal("expected error on unpaired client")
+	}
+}
+
+func TestSetDisappearingTimerBadJID(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/sd2.db")
+	defer c.Close()
+	err := c.SetDisappearingTimer("not a jid", 86400)
+	if err == nil {
+		t.Fatal("expected parse error")
+	}
+}
+
+func TestMapGroupInfoCarriesEphemeralExpiration(t *testing.T) {
+	in := &types.GroupInfo{
+		JID:       types.NewJID("999", "g.us"),
+		GroupName: types.GroupName{Name: "T"},
+		GroupEphemeral: types.GroupEphemeral{
+			IsEphemeral:       true,
+			DisappearingTimer: 86400,
+		},
+	}
+	got := mapGroupInfo(in)
+	if got.EphemeralExpirationSeconds != 86400 {
+		t.Fatalf("want 86400 got %d", got.EphemeralExpirationSeconds)
+	}
+}

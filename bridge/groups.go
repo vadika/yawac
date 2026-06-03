@@ -23,6 +23,7 @@ type JGroup struct {
 	LinkedParentJID   string         `json:"linked_parent_jid,omitempty"`
 	IsDefaultSubGroup bool           `json:"is_default_sub_group,omitempty"`
 	JoinApprovalMode  bool           `json:"join_approval_mode,omitempty"`
+	EphemeralExpirationSeconds int32 `json:"ephemeral_expiration_seconds,omitempty"`
 	Participants      []JParticipant `json:"participants"`
 }
 
@@ -49,6 +50,7 @@ func mapGroupInfo(g *types.GroupInfo) JGroup {
 		IsDefaultSubGroup: g.GroupIsDefaultSub.IsDefaultSubGroup,
 		JoinApprovalMode:  g.GroupMembershipApprovalMode.IsJoinApprovalRequired,
 	}
+	out.EphemeralExpirationSeconds = int32(g.GroupEphemeral.DisappearingTimer)
 	out.Participants = make([]JParticipant, 0, len(g.Participants))
 	for _, p := range g.Participants {
 		out.Participants = append(out.Participants, JParticipant{
@@ -641,6 +643,28 @@ func (c *Client) UpdateGroupJoinRequests(
 	}
 	b, _ := json.Marshal(out)
 	return string(b), nil
+}
+
+// SetDisappearingTimer sets the chat-level disappearing-messages timer.
+// seconds ∈ {0, 86400 (24h), 604800 (7d), 7776000 (90d)}. Whatsmeow
+// handles 1:1 vs group routing internally.
+func (c *Client) SetDisappearingTimer(chatJIDStr string, seconds int32) error {
+	if c.wa == nil {
+		return errors.New("client closed")
+	}
+	jid, err := types.ParseJID(chatJIDStr)
+	if err != nil {
+		return fmt.Errorf("parse jid: %w", err)
+	}
+	if jid.User == "" || jid.Server == "" {
+		return fmt.Errorf("parse jid: empty user or server")
+	}
+	timer := time.Duration(seconds) * time.Second
+	if err := c.wa.SetDisappearingTimer(
+		context.Background(), jid, timer, time.Time{}); err != nil {
+		return fmt.Errorf("set disappearing timer: %w", err)
+	}
+	return nil
 }
 
 // SetGroupJoinApprovalMode flips the require-admin-approval gate
