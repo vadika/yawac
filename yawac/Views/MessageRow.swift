@@ -94,6 +94,13 @@ struct MessageRow: View {
     @State private var mentionPopover: MentionTarget?
     @State private var showContextMenu: Bool = false
     @State private var contextMenuAnchor: UnitPoint = .center
+    /// View-once: local reveal latch. Flipped on tap so the body renders
+    /// for the duration of this row's lifetime. T26+ will wire a persisted
+    /// `viewOnceLocked` flip through `ViewOnceReveal.reveal(_:)` at the
+    /// ConversationView level (where the persisted row is in scope).
+    // TODO: persist reveal state — pipe a closure from ConversationView
+    // that calls `ViewOnceReveal.reveal(_:)` on the persisted row.
+    @State private var revealedLocally: Bool = false
 
     struct MentionTarget: Identifiable {
         let id = UUID()
@@ -448,6 +455,15 @@ struct MessageRow: View {
 
     @ViewBuilder
     private var existingBodyContent: some View {
+        if message.isViewOnce, !revealedLocally {
+            viewOnceReveal()
+        } else {
+            renderedBody
+        }
+    }
+
+    @ViewBuilder
+    private var renderedBody: some View {
         switch message.body {
         case .text(let s):
             translatableText(surfaceID: "\(translationSurfacePrefix):text", raw: s)
@@ -462,6 +478,24 @@ struct MessageRow: View {
         case .system(let s):
             Text(s).font(.caption).foregroundStyle(.secondary)
         }
+    }
+
+    /// View-once reveal CTA. Tap flips `revealedLocally`; the bytes-gone
+    /// persistence happens via `ViewOnceReveal.reveal(_:)` at the
+    /// ConversationView level once that wiring lands (T26+).
+    @ViewBuilder
+    private func viewOnceReveal() -> some View {
+        Button {
+            revealedLocally = true
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "eye")
+                Text("Tap to reveal").scaledUI(12)
+            }
+            .padding(.horizontal, 10).padding(.vertical, 6)
+            .background(Theme.surface, in: Capsule())
+        }
+        .buttonStyle(.plain)
     }
 
     @ViewBuilder
