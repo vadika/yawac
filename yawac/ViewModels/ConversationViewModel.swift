@@ -1559,6 +1559,24 @@ final class ConversationViewModel {
             if let push = m.senderPushName, !push.isEmpty {
                 existing.senderPushName = push
             }
+            // T12 fields: re-merge view-once / location / contact metadata so
+            // history-sync replays (or live-location sequence bumps) don't
+            // erase what the initial insert captured.
+            if let v = m.isViewOnce { existing.isViewOnce = v }
+            if let loc = m.location {
+                existing.locationLat = loc.lat
+                existing.locationLng = loc.lng
+                if !loc.name.isEmpty { existing.locationName = loc.name }
+                if !loc.address.isEmpty { existing.locationAddress = loc.address }
+            }
+            if m.kind == "location_live" {
+                existing.locationIsLive = true
+                if let seq = m.locationSequence { existing.locationSequence = seq }
+            }
+            if let card = m.contact {
+                existing.contactVCard = card.vcard
+                existing.contactDisplayName = card.displayName
+            }
             try? context.save()
             return
         }
@@ -1576,6 +1594,16 @@ final class ConversationViewModel {
             mediaFileName: m.media?.fileName,
             mediaRefJSON: m.media?.ref?.json,
             pollJSON: m.poll?.json,
+            isViewOnce: m.isViewOnce ?? false,
+            viewOnceLocked: false,
+            locationLat: m.location?.lat,
+            locationLng: m.location?.lng,
+            locationName: m.location?.name,
+            locationAddress: m.location?.address,
+            locationIsLive: m.kind == "location_live",
+            locationSequence: m.locationSequence,
+            contactVCard: m.contact?.vcard,
+            contactDisplayName: m.contact?.displayName,
             senderPushName: m.senderPushName,
             quotedMessageID: m.quoted?.messageID,
             quotedSenderJID: m.quoted?.senderJID,

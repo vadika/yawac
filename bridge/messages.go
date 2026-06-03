@@ -475,6 +475,21 @@ func (c *Client) dispatchMessage(evt *events.Message) {
 		c.dispatchPollVote(evt)
 		return
 	}
+	// Hydrate the 1:1 disappearing-messages timer opportunistically from
+	// ContextInfo.Expiration: whatsmeow populates this on every regular
+	// message in a disappearing chat. The EPHEMERAL_SETTING carrier
+	// above only fires when the timer is *changed*, so chats that were
+	// already set on the phone before yawac came online never hydrated
+	// without this hint. Treat as additive — continue to the normal
+	// classify/dispatch path below.
+	if exp := extractContextInfoExpiration(evt.Message); exp > 0 {
+		b, _ := json.Marshal(JEphemeralTimerChanged{
+			ChatJID:   evt.Info.Chat.String(),
+			Seconds:   int32(exp),
+			Timestamp: evt.Info.Timestamp.Unix(),
+		})
+		c.dispatch("EphemeralTimerChanged", string(b))
+	}
 	kind, loc, locSeq, contact, isViewOnce := classifyMessage(evt.Message)
 	jm := JMessage{
 		ID:               evt.Info.ID,
@@ -678,6 +693,86 @@ func contextInfoFromMessage(m *waE2E.Message) *waE2E.ContextInfo {
 		return sm.GetContextInfo()
 	}
 	return nil
+}
+
+// extractContextInfoExpiration scans the inner message types for a
+// non-zero ContextInfo.Expiration. Returns 0 when no expiration is
+// found (i.e. the chat is not disappearing). Whatsmeow populates this
+// field on every regular message in a disappearing chat — a simpler
+// and more reliable hydration signal than waiting for a
+// ProtocolMessage{EPHEMERAL_SETTING} carrier (which only fires when
+// the timer is *changed*).
+func extractContextInfoExpiration(m *waE2E.Message) uint32 {
+	if m == nil {
+		return 0
+	}
+	// Unwrap view-once / ephemeral wrappers first.
+	if vo := m.GetViewOnceMessageV2(); vo != nil && vo.Message != nil {
+		m = vo.Message
+	}
+	if voe := m.GetViewOnceMessageV2Extension(); voe != nil && voe.Message != nil {
+		m = voe.Message
+	}
+	if em := m.GetEphemeralMessage(); em != nil && em.Message != nil {
+		m = em.Message
+	}
+	if etm := m.GetExtendedTextMessage(); etm != nil {
+		if ci := etm.GetContextInfo(); ci != nil {
+			if e := ci.GetExpiration(); e > 0 {
+				return e
+			}
+		}
+	}
+	if im := m.GetImageMessage(); im != nil {
+		if ci := im.GetContextInfo(); ci != nil {
+			if e := ci.GetExpiration(); e > 0 {
+				return e
+			}
+		}
+	}
+	if vm := m.GetVideoMessage(); vm != nil {
+		if ci := vm.GetContextInfo(); ci != nil {
+			if e := ci.GetExpiration(); e > 0 {
+				return e
+			}
+		}
+	}
+	if am := m.GetAudioMessage(); am != nil {
+		if ci := am.GetContextInfo(); ci != nil {
+			if e := ci.GetExpiration(); e > 0 {
+				return e
+			}
+		}
+	}
+	if dm := m.GetDocumentMessage(); dm != nil {
+		if ci := dm.GetContextInfo(); ci != nil {
+			if e := ci.GetExpiration(); e > 0 {
+				return e
+			}
+		}
+	}
+	if sm := m.GetStickerMessage(); sm != nil {
+		if ci := sm.GetContextInfo(); ci != nil {
+			if e := ci.GetExpiration(); e > 0 {
+				return e
+			}
+		}
+	}
+	if cm := m.GetContactMessage(); cm != nil {
+		if ci := cm.GetContextInfo(); ci != nil {
+			if e := ci.GetExpiration(); e > 0 {
+				return e
+			}
+		}
+	}
+	if lm := m.GetLocationMessage(); lm != nil {
+		if ci := lm.GetContextInfo(); ci != nil {
+			if e := ci.GetExpiration(); e > 0 {
+				return e
+			}
+		}
+	}
+	return 0
 }
 
 func extractSnippet(m *waE2E.Message) string {

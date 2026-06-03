@@ -609,6 +609,11 @@ struct ComposerView: View {
             .help("Remove")
 
             // View-once toggle — only meaningful for image/video.
+            // Pinned to the chip's bottom-trailing corner via a fixed
+            // 56×56 frame; previously used .frame(maxWidth:.infinity,
+            // maxHeight:.infinity, alignment:.bottomTrailing) which made
+            // the ZStack expand to fill its parent, bloating the chip
+            // (and the whole composer) beyond its 56×56 footprint.
             if att.kind == "image" || att.kind == "video" {
                 Button {
                     vm.toggleViewOnce(att.id)
@@ -620,8 +625,7 @@ struct ComposerView: View {
                 }
                 .buttonStyle(.plain)
                 .padding(2)
-                .frame(maxWidth: .infinity, maxHeight: .infinity,
-                       alignment: .bottomTrailing)
+                .frame(width: 56, height: 56, alignment: .bottomTrailing)
                 .help(att.viewOnce ? "View once: on" : "Send as view once")
             }
         }

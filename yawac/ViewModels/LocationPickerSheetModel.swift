@@ -92,16 +92,40 @@ final class LocationPickerSheetModel {
         }
         if status == .notDetermined {
             locationManager.requestWhenInUseAuthorization()
+            // Wait briefly for the permission prompt to resolve. CoreLocation
+            // delivers the authorization decision asynchronously; reading
+            // `.authorizationStatus` again immediately after the request
+            // returns the stale value.
+            for _ in 0..<10 {
+                try? await Task.sleep(nanoseconds: 200_000_000)
+                if locationManager.authorizationStatus != .notDetermined { break }
+            }
         }
-        guard let loc = locationManager.location else {
-            permissionDenied = locationManager.authorizationStatus == .denied
+        let status2 = locationManager.authorizationStatus
+        if status2 == .denied || status2 == .restricted {
+            permissionDenied = true
             return
         }
-        let coord = loc.coordinate
-        region = MKCoordinateRegion(
-            center: coord, latitudinalMeters: 1000, longitudinalMeters: 1000)
-        selectedCoord = coord
-        await reverseGeocode(coord: coord)
+        // Kick off a one-shot fix. `locationManager.location` is nil until
+        // the manager has had a chance to deliver a fix — a single sync
+        // read on first tap always returns nil and the map never moves.
+        // Start updates, poll up to ~3s for a coordinate, then stop.
+        locationManager.startUpdatingLocation()
+        defer { locationManager.stopUpdatingLocation() }
+        for _ in 0..<15 {
+            if let loc = locationManager.location {
+                let coord = loc.coordinate
+                region = MKCoordinateRegion(
+                    center: coord,
+                    latitudinalMeters: 1000, longitudinalMeters: 1000)
+                selectedCoord = coord
+                error = nil
+                await reverseGeocode(coord: coord)
+                return
+            }
+            try? await Task.sleep(nanoseconds: 200_000_000)
+        }
+        error = "Couldn't get current location — try again."
     }
 
     func onPinDrag(to coord: CLLocationCoordinate2D) {

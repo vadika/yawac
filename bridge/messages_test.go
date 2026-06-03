@@ -335,3 +335,75 @@ func TestClassifyInboundViewOnce(t *testing.T) {
 		t.Fatal("expected isViewOnce=true after unwrap")
 	}
 }
+
+func TestExtractContextInfoExpirationFromExtendedText(t *testing.T) {
+	m := &waE2E.Message{
+		ExtendedTextMessage: &waE2E.ExtendedTextMessage{
+			Text: proto.String("hi"),
+			ContextInfo: &waE2E.ContextInfo{
+				Expiration: proto.Uint32(86400),
+			},
+		},
+	}
+	if got := extractContextInfoExpiration(m); got != 86400 {
+		t.Fatalf("want 86400 got %d", got)
+	}
+}
+
+func TestExtractContextInfoExpirationFromImage(t *testing.T) {
+	m := &waE2E.Message{
+		ImageMessage: &waE2E.ImageMessage{
+			ContextInfo: &waE2E.ContextInfo{
+				Expiration: proto.Uint32(604800),
+			},
+		},
+	}
+	if got := extractContextInfoExpiration(m); got != 604800 {
+		t.Fatalf("want 604800 got %d", got)
+	}
+}
+
+func TestExtractContextInfoExpirationZeroWhenAbsent(t *testing.T) {
+	m := &waE2E.Message{
+		Conversation: proto.String("plain text, no context info"),
+	}
+	if got := extractContextInfoExpiration(m); got != 0 {
+		t.Fatalf("want 0 got %d", got)
+	}
+}
+
+func TestDispatchEmitsEphemeralTimerOnInboundWithExpiration(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/exp.db")
+	defer c.Close()
+	sink := newRecSink()
+	c.SetEventSink(sink)
+	chat, _ := types.ParseJID("79215925086@s.whatsapp.net")
+	sender, _ := types.ParseJID("79215925086@s.whatsapp.net")
+	evt := &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{Chat: chat, Sender: sender},
+			ID:            "EXP-HINT-1",
+			Timestamp:     time.Unix(1700000200, 0),
+		},
+		Message: &waE2E.Message{
+			ExtendedTextMessage: &waE2E.ExtendedTextMessage{
+				Text: proto.String("disappearing hello"),
+				ContextInfo: &waE2E.ContextInfo{
+					Expiration: proto.Uint32(86400),
+				},
+			},
+		},
+	}
+	c.dispatchMessage(evt)
+	e := sink.wait(t, "EphemeralTimerChanged", time.Second)
+	var got JEphemeralTimerChanged
+	if err := json.Unmarshal([]byte(e.payload), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.ChatJID != chat.String() {
+		t.Errorf("ChatJID = %q", got.ChatJID)
+	}
+	if got.Seconds != 86400 {
+		t.Errorf("Seconds = %d", got.Seconds)
+	}
+}

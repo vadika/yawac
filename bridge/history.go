@@ -211,6 +211,19 @@ func (c *Client) dispatchWebMessage(chatJID string, wm *waWeb.WebMessageInfo) {
 		}
 		return
 	}
+	// Hydrate the 1:1 disappearing-messages timer opportunistically from
+	// the historical message's ContextInfo.Expiration. Same rationale as
+	// dispatchMessage: whatsmeow populates this on every regular message
+	// in a disappearing chat, and history sync is often the first time
+	// yawac sees the chat.
+	if exp := extractContextInfoExpiration(msg); exp > 0 {
+		b, _ := json.Marshal(JEphemeralTimerChanged{
+			ChatJID:   chatJID,
+			Seconds:   int32(exp),
+			Timestamp: int64(wm.GetMessageTimestamp()),
+		})
+		c.dispatch("EphemeralTimerChanged", string(b))
+	}
 	kind, loc, locSeq, contact, isViewOnce := classifyMessage(msg)
 	if kind == "protocol" || kind == "system" {
 		return // skip noise
