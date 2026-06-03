@@ -15,6 +15,34 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+// wrapForChat optionally wraps inner in ViewOnceMessageV2 and then
+// EphemeralMessage. ViewOnce wrap is only meaningful for
+// ImageMessage / VideoMessage; the UI gates other kinds, but if a
+// caller passes viewOnce=true on an unrelated inner we still wrap
+// (whatsmeow / WhatsApp may reject; not our enforcement layer).
+//
+// Nesting order: ViewOnce inside Ephemeral. The outer EphemeralMessage
+// is what the server uses for retention; the inner ViewOnceMessageV2
+// is what the recipient client uses to gate the reveal flow.
+func wrapForChat(inner *waE2E.Message, ephemeralSec int32, viewOnce bool) *waE2E.Message {
+	out := inner
+	if viewOnce {
+		out = &waE2E.Message{
+			ViewOnceMessageV2: &waE2E.FutureProofMessage{
+				Message: out,
+			},
+		}
+	}
+	if ephemeralSec > 0 {
+		out = &waE2E.Message{
+			EphemeralMessage: &waE2E.FutureProofMessage{
+				Message: out,
+			},
+		}
+	}
+	return out
+}
+
 // PinMessageInChat pins or unpins a target message inside its
 // chat. WhatsApp distributes the pin via a normal stanza carrying
 // a PinInChatMessage payload — every participant's client (including

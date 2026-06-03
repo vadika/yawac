@@ -170,3 +170,57 @@ func TestDispatchReplyPopulatesQuoted(t *testing.T) {
 		t.Errorf("Snippet = %q", got.Quoted.Snippet)
 	}
 }
+
+func TestWrapForChatNoWrap(t *testing.T) {
+	inner := &waE2E.Message{
+		Conversation: proto.String("hello"),
+	}
+	out := wrapForChat(inner, 0, false)
+	if out != inner {
+		t.Fatal("expected unchanged inner when no wrapping requested")
+	}
+}
+
+func TestWrapForChatEphemeralOnly(t *testing.T) {
+	inner := &waE2E.Message{
+		Conversation: proto.String("hi"),
+	}
+	out := wrapForChat(inner, 86400, false)
+	if out.EphemeralMessage == nil {
+		t.Fatal("expected EphemeralMessage wrap")
+	}
+	if out.EphemeralMessage.Message == nil {
+		t.Fatal("inner should still be set on wrapper")
+	}
+	if out.ViewOnceMessageV2 != nil {
+		t.Fatal("unexpected ViewOnce wrap")
+	}
+}
+
+func TestWrapForChatViewOnceOnly(t *testing.T) {
+	inner := &waE2E.Message{
+		ImageMessage: &waE2E.ImageMessage{},
+	}
+	out := wrapForChat(inner, 0, true)
+	if out.ViewOnceMessageV2 == nil {
+		t.Fatal("expected ViewOnceMessageV2 wrap")
+	}
+	if out.EphemeralMessage != nil {
+		t.Fatal("unexpected Ephemeral wrap")
+	}
+}
+
+func TestWrapForChatBothEphemeralOutside(t *testing.T) {
+	inner := &waE2E.Message{
+		ImageMessage: &waE2E.ImageMessage{},
+	}
+	out := wrapForChat(inner, 86400, true)
+	if out.EphemeralMessage == nil {
+		t.Fatal("expected outer EphemeralMessage wrap")
+	}
+	if out.EphemeralMessage.Message == nil ||
+		out.EphemeralMessage.Message.ViewOnceMessageV2 == nil {
+		t.Fatalf("expected ViewOnceMessageV2 inside EphemeralMessage; got %+v",
+			out.EphemeralMessage.Message)
+	}
+}
