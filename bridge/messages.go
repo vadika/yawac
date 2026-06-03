@@ -841,6 +841,43 @@ func (c *Client) SendLocation(
 	return string(out), nil
 }
 
+// SendContact sends a single-contact ContactMessage. vcard must be
+// a valid VCARD 3.0 payload (built Swift-side via VCardBuilder).
+// displayName is the human-readable name. When ephemeralSec > 0,
+// wraps in EphemeralMessage.
+func (c *Client) SendContact(
+	chatJIDStr string,
+	vcard, displayName string,
+	ephemeralSec int32,
+) (string, error) {
+	if c.wa == nil {
+		return "", errors.New("client closed")
+	}
+	jid, err := types.ParseJID(chatJIDStr)
+	if err != nil {
+		return "", fmt.Errorf("parse jid: %w", err)
+	}
+	// Empty-jid guard matches SendText / SendLocation pattern
+	// so bad inputs surface as parse errors not send errors.
+	if jid.User == "" || jid.Server == "" {
+		return "", fmt.Errorf("parse jid: empty user or server")
+	}
+	inner := &waE2E.Message{
+		ContactMessage: &waE2E.ContactMessage{
+			DisplayName: proto.String(displayName),
+			Vcard:       proto.String(vcard),
+		},
+	}
+	msg := wrapForChat(inner, ephemeralSec, false)
+	resp, err := c.wa.SendMessage(context.Background(), jid, msg)
+	if err != nil {
+		return "", fmt.Errorf("send: %w", err)
+	}
+	out := JSendResult{MessageID: resp.ID, Timestamp: resp.Timestamp.Unix()}
+	b, _ := json.Marshal(out)
+	return string(b), nil
+}
+
 func stubQuoted(kind, snippet string) *waE2E.Message {
 	switch kind {
 	case "image":

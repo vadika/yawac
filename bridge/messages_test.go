@@ -242,3 +242,22 @@ func TestSendLocationBadJID(t *testing.T) {
 		t.Fatal("expected parse error")
 	}
 }
+
+func TestSendContactUnpaired(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/sc.db")
+	defer c.Close()
+	vcard := "BEGIN:VCARD\nVERSION:3.0\nFN:Anna\nTEL;type=CELL;waid=12345:+12345\nEND:VCARD"
+	_, err := c.SendContact("1234@s.whatsapp.net", vcard, "Anna", 0)
+	if err == nil {
+		t.Fatal("expected error on unpaired client")
+	}
+}
+
+func TestSendContactBadJID(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/sc2.db")
+	defer c.Close()
+	_, err := c.SendContact("not a jid", "BEGIN:VCARD\nEND:VCARD", "X", 0)
+	if err == nil {
+		t.Fatal("expected parse error")
+	}
+}
