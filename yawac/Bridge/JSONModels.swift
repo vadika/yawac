@@ -171,7 +171,10 @@ struct BridgeGroupModel: Codable, Identifiable {
     // without re-building the whole struct. The decoder still treats
     // missing/false payloads as `false`.
     var joinApprovalMode: Bool
-    let ephemeralExpirationSeconds: Int32
+    // `var` so the disappearing-messages inspector row can optimistically
+    // apply a new timer (mirrors the `joinApprovalMode` pattern). Cold
+    // payloads default to 0 via the decoder.
+    var ephemeralExpirationSeconds: Int32
 
     enum CodingKeys: String, CodingKey {
         case jid, name, topic
