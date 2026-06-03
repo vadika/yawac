@@ -101,6 +101,10 @@ private extension BridgeMessage {
                       media: nil,
                       poll: nil,
                       quoted: nil,
-                      isForwarded: false)
+                      isForwarded: false,
+                      location: nil,
+                      locationSequence: nil,
+                      contact: nil,
+                      isViewOnce: false)
     }
 }
