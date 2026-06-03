@@ -12,12 +12,22 @@ relevant context lingers).
 
 - ☐ **Status / Stories** — view + post (whatsmeow supports).
 - ☐ **Calls** — voice/video. Out of scope (companion-device limit).
-- ✅ **Polls — create** — composer paperclip menu opens a sheet
-  (question + 2–12 options + multi-select toggle); bridge wraps
-  `BuildPollCreation` + `SendMessage`; optimistic bubble + persistence
-  via existing `PersistedMessage.pollJSON`. Shipped 2026-06-02.
-- ◐ **Stickers** — incoming render works; need pack browsing + send from
-  pack.
+- ◐ **Polls** — create (composer paperclip → question + 2–12
+  options + multi-select toggle) and vote (single + multi cast)
+  shipped 2026-06-02; vote tallies + voter-by-option render in the
+  bubble.
+  Gaps:
+    - ☐ Cross-device own-vote re-render from
+      `HistoricalPollVote` event (after history sync the user's
+      own selection may show empty until they vote again).
+    - ☐ Anonymous polls — whatsmeow exposes no toggle; spec unclear
+      if WhatsApp protocol supports it for mobile clients.
+- ◐ **Stickers** — incoming render works; bridge `SendImage`-style
+  outbound send wired for the sticker `*.webp` payload, but no UI
+  to pick / send from a sticker pack.
+  Gaps:
+    - ☐ Pack browser + tap-to-send from the composer.
+    - ☐ Recents / favorites.
 - ◐ **Location sharing** — static MapKit picker (search + current
   location via delegate one-shot) shipped in v0.8.0. Inbound
   LiveLocation renders with last known coord + "LIVE" badge.
@@ -68,10 +78,19 @@ relevant context lingers).
 
 ## Search
 
-- ✅ **In-chat message search** — ⌘F find bar with ↑/↓ navigation,
+- ◐ **In-chat message search** — ⌘F find bar with ↑/↓ navigation,
   highlights, locale-aware tokenizer (FTS5).
-- ✅ **Global message search** — sidebar `⌘K` Messages section, tap-to-jump
+  Gaps:
+    - ☐ Filter by sender (groups only).
+    - ☐ Filter by message kind (text / image / video / voice /
+      document / link / location).
+    - ☐ Filter by date range.
+- ◐ **Global message search** — sidebar `⌘K` Messages section, tap-to-jump
   with brief flash highlight.
+  Gaps:
+    - ☐ Filter by chat.
+    - ☐ Filter by message kind.
+    - ☐ Filter by sender across chats.
 
 ## Groups
 
@@ -152,7 +171,26 @@ relevant context lingers).
 
 - ☐ **Linked-devices** view + manage.
 - ☐ **Privacy settings** (last seen / about / profile photo).
+- ☐ **Own profile edit** — change own display name (`SetPushName`),
+  avatar, and About from a settings sheet. No surface today; phone
+  is the only path.
 - ☐ **2FA** (account-level).
+
+## Messaging gaps (against shipped surface)
+
+- ☐ **Voice-note waveform render (inbound)** — outbound recorder
+  captures + transmits waveform bytes, but the inbound bubble shows
+  a plain `ProgressView` linear bar instead of the WhatsApp-style
+  bar visualization.
+- ☐ **Reply-privately to group message** — DM the sender quoting the
+  group message (right-click → Reply privately). WhatsApp surface.
+- ☐ **Cross-device-sync own outbound edits / reactions** — edits + own
+  reactions made on the phone don't always re-merge into yawac's
+  bubble without a fresh history sync.
+- ☐ **Self-chat ("Message yourself")** — WhatsApp surfaces a self
+  conversation at `<ownJID>@s.whatsapp.net`; yawac lists it but
+  composer / receipt path treats it as a generic 1:1. Worth a
+  smoke pass for any edge-case regressions.
 
 ## Cleanup gaps (smaller)
 
