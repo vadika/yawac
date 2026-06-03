@@ -458,9 +458,7 @@ struct MessageRow: View {
         case .location(let loc, let isLive, _):
             locationBubble(loc, isLive: isLive)
         case .contact(let c):
-            // TODO Task 24: real contact bubble. Placeholder for now.
-            Text("(contact) \(c.displayName)")
-                .font(.caption).foregroundStyle(.secondary)
+            contactBubble(c)
         case .system(let s):
             Text(s).font(.caption).foregroundStyle(.secondary)
         }
@@ -502,6 +500,38 @@ struct MessageRow: View {
             .clipShape(RoundedRectangle(cornerRadius: Theme.bubbleRadius))
         }
         .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private func contactBubble(_ card: ContactPayload) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                ZStack {
+                    Circle().fill(Theme.surface).frame(width: 36, height: 36)
+                    Text(String(card.displayName.prefix(1)))
+                        .scaledUI(15, weight: .semibold)
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(card.displayName).scaledUI(13).foregroundStyle(Theme.text)
+                    if !card.phone.isEmpty {
+                        Text(card.phone).scaledUI(11).foregroundStyle(Theme.textMuted)
+                    }
+                }
+            }
+            if let waid = VCardBuilder.parseWAID(card.vcard) {
+                Divider()
+                Button("Message on WhatsApp") {
+                    let jid = "\(waid)@s.whatsapp.net"
+                    onOpenChat?(jid)
+                }
+                .buttonStyle(.borderless)
+                .scaledUI(12, weight: .medium)
+            }
+        }
+        .padding(10)
+        .frame(width: 220, alignment: .leading)
+        .background(Theme.surface)
+        .clipShape(RoundedRectangle(cornerRadius: Theme.bubbleRadius))
     }
 
     @ViewBuilder
