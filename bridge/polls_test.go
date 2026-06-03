@@ -87,11 +87,11 @@ func TestExtractPollNilOnNonPoll(t *testing.T) {
 }
 
 func TestClassifyMessagePoll(t *testing.T) {
-	if got := classifyMessage(newPollMessage()); got != "poll" {
+	if got, _, _, _, _ := classifyMessage(newPollMessage()); got != "poll" {
 		t.Fatalf("classifyMessage(poll) = %q, want poll", got)
 	}
 	pu := &waE2E.Message{PollUpdateMessage: &waE2E.PollUpdateMessage{}}
-	if got := classifyMessage(pu); got != "poll_vote" {
+	if got, _, _, _, _ := classifyMessage(pu); got != "poll_vote" {
 		t.Fatalf("classifyMessage(poll_update) = %q, want poll_vote", got)
 	}
 }

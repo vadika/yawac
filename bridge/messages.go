@@ -463,52 +463,136 @@ func (c *Client) dispatchMessage(evt *events.Message) {
 		c.dispatchPollVote(evt)
 		return
 	}
+	kind, loc, locSeq, contact, isViewOnce := classifyMessage(evt.Message)
 	jm := JMessage{
-		ID:             evt.Info.ID,
-		ChatJID:        evt.Info.Chat.String(),
-		SenderJID:      evt.Info.Sender.String(),
-		SenderPushName: evt.Info.PushName,
-		FromMe:         evt.Info.IsFromMe,
-		Timestamp:      evt.Info.Timestamp.Unix(),
-		Kind:           classifyMessage(evt.Message),
+		ID:               evt.Info.ID,
+		ChatJID:          evt.Info.Chat.String(),
+		SenderJID:        evt.Info.Sender.String(),
+		SenderPushName:   evt.Info.PushName,
+		FromMe:           evt.Info.IsFromMe,
+		Timestamp:        evt.Info.Timestamp.Unix(),
+		Kind:             kind,
+		Location:         loc,
+		LocationSequence: locSeq,
+		Contact:          contact,
+		IsViewOnce:       isViewOnce,
 	}
+	// After unwrapping view-once, media + text + quoted may live inside
+	// the wrapped Message. Resolve the effective payload once and use it
+	// for every per-kind getter below.
+	inner := unwrapViewOnce(evt.Message)
 	switch {
-	case evt.Message.GetConversation() != "":
-		jm.Text = evt.Message.GetConversation()
-	case evt.Message.GetExtendedTextMessage() != nil:
-		jm.Text = evt.Message.GetExtendedTextMessage().GetText()
+	case inner.GetConversation() != "":
+		jm.Text = inner.GetConversation()
+	case inner.GetExtendedTextMessage() != nil:
+		jm.Text = inner.GetExtendedTextMessage().GetText()
 	}
-	if ctx := contextInfoFromMessage(evt.Message); ctx != nil && ctx.GetStanzaID() != "" {
+	if ctx := contextInfoFromMessage(inner); ctx != nil && ctx.GetStanzaID() != "" {
+		qKind, _, _, _, _ := classifyMessage(ctx.GetQuotedMessage())
 		jm.Quoted = &JQuoted{
 			MessageID: ctx.GetStanzaID(),
 			SenderJID: ctx.GetParticipant(),
 			FromMe:    isFromMe(c, ctx.GetParticipant()),
-			Kind:      classifyMessage(ctx.GetQuotedMessage()),
+			Kind:      qKind,
 			Snippet:   extractSnippet(ctx.GetQuotedMessage()),
 		}
 	}
-	if ctx := contextInfoFromMessage(evt.Message); ctx != nil && ctx.GetIsForwarded() {
+	if ctx := contextInfoFromMessage(inner); ctx != nil && ctx.GetIsForwarded() {
 		jm.IsForwarded = true
 	}
-	if m := evt.Message.GetImageMessage(); m != nil {
+	if m := inner.GetImageMessage(); m != nil {
 		jm.Media = mediaFromImage(m)
-	} else if m := evt.Message.GetVideoMessage(); m != nil {
+	} else if m := inner.GetVideoMessage(); m != nil {
 		jm.Media = mediaFromVideo(m)
-	} else if m := evt.Message.GetAudioMessage(); m != nil {
+	} else if m := inner.GetAudioMessage(); m != nil {
 		jm.Media = mediaFromAudio(m)
-	} else if m := evt.Message.GetDocumentMessage(); m != nil {
+	} else if m := inner.GetDocumentMessage(); m != nil {
 		jm.Media = mediaFromDocument(m)
-	} else if m := evt.Message.GetStickerMessage(); m != nil {
+	} else if m := inner.GetStickerMessage(); m != nil {
 		jm.Media = mediaFromSticker(m)
 	}
-	if p := extractPoll(evt.Message); p != nil {
+	if p := extractPoll(inner); p != nil {
 		jm.Poll = p
 	}
 	b, _ := json.Marshal(jm)
 	c.dispatch("Message", string(b))
 }
 
-func classifyMessage(m *waE2E.Message) string {
+// unwrapViewOnce returns the inner Message of a ViewOnceMessageV2 /
+// V2Extension wrapper, or m itself when no wrapper is present.
+// classifyMessage performs the same unwrap internally; this helper is
+// for callers that also need to reach into the inner payload (media,
+// text, context-info) after asking for the kind.
+func unwrapViewOnce(m *waE2E.Message) *waE2E.Message {
+	if m == nil {
+		return nil
+	}
+	if vo := m.GetViewOnceMessageV2(); vo != nil && vo.Message != nil {
+		return vo.Message
+	}
+	if voe := m.GetViewOnceMessageV2Extension(); voe != nil && voe.Message != nil {
+		return voe.Message
+	}
+	return m
+}
+
+// classifyMessage maps an inbound *waE2E.Message to its kind +
+// any structured payload (location, contact) + the view-once flag.
+// Unwraps ViewOnceMessageV2 / V2Extension transparently and sets
+// isViewOnce=true on the envelope so downstream renderers can mark
+// the bubble without a second pass.
+func classifyMessage(m *waE2E.Message) (
+	kind string,
+	loc *JLocationPayload,
+	locSeq int64,
+	contact *JContactPayload,
+	isViewOnce bool,
+) {
+	if m == nil {
+		return "system", nil, 0, nil, false
+	}
+	// Unwrap view-once first. Both V2 and the V2Extension carry the
+	// real payload in their inner Message; classify against that.
+	if vo := m.GetViewOnceMessageV2(); vo != nil && vo.Message != nil {
+		isViewOnce = true
+		m = vo.Message
+	} else if voe := m.GetViewOnceMessageV2Extension(); voe != nil && voe.Message != nil {
+		isViewOnce = true
+		m = voe.Message
+	}
+
+	switch {
+	case m.GetLocationMessage() != nil:
+		lm := m.GetLocationMessage()
+		return "location", &JLocationPayload{
+			Lat:     lm.GetDegreesLatitude(),
+			Lng:     lm.GetDegreesLongitude(),
+			Name:    lm.GetName(),
+			Address: lm.GetAddress(),
+		}, 0, nil, isViewOnce
+	case m.GetLiveLocationMessage() != nil:
+		ll := m.GetLiveLocationMessage()
+		return "location_live", &JLocationPayload{
+			Lat: ll.GetDegreesLatitude(),
+			Lng: ll.GetDegreesLongitude(),
+		}, ll.GetSequenceNumber(), nil, isViewOnce
+	case m.GetContactMessage() != nil:
+		cm := m.GetContactMessage()
+		return "contact", nil, 0, &JContactPayload{
+			Vcard:       cm.GetVcard(),
+			DisplayName: cm.GetDisplayName(),
+		}, isViewOnce
+	}
+	return classifyKindUnwrapped(m), nil, 0, nil, isViewOnce
+}
+
+// classifyKindUnwrapped is the legacy kind-detection switch — it
+// assumes the caller has already unwrapped any view-once wrappers
+// and that the location / contact arms in classifyMessage didn't
+// fire. Kept as a helper so the quoted-message path and historical
+// dispatchers can still ask "what kind is this?" without caring
+// about the payload accessors.
+func classifyKindUnwrapped(m *waE2E.Message) string {
 	switch {
 	case m.GetConversation() != "":
 		return "text"
@@ -526,6 +610,10 @@ func classifyMessage(m *waE2E.Message) string {
 		return "sticker"
 	case m.GetLocationMessage() != nil:
 		return "location"
+	case m.GetLiveLocationMessage() != nil:
+		return "location_live"
+	case m.GetContactMessage() != nil:
+		return "contact"
 	case m.GetReactionMessage() != nil:
 		return "reaction"
 	case isPollCreation(m):

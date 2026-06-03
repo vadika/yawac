@@ -261,3 +261,77 @@ func TestSendContactBadJID(t *testing.T) {
 		t.Fatal("expected parse error")
 	}
 }
+
+func TestClassifyInboundLocation(t *testing.T) {
+	m := &waE2E.Message{
+		LocationMessage: &waE2E.LocationMessage{
+			DegreesLatitude:  proto.Float64(60.17),
+			DegreesLongitude: proto.Float64(24.94),
+			Name:             proto.String("Senate Square"),
+			Address:          proto.String("Helsinki"),
+		},
+	}
+	kind, loc, _, _, _ := classifyMessage(m)
+	if kind != "location" {
+		t.Fatalf("kind=%s", kind)
+	}
+	if loc == nil || loc.Lat != 60.17 || loc.Lng != 24.94 {
+		t.Fatalf("loc=%+v", loc)
+	}
+	if loc.Name != "Senate Square" || loc.Address != "Helsinki" {
+		t.Fatalf("loc name/address mismatch: %+v", loc)
+	}
+}
+
+func TestClassifyInboundLiveLocation(t *testing.T) {
+	m := &waE2E.Message{
+		LiveLocationMessage: &waE2E.LiveLocationMessage{
+			DegreesLatitude:  proto.Float64(60.17),
+			DegreesLongitude: proto.Float64(24.94),
+			SequenceNumber:   proto.Int64(42),
+		},
+	}
+	kind, loc, seq, _, _ := classifyMessage(m)
+	if kind != "location_live" || seq != 42 {
+		t.Fatalf("kind=%s seq=%d", kind, seq)
+	}
+	if loc == nil || loc.Lat != 60.17 || loc.Lng != 24.94 {
+		t.Fatalf("loc=%+v", loc)
+	}
+}
+
+func TestClassifyInboundContact(t *testing.T) {
+	m := &waE2E.Message{
+		ContactMessage: &waE2E.ContactMessage{
+			DisplayName: proto.String("Anna"),
+			Vcard:       proto.String("BEGIN:VCARD\nEND:VCARD"),
+		},
+	}
+	kind, _, _, contact, _ := classifyMessage(m)
+	if kind != "contact" {
+		t.Fatalf("kind=%s", kind)
+	}
+	if contact == nil || contact.DisplayName != "Anna" {
+		t.Fatalf("contact=%+v", contact)
+	}
+	if contact.Vcard != "BEGIN:VCARD\nEND:VCARD" {
+		t.Fatalf("vcard mismatch: %q", contact.Vcard)
+	}
+}
+
+func TestClassifyInboundViewOnce(t *testing.T) {
+	m := &waE2E.Message{
+		ViewOnceMessageV2: &waE2E.FutureProofMessage{
+			Message: &waE2E.Message{
+				ImageMessage: &waE2E.ImageMessage{},
+			},
+		},
+	}
+	kind, _, _, _, isViewOnce := classifyMessage(m)
+	if kind != "image" {
+		t.Fatalf("expected unwrap to image, got %s", kind)
+	}
+	if !isViewOnce {
+		t.Fatal("expected isViewOnce=true after unwrap")
+	}
+}
