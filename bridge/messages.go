@@ -455,6 +455,18 @@ func (c *Client) dispatchMessage(evt *events.Message) {
 			})
 			c.dispatch("MessageEdited", string(b))
 			return
+		case waE2E.ProtocolMessage_EPHEMERAL_SETTING:
+			// 1:1 disappearing-messages toggle. The wrapping Message is
+			// a control carrier; suppress the regular MessageReceived
+			// path and surface a dedicated EphemeralTimerChanged event.
+			b, _ := json.Marshal(JEphemeralTimerChanged{
+				ChatJID:   evt.Info.Chat.String(),
+				Seconds:   int32(pm.GetEphemeralExpiration()),
+				ActorJID:  evt.Info.Sender.String(),
+				Timestamp: evt.Info.Timestamp.Unix(),
+			})
+			c.dispatch("EphemeralTimerChanged", string(b))
+			return
 		}
 	}
 	// Poll updates (votes) are not displayed as chat entries — they

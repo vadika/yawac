@@ -177,6 +177,18 @@ type JJoinApprovalModeChanged struct {
 	Timestamp int64  `json:"timestamp"`
 }
 
+// JEphemeralTimerChanged carries a disappearing-messages timer change for
+// a chat. Seconds == 0 means "off" (timer cleared). Fan-out source is
+// either a group GroupInfo with non-nil Ephemeral, or a 1:1 inbound
+// ProtocolMessage of type EPHEMERAL_SETTING (the carrier message that
+// otherwise would render as a noise bubble).
+type JEphemeralTimerChanged struct {
+	ChatJID   string `json:"chat_jid"`
+	Seconds   int32  `json:"seconds"`
+	ActorJID  string `json:"actor_jid,omitempty"`
+	Timestamp int64  `json:"timestamp"`
+}
+
 // JGroupParticipantsChanged carries a single action verb (add / remove /
 // promote / demote) and the affected participant JIDs. A single
 // whatsmeow events.GroupInfo can carry more than one — the dispatcher

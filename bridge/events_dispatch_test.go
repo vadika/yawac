@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	waE2E "go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/proto/waSyncAction"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
@@ -443,5 +444,74 @@ func TestDispatchGroupInfoFiresBothNameAndApprovalMode(t *testing.T) {
 	}
 	if findInSink(sink, "JoinApprovalModeChanged") == nil {
 		t.Error("missing JoinApprovalModeChanged")
+	}
+}
+
+// TestDispatchGroupInfoFiresEphemeralTimerChangedOnGroupChange verifies
+// that when whatsmeow surfaces a GroupInfo carrying a non-nil Ephemeral
+// (disappearing messages change), dispatchGroupInfo fans out an
+// EphemeralTimerChanged event with the new disappearing-timer seconds.
+func TestDispatchGroupInfoFiresEphemeralTimerChangedOnGroupChange(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/gi_eph.db")
+	defer c.Close()
+	sink := newRecSink()
+	c.SetEventSink(sink)
+	chat := types.JID{User: "888", Server: types.GroupServer}
+	sender, _ := types.ParseJID("999@s.whatsapp.net")
+	c.dispatchGroupInfo(&events.GroupInfo{
+		JID:    chat,
+		Sender: &sender,
+		Ephemeral: &types.GroupEphemeral{
+			IsEphemeral:       true,
+			DisappearingTimer: 86400,
+		},
+		Timestamp: time.Unix(1700000000, 0),
+	})
+	ev := sink.wait(t, "EphemeralTimerChanged", time.Second)
+	if !strings.Contains(ev.payload, `"seconds":86400`) {
+		t.Errorf("payload missing seconds: %s", ev.payload)
+	}
+	if !strings.Contains(ev.payload, `"chat_jid":"888@g.us"`) {
+		t.Errorf("payload missing chat_jid: %s", ev.payload)
+	}
+	if !strings.Contains(ev.payload, `"actor_jid":"999@s.whatsapp.net"`) {
+		t.Errorf("payload missing actor_jid: %s", ev.payload)
+	}
+}
+
+// TestDispatchEphemeralTimerChangedOnDirectMessage verifies that a 1:1
+// inbound carrier message whose ProtocolMessage type is EPHEMERAL_SETTING
+// is intercepted into an EphemeralTimerChanged event and the regular
+// MessageReceived ("Message") dispatch is suppressed.
+func TestDispatchEphemeralTimerChangedOnDirectMessage(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/dm_eph.db")
+	defer c.Close()
+	sink := newRecSink()
+	c.SetEventSink(sink)
+	chat, _ := types.ParseJID("12345@s.whatsapp.net")
+	sender, _ := types.ParseJID("12345@s.whatsapp.net")
+	c.dispatchMessage(&events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{Chat: chat, Sender: sender},
+			ID:            "x",
+			Timestamp:     time.Unix(1700000001, 0),
+		},
+		Message: &waE2E.Message{
+			ProtocolMessage: &waE2E.ProtocolMessage{
+				Type:                waE2E.ProtocolMessage_EPHEMERAL_SETTING.Enum(),
+				EphemeralExpiration: proto.Uint32(604800),
+			},
+		},
+	})
+	ev := sink.wait(t, "EphemeralTimerChanged", time.Second)
+	if !strings.Contains(ev.payload, `"seconds":604800`) {
+		t.Errorf("payload missing seconds: %s", ev.payload)
+	}
+	if !strings.Contains(ev.payload, `"chat_jid":"12345@s.whatsapp.net"`) {
+		t.Errorf("payload missing chat_jid: %s", ev.payload)
+	}
+	// Carrier message must be suppressed — no regular Message event.
+	if findInSink(sink, "Message") != nil {
+		t.Error("expected EphemeralSetting carrier message to be suppressed")
 	}
 }
