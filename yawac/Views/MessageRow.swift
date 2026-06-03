@@ -456,9 +456,7 @@ struct MessageRow: View {
         case .poll(let q, let options, let selectable):
             pollView(question: q, options: options, selectableCount: selectable)
         case .location(let loc, let isLive, _):
-            // TODO Task 24: real location bubble. Placeholder for now.
-            Text(isLive ? "(live location) \(loc.name)" : "(location) \(loc.name)")
-                .font(.caption).foregroundStyle(.secondary)
+            locationBubble(loc, isLive: isLive)
         case .contact(let c):
             // TODO Task 24: real contact bubble. Placeholder for now.
             Text("(contact) \(c.displayName)")
@@ -466,6 +464,44 @@ struct MessageRow: View {
         case .system(let s):
             Text(s).font(.caption).foregroundStyle(.secondary)
         }
+    }
+
+    @ViewBuilder
+    private func locationBubble(_ loc: LocationPayload, isLive: Bool) -> some View {
+        Button {
+            if let url = URL(string: "maps://?ll=\(loc.lat),\(loc.lng)") {
+                NSWorkspace.shared.open(url)
+            }
+        } label: {
+            VStack(alignment: .leading, spacing: 0) {
+                ZStack(alignment: .topTrailing) {
+                    MapSnapshotImage(lat: loc.lat, lng: loc.lng)
+                    if isLive {
+                        Text("🔴 LIVE")
+                            .scaledMono(10, weight: .semibold)
+                            .padding(.horizontal, 4).padding(.vertical, 2)
+                            .background(.red.opacity(0.8), in: Capsule())
+                            .foregroundStyle(.white)
+                            .padding(6)
+                    }
+                }
+                .frame(width: 220, height: 120)
+                VStack(alignment: .leading, spacing: 2) {
+                    if !loc.name.isEmpty {
+                        Text(loc.name).scaledUI(13).foregroundStyle(Theme.text)
+                    }
+                    if !loc.address.isEmpty {
+                        Text(loc.address).scaledUI(11)
+                            .foregroundStyle(Theme.textMuted)
+                    }
+                }
+                .padding(8)
+            }
+            .frame(width: 220)
+            .background(Theme.surface)
+            .clipShape(RoundedRectangle(cornerRadius: Theme.bubbleRadius))
+        }
+        .buttonStyle(.plain)
     }
 
     @ViewBuilder
@@ -931,5 +967,27 @@ struct MessageRow: View {
 
     private func statusColor(_ s: UIMessage.Status) -> Color {
         s == .read || s == .played ? Theme.accent : Theme.textFaint
+    }
+}
+
+private struct MapSnapshotImage: View {
+    let lat: Double
+    let lng: Double
+    @State private var image: NSImage?
+
+    var body: some View {
+        Group {
+            if let img = image {
+                Image(nsImage: img).resizable().aspectRatio(contentMode: .fill)
+            } else {
+                ZStack {
+                    Rectangle().fill(Theme.surface)
+                    ProgressView().controlSize(.small)
+                }
+            }
+        }
+        .task(id: "\(lat),\(lng)") {
+            image = await MapSnapshotCache.shared.snapshot(lat: lat, lng: lng)
+        }
     }
 }
