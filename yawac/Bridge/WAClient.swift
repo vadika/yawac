@@ -52,6 +52,10 @@ class WAClient: PhoneValidating, LIDResolving {
                                      on: Bool,
                                      actorJID: String,
                                      timestamp: Int64)
+        case ephemeralTimerChanged(chatJID: String,
+                                   seconds: Int32,
+                                   actorJID: String,
+                                   timestamp: Int64)
         case messagePinned(chatJID: String, targetMessageID: String, senderJID: String, pinned: Bool, timestamp: Int64)
         case chatArchived(chatJID: String, archived: Bool, timestamp: Int64)
         case chatDeleted(chatJID: String, timestamp: Int64)
@@ -1050,6 +1054,25 @@ class WAClient: PhoneValidating, LIDResolving {
                                                 on: j.on,
                                                 actorJID: j.actorJID ?? "",
                                                 timestamp: j.timestamp)
+            }
+        case "EphemeralTimerChanged":
+            struct E: Codable {
+                let chatJID: String
+                let seconds: Int32
+                let actorJID: String?
+                let timestamp: Int64
+                enum CodingKeys: String, CodingKey {
+                    case chatJID = "chat_jid"
+                    case seconds
+                    case actorJID = "actor_jid"
+                    case timestamp
+                }
+            }
+            if let e = try? dec.decode(E.self, from: data) {
+                return .ephemeralTimerChanged(chatJID: e.chatJID,
+                                              seconds: e.seconds,
+                                              actorJID: e.actorJID ?? "",
+                                              timestamp: e.timestamp)
             }
         default:
             break
