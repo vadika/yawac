@@ -634,7 +634,9 @@ struct MessageRow: View {
         VStack(alignment: .leading, spacing: 2) {
             switch baseStyle {
             case .body:
-                Text(richText(from: displayed)).textSelection(.enabled)
+                Text(richText(from: displayed))
+                    .scaledUI(13)
+                    .textSelection(.enabled)
             case .caption:
                 Text(displayed)
                     .scaledUI(12)
