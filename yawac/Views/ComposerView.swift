@@ -31,6 +31,8 @@ struct ComposerView: View {
     @State private var recorder = VoiceRecorder()
     @State private var wantsCancel = false
     @State private var pasteMonitor: Any?
+    @State private var showLocationPicker = false
+    @State private var showContactPicker = false
 
     var body: some View {
         VStack(spacing: 8) {
@@ -59,6 +61,48 @@ struct ComposerView: View {
         }
         .onAppear { installPasteMonitor() }
         .onDisappear { removePasteMonitor() }
+        .sheet(isPresented: $showLocationPicker) {
+            LocationPickerSheet(
+                model: LocationPickerSheetModel(),
+                onSend: { payload in
+                    vm.stageLocation(payload)
+                }
+            )
+        }
+        .sheet(isPresented: $showContactPicker) {
+            ContactPickerSheet(
+                model: ContactPickerSheetModel(contacts: contactsForPicker),
+                onSend: { payload in
+                    vm.stageContact(payload)
+                }
+            )
+        }
+    }
+
+    /// Contact list passed to `ContactPickerSheet`. Mirrors the dedup
+    /// pattern from `ChatListView.contactsForPicker`: walk
+    /// `session.contactNames`, prefer the PN form over `@lid` when both
+    /// are known, and drop self.
+    private var contactsForPicker: [BridgeContact] {
+        guard let client = session.client else { return [] }
+        let selfKey = JIDNormalize.key(client.ownJID, client: client)
+        var byKey: [String: BridgeContact] = [:]
+        for (jid, name) in session.contactNames {
+            let key = JIDNormalize.key(jid, client: client)
+            if key == selfKey { continue }
+            if let existing = byKey[key] {
+                if existing.jid.hasSuffix("@lid"), !key.hasSuffix("@lid") {
+                    byKey[key] = BridgeContact(
+                        jid: key, name: name,
+                        pushName: nil, fullName: nil, businessName: nil)
+                }
+                continue
+            }
+            byKey[key] = BridgeContact(
+                jid: key, name: name,
+                pushName: nil, fullName: nil, businessName: nil)
+        }
+        return Array(byKey.values)
     }
 
     /// Local NSEvent monitor watching for ⌘V while the composer is
@@ -157,6 +201,16 @@ struct ComposerView: View {
                     attachFile()
                 } label: {
                     Label("Attach file…", systemImage: "paperclip")
+                }
+                Button {
+                    showLocationPicker = true
+                } label: {
+                    Label("Send location…", systemImage: "location")
+                }
+                Button {
+                    showContactPicker = true
+                } label: {
+                    Label("Send contact…", systemImage: "person.crop.circle")
                 }
                 Button {
                     vm.showPollComposer = true

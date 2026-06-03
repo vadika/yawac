@@ -1319,6 +1319,22 @@ final class ConversationViewModel {
         pendingAttachments.removeAll { $0.id == id }
     }
 
+    /// Stage a chosen location in the composer. Filled in T22 — will append
+    /// a `.location` case to `pendingAttachments` once the staging surface
+    /// supports non-file kinds.
+    func stageLocation(_ p: LocationPayload) {
+        // Filled in T22 — appends .location case to pendingAttachments.
+        _ = p
+    }
+
+    /// Stage a chosen contact in the composer. Filled in T22 — will append
+    /// a `.contact` case to `pendingAttachments` once the staging surface
+    /// supports non-file kinds.
+    func stageContact(_ p: ContactPayload) {
+        // Filled in T22 — appends .contact case to pendingAttachments.
+        _ = p
+    }
+
     /// Send all staged attachments, clearing the composer. The typed caption
     /// rides on the first attachment only; the rest send caption-less.
     func sendPendingAttachments() async {
