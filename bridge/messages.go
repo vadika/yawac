@@ -182,8 +182,10 @@ func (c *Client) MarkRead(chatJID, senderJID, msgIDsJSON string) error {
 // ContextInfo whose MentionedJID array carries the pinged JIDs (matches
 // WhatsApp's wire format for @mentions). The JSON-string param shape is
 // required because gomobile silently drops methods with []string params.
-// Pass "" (or "[]") when there are no mentions. Returns JSON of JSendResult.
-func (c *Client) SendText(chatJID, body string, mentionedJIDsJSON string) (string, error) {
+// Pass "" (or "[]") when there are no mentions. When ephemeralSec > 0,
+// wraps in EphemeralMessage so disappearing-message retention applies.
+// Returns JSON of JSendResult.
+func (c *Client) SendText(chatJID, body string, mentionedJIDsJSON string, ephemeralSec int32) (string, error) {
 	if c.wa == nil {
 		return "", errors.New("client closed")
 	}
@@ -200,15 +202,16 @@ func (c *Client) SendText(chatJID, body string, mentionedJIDsJSON string) (strin
 			return "", fmt.Errorf("parse mentionedJIDs: %w", err)
 		}
 	}
-	var msg *waE2E.Message
+	var inner *waE2E.Message
 	if len(mentionedJIDs) == 0 {
-		msg = &waE2E.Message{Conversation: proto.String(body)}
+		inner = &waE2E.Message{Conversation: proto.String(body)}
 	} else {
-		msg = &waE2E.Message{ExtendedTextMessage: &waE2E.ExtendedTextMessage{
+		inner = &waE2E.Message{ExtendedTextMessage: &waE2E.ExtendedTextMessage{
 			Text:        proto.String(body),
 			ContextInfo: &waE2E.ContextInfo{MentionedJID: mentionedJIDs},
 		}}
 	}
+	msg := wrapForChat(inner, ephemeralSec, false)
 	resp, err := c.wa.SendMessage(context.Background(), jid, msg)
 	if err != nil {
 		return "", fmt.Errorf("send: %w", err)

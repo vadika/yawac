@@ -94,8 +94,10 @@ func mimeFromExt(filePath string) string {
 }
 
 // SendImage reads a local file, uploads it to WhatsApp, and sends an
-// ImageMessage to the given chat. Returns JSON of JSendResult.
-func (c *Client) SendImage(chatJID, filePath, caption string) (string, error) {
+// ImageMessage to the given chat. When ephemeralSec > 0, wraps in
+// EphemeralMessage; when viewOnce is true, wraps in ViewOnceMessageV2
+// (and both compose if both are set). Returns JSON of JSendResult.
+func (c *Client) SendImage(chatJID, filePath, caption string, ephemeralSec int32, viewOnce bool) (string, error) {
 	if c.wa == nil {
 		return "", errors.New("client closed")
 	}
@@ -114,7 +116,7 @@ func (c *Client) SendImage(chatJID, filePath, caption string) (string, error) {
 	}
 
 	mime := detectImageMime(data, filePath)
-	msg := &waE2E.Message{ImageMessage: &waE2E.ImageMessage{
+	inner := &waE2E.Message{ImageMessage: &waE2E.ImageMessage{
 		Caption:       proto.String(caption),
 		URL:           &up.URL,
 		DirectPath:    &up.DirectPath,
@@ -124,6 +126,7 @@ func (c *Client) SendImage(chatJID, filePath, caption string) (string, error) {
 		FileSHA256:    up.FileSHA256,
 		FileLength:    proto.Uint64(uint64(len(data))),
 	}}
+	msg := wrapForChat(inner, ephemeralSec, viewOnce)
 	resp, err := c.wa.SendMessage(context.Background(), jid, msg)
 	if err != nil {
 		return "", fmt.Errorf("send image: %w", err)
@@ -133,7 +136,9 @@ func (c *Client) SendImage(chatJID, filePath, caption string) (string, error) {
 }
 
 // SendVideo uploads filePath as a VideoMessage. Mime auto-detected.
-func (c *Client) SendVideo(chatJID, filePath, caption string) (string, error) {
+// When ephemeralSec > 0, wraps in EphemeralMessage; when viewOnce is
+// true, wraps in ViewOnceMessageV2 (both compose if both are set).
+func (c *Client) SendVideo(chatJID, filePath, caption string, ephemeralSec int32, viewOnce bool) (string, error) {
 	if c.wa == nil {
 		return "", errors.New("client closed")
 	}
@@ -152,7 +157,7 @@ func (c *Client) SendVideo(chatJID, filePath, caption string) (string, error) {
 	}
 
 	mime := detectMime(data, filePath, "video/mp4")
-	msg := &waE2E.Message{VideoMessage: &waE2E.VideoMessage{
+	inner := &waE2E.Message{VideoMessage: &waE2E.VideoMessage{
 		Caption:       proto.String(caption),
 		URL:           &up.URL,
 		DirectPath:    &up.DirectPath,
@@ -162,6 +167,7 @@ func (c *Client) SendVideo(chatJID, filePath, caption string) (string, error) {
 		FileSHA256:    up.FileSHA256,
 		FileLength:    proto.Uint64(uint64(len(data))),
 	}}
+	msg := wrapForChat(inner, ephemeralSec, viewOnce)
 	resp, err := c.wa.SendMessage(context.Background(), jid, msg)
 	if err != nil {
 		return "", fmt.Errorf("send video: %w", err)
@@ -171,7 +177,8 @@ func (c *Client) SendVideo(chatJID, filePath, caption string) (string, error) {
 }
 
 // SendAudio uploads filePath as an AudioMessage. Mime auto-detected.
-func (c *Client) SendAudio(chatJID, filePath string) (string, error) {
+// When ephemeralSec > 0, wraps in EphemeralMessage.
+func (c *Client) SendAudio(chatJID, filePath string, ephemeralSec int32) (string, error) {
 	if c.wa == nil {
 		return "", errors.New("client closed")
 	}
@@ -190,7 +197,7 @@ func (c *Client) SendAudio(chatJID, filePath string) (string, error) {
 	}
 
 	mime := detectMime(data, filePath, "audio/ogg")
-	msg := &waE2E.Message{AudioMessage: &waE2E.AudioMessage{
+	inner := &waE2E.Message{AudioMessage: &waE2E.AudioMessage{
 		URL:           &up.URL,
 		DirectPath:    &up.DirectPath,
 		MediaKey:      up.MediaKey,
@@ -199,6 +206,7 @@ func (c *Client) SendAudio(chatJID, filePath string) (string, error) {
 		FileSHA256:    up.FileSHA256,
 		FileLength:    proto.Uint64(uint64(len(data))),
 	}}
+	msg := wrapForChat(inner, ephemeralSec, false)
 	resp, err := c.wa.SendMessage(context.Background(), jid, msg)
 	if err != nil {
 		return "", fmt.Errorf("send audio: %w", err)
@@ -213,8 +221,8 @@ func (c *Client) SendAudio(chatJID, filePath string) (string, error) {
 // base64-encoded 64-byte 6-bit log-meter digest WhatsApp uses to draw
 // the bubble's waveform. PTT=true is what makes phones render the
 // voice-bubble UI (play button + waveform) instead of a plain audio
-// file attachment.
-func (c *Client) SendVoiceNote(chatJID, filePath string, durationSec int32, waveformB64 string) (string, error) {
+// file attachment. When ephemeralSec > 0, wraps in EphemeralMessage.
+func (c *Client) SendVoiceNote(chatJID, filePath string, durationSec int32, waveformB64 string, ephemeralSec int32) (string, error) {
 	if c.wa == nil {
 		return "", errors.New("client closed")
 	}
@@ -239,7 +247,7 @@ func (c *Client) SendVoiceNote(chatJID, filePath string, durationSec int32, wave
 	mime := "audio/ogg; codecs=opus"
 	seconds := uint32(durationSec)
 	ptt := true
-	msg := &waE2E.Message{AudioMessage: &waE2E.AudioMessage{
+	inner := &waE2E.Message{AudioMessage: &waE2E.AudioMessage{
 		URL:           &up.URL,
 		DirectPath:    &up.DirectPath,
 		MediaKey:      up.MediaKey,
@@ -251,6 +259,7 @@ func (c *Client) SendVoiceNote(chatJID, filePath string, durationSec int32, wave
 		PTT:           &ptt,
 		Waveform:      waveform,
 	}}
+	msg := wrapForChat(inner, ephemeralSec, false)
 	resp, err := c.wa.SendMessage(context.Background(), jid, msg)
 	if err != nil {
 		return "", fmt.Errorf("send voice note: %w", err)
@@ -260,8 +269,9 @@ func (c *Client) SendVoiceNote(chatJID, filePath string, durationSec int32, wave
 }
 
 // SendDocument uploads filePath as a DocumentMessage with caption + filename.
-// Mime auto-detected; falls back to application/octet-stream.
-func (c *Client) SendDocument(chatJID, filePath, caption string) (string, error) {
+// Mime auto-detected; falls back to application/octet-stream. When
+// ephemeralSec > 0, wraps in EphemeralMessage.
+func (c *Client) SendDocument(chatJID, filePath, caption string, ephemeralSec int32) (string, error) {
 	if c.wa == nil {
 		return "", errors.New("client closed")
 	}
@@ -281,7 +291,7 @@ func (c *Client) SendDocument(chatJID, filePath, caption string) (string, error)
 
 	mime := detectMime(data, filePath, "application/octet-stream")
 	fileName := filepath.Base(filePath)
-	msg := &waE2E.Message{DocumentMessage: &waE2E.DocumentMessage{
+	inner := &waE2E.Message{DocumentMessage: &waE2E.DocumentMessage{
 		Caption:       proto.String(caption),
 		FileName:      proto.String(fileName),
 		URL:           &up.URL,
@@ -292,6 +302,7 @@ func (c *Client) SendDocument(chatJID, filePath, caption string) (string, error)
 		FileSHA256:    up.FileSHA256,
 		FileLength:    proto.Uint64(uint64(len(data))),
 	}}
+	msg := wrapForChat(inner, ephemeralSec, false)
 	resp, err := c.wa.SendMessage(context.Background(), jid, msg)
 	if err != nil {
 		return "", fmt.Errorf("send document: %w", err)

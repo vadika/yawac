@@ -19,7 +19,7 @@ func TestSendTextRejectsBadJID(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer c.Close()
-	_, err = c.SendText("not-a-jid", "hi", "")
+	_, err = c.SendText("not-a-jid", "hi", "", 0)
 	if err == nil || !strings.Contains(err.Error(), "jid") {
 		t.Fatalf("want jid error, got %v", err)
 	}
