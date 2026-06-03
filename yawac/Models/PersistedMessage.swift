@@ -15,6 +15,22 @@ final class PersistedMessage {
     var mediaFileName: String?
     var mediaRefJSON: String?
     var pollJSON: String?
+    // View-once envelope (Sticker / Image / Video).
+    var isViewOnce: Bool = false
+    var viewOnceLocked: Bool = false
+    var viewOnceRevealedAt: Date? = nil
+    // Location (live + static). `locationIsLive` flips the kind to
+    // "location_live"; `locationSequence` is the live-update sequence
+    // emitted by WhatsApp's CDN-less live-location protocol.
+    var locationLat: Double? = nil
+    var locationLng: Double? = nil
+    var locationName: String? = nil
+    var locationAddress: String? = nil
+    var locationIsLive: Bool = false
+    var locationSequence: Int64? = nil
+    // Contact card (vCard payload + parsed display name).
+    var contactVCard: String? = nil
+    var contactDisplayName: String? = nil
     // Delivery state for fromMe messages: "sent" | "delivered" | "read" | "played".
     // Defaulted so existing rows migrate lightweight.
     var deliveryStatus: String = "sent"
@@ -58,6 +74,17 @@ final class PersistedMessage {
          mediaFileName: String? = nil,
          mediaRefJSON: String? = nil,
          pollJSON: String? = nil,
+         isViewOnce: Bool = false,
+         viewOnceLocked: Bool = false,
+         viewOnceRevealedAt: Date? = nil,
+         locationLat: Double? = nil,
+         locationLng: Double? = nil,
+         locationName: String? = nil,
+         locationAddress: String? = nil,
+         locationIsLive: Bool = false,
+         locationSequence: Int64? = nil,
+         contactVCard: String? = nil,
+         contactDisplayName: String? = nil,
          deliveryStatus: String = "sent",
          senderPushName: String? = nil,
          quotedMessageID: String? = nil,
@@ -84,6 +111,17 @@ final class PersistedMessage {
         self.mediaFileName = mediaFileName
         self.mediaRefJSON = mediaRefJSON
         self.pollJSON = pollJSON
+        self.isViewOnce = isViewOnce
+        self.viewOnceLocked = viewOnceLocked
+        self.viewOnceRevealedAt = viewOnceRevealedAt
+        self.locationLat = locationLat
+        self.locationLng = locationLng
+        self.locationName = locationName
+        self.locationAddress = locationAddress
+        self.locationIsLive = locationIsLive
+        self.locationSequence = locationSequence
+        self.contactVCard = contactVCard
+        self.contactDisplayName = contactDisplayName
         self.deliveryStatus = deliveryStatus
         self.senderPushName = senderPushName
         self.quotedMessageID = quotedMessageID
