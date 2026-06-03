@@ -34,8 +34,13 @@ final class LocationPickerSheetModel {
 
     @ObservationIgnored private var searchDebounce: Task<Void, Never>?
     @ObservationIgnored private var geocodeDebounce: Task<Void, Never>?
-    @ObservationIgnored private lazy var locationManager: CLLocationManager = {
-        CLLocationManager()
+    @ObservationIgnored private lazy var locationDelegate: LocationDelegateBox = {
+        let box = LocationDelegateBox()
+        let mgr = CLLocationManager()
+        mgr.delegate = box
+        mgr.desiredAccuracy = kCLLocationAccuracyHundredMeters
+        box.manager = mgr
+        return box
     }()
     @ObservationIgnored private lazy var geocoder = CLGeocoder()
 
@@ -85,47 +90,33 @@ final class LocationPickerSheetModel {
     }
 
     func useCurrentLocation() async {
-        let status = locationManager.authorizationStatus
+        let box = locationDelegate
+        guard let mgr = box.manager else { return }
+        // Trigger permission prompt if needed; delegate observes the
+        // resolved status and starts updates from there.
+        let status = mgr.authorizationStatus
         if status == .denied || status == .restricted {
             permissionDenied = true
             return
         }
-        if status == .notDetermined {
-            locationManager.requestWhenInUseAuthorization()
-            // Wait briefly for the permission prompt to resolve. CoreLocation
-            // delivers the authorization decision asynchronously; reading
-            // `.authorizationStatus` again immediately after the request
-            // returns the stale value.
-            for _ in 0..<10 {
-                try? await Task.sleep(nanoseconds: 200_000_000)
-                if locationManager.authorizationStatus != .notDetermined { break }
-            }
-        }
-        let status2 = locationManager.authorizationStatus
-        if status2 == .denied || status2 == .restricted {
+        // Request a one-shot fix via the delegate continuation.
+        inFlight = true
+        defer { inFlight = false }
+        let loc = await box.requestOneShot(timeoutSeconds: 8)
+        if let loc {
+            let coord = loc.coordinate
+            region = MKCoordinateRegion(
+                center: coord,
+                latitudinalMeters: 1000, longitudinalMeters: 1000)
+            selectedCoord = coord
+            error = nil
+            await reverseGeocode(coord: coord)
+        } else if mgr.authorizationStatus == .denied
+                    || mgr.authorizationStatus == .restricted {
             permissionDenied = true
-            return
+        } else {
+            error = "Couldn't get current location — try again."
         }
-        // Kick off a one-shot fix. `locationManager.location` is nil until
-        // the manager has had a chance to deliver a fix — a single sync
-        // read on first tap always returns nil and the map never moves.
-        // Start updates, poll up to ~3s for a coordinate, then stop.
-        locationManager.startUpdatingLocation()
-        defer { locationManager.stopUpdatingLocation() }
-        for _ in 0..<15 {
-            if let loc = locationManager.location {
-                let coord = loc.coordinate
-                region = MKCoordinateRegion(
-                    center: coord,
-                    latitudinalMeters: 1000, longitudinalMeters: 1000)
-                selectedCoord = coord
-                error = nil
-                await reverseGeocode(coord: coord)
-                return
-            }
-            try? await Task.sleep(nanoseconds: 200_000_000)
-        }
-        error = "Couldn't get current location — try again."
     }
 
     func onPinDrag(to coord: CLLocationCoordinate2D) {
@@ -162,5 +153,70 @@ final class LocationPickerSheetModel {
             lng: selectedCoord.longitude,
             name: resolvedName,
             address: resolvedAddress)
+    }
+}
+
+/// Thin CLLocationManagerDelegate that exposes a one-shot async API
+/// for the picker sheet. Holds the manager strongly so it survives
+/// across the await, and resolves a single continuation when the
+/// first non-stale fix arrives (or on auth-denied / timeout).
+final class LocationDelegateBox: NSObject, CLLocationManagerDelegate, @unchecked Sendable {
+    var manager: CLLocationManager?
+    private var continuation: CheckedContinuation<CLLocation?, Never>?
+    private let lock = NSLock()
+
+    @MainActor
+    func requestOneShot(timeoutSeconds: TimeInterval) async -> CLLocation? {
+        guard let mgr = manager else { return nil }
+        // If we already have a recent cached fix, return it immediately.
+        if let cached = mgr.location,
+           Date().timeIntervalSince(cached.timestamp) < 10 {
+            return cached
+        }
+        // Otherwise start updates and wait for didUpdateLocations.
+        if mgr.authorizationStatus == .notDetermined {
+            mgr.requestWhenInUseAuthorization()
+        }
+        mgr.startUpdatingLocation()
+        let result = await withCheckedContinuation { (c: CheckedContinuation<CLLocation?, Never>) in
+            self.lock.lock()
+            self.continuation = c
+            self.lock.unlock()
+            // Timeout: if no fix arrives, resolve nil.
+            Task {
+                try? await Task.sleep(
+                    nanoseconds: UInt64(timeoutSeconds * 1_000_000_000))
+                self.resolve(with: nil)
+            }
+        }
+        mgr.stopUpdatingLocation()
+        return result
+    }
+
+    private func resolve(with location: CLLocation?) {
+        lock.lock()
+        let c = continuation
+        continuation = nil
+        lock.unlock()
+        c?.resume(returning: location)
+    }
+
+    // MARK: - CLLocationManagerDelegate
+
+    func locationManager(_ manager: CLLocationManager,
+                         didUpdateLocations locations: [CLLocation]) {
+        if let loc = locations.last { resolve(with: loc) }
+    }
+
+    func locationManager(_ manager: CLLocationManager,
+                         didFailWithError error: Error) {
+        resolve(with: nil)
+    }
+
+    func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        let s = manager.authorizationStatus
+        if s == .denied || s == .restricted {
+            resolve(with: nil)
+        }
     }
 }
