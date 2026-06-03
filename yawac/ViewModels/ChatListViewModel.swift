@@ -514,6 +514,7 @@ final class ChatListViewModel {
                 c.isDefaultSubGroup = g.isDefaultSubGroup
                 c.joinApprovalMode = g.joinApprovalMode
                 c.amAdmin = amAdmin
+                c.ephemeralExpirationSeconds = g.ephemeralExpirationSeconds
                 if c.name == jid && !g.name.isEmpty { c.name = g.name }
                 chats[idx] = c
                 upsertPersisted(c)
@@ -531,6 +532,7 @@ final class ChatListViewModel {
                 isDefaultSubGroup: g.isDefaultSubGroup)
             fresh.joinApprovalMode = g.joinApprovalMode
             fresh.amAdmin = amAdmin
+            fresh.ephemeralExpirationSeconds = g.ephemeralExpirationSeconds
             chats.append(fresh)
             upsertPersisted(chats[chats.count - 1])
         }
@@ -1038,6 +1040,19 @@ final class ChatListViewModel {
             return
         }
         chats[idx].joinApprovalMode = on
+    }
+
+    /// Apply a live `ephemeralTimerChanged` event (or an optimistic local
+    /// edit) onto `Chat.ephemeralExpirationSeconds` so the inspector
+    /// picker and any future composer banner reflect the new timer
+    /// without waiting for the next `mergeGroups`. Runtime-only — the
+    /// field is not persisted (a fresh ListGroups on the next connect
+    /// repopulates it for groups; 1:1 chats hydrate only via this event).
+    func applyEphemeralTimer(chatJID: String, seconds: Int32) {
+        guard let idx = chats.firstIndex(where: { $0.jid == chatJID }) else {
+            return
+        }
+        chats[idx].ephemeralExpirationSeconds = seconds
     }
 
     /// Pending join-request count to render in the sidebar chip for
