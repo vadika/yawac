@@ -455,6 +455,14 @@ struct MessageRow: View {
             mediaView(kind: kind, caption: caption, fileName: fileName, path: path)
         case .poll(let q, let options, let selectable):
             pollView(question: q, options: options, selectableCount: selectable)
+        case .location(let loc, let isLive, _):
+            // TODO Task 24: real location bubble. Placeholder for now.
+            Text(isLive ? "(live location) \(loc.name)" : "(location) \(loc.name)")
+                .font(.caption).foregroundStyle(.secondary)
+        case .contact(let c):
+            // TODO Task 24: real contact bubble. Placeholder for now.
+            Text("(contact) \(c.displayName)")
+                .font(.caption).foregroundStyle(.secondary)
         case .system(let s):
             Text(s).font(.caption).foregroundStyle(.secondary)
         }

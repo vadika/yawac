@@ -358,6 +358,11 @@ struct ComposerView: View {
             return ""
         case .poll(let q, _, _):
             return q
+        case .location(let loc, let isLive, _):
+            let label = isLive ? "Live location" : "Location"
+            return loc.name.isEmpty ? label : "\(label): \(loc.name)"
+        case .contact(let c):
+            return "Contact: \(c.displayName)"
         case .system(let s):
             return s
         }
