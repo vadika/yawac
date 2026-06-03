@@ -46,6 +46,8 @@ struct ComposerView: View {
             inputRow
         }
         .animation(.easeOut(duration: 0.15), value: vm.pendingAttachments)
+        .animation(.easeOut(duration: 0.15), value: vm.pendingLocations)
+        .animation(.easeOut(duration: 0.15), value: vm.pendingContacts)
         .animation(.easeOut(duration: 0.12), value: vm.picker.isActive)
         .padding(.horizontal, 22)
         .padding(.vertical, 12)
@@ -163,12 +165,18 @@ struct ComposerView: View {
         vm.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    private var hasStaged: Bool {
+        !vm.pendingAttachments.isEmpty
+            || !vm.pendingLocations.isEmpty
+            || !vm.pendingContacts.isEmpty
+    }
+
     private var showMic: Bool {
-        draftIsEmpty && vm.editTarget == nil && vm.pendingAttachments.isEmpty
+        draftIsEmpty && vm.editTarget == nil && !hasStaged
     }
 
     private func send() {
-        if !vm.pendingAttachments.isEmpty {
+        if hasStaged {
             Task { await vm.sendPendingAttachments() }
         } else if vm.editTarget != nil {
             Task { await vm.saveEdit(vm.draft); vm.draft = "" }
@@ -348,7 +356,7 @@ struct ComposerView: View {
     }
 
     private var canSend: Bool {
-        if !vm.pendingAttachments.isEmpty { return true }
+        if hasStaged { return true }
         let body = vm.draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !body.isEmpty else { return false }
         if let m = vm.editTarget, case .text(let t) = m.body, body == t {
@@ -484,16 +492,82 @@ struct ComposerView: View {
     // ─── Staged-attachment preview strip ─────────────────────────────
     @ViewBuilder
     private var attachmentStrip: some View {
-        if !vm.pendingAttachments.isEmpty {
+        if hasStaged {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     ForEach(vm.pendingAttachments) { att in
                         attachmentChip(att)
                     }
+                    ForEach(Array(vm.pendingLocations.enumerated()), id: \.offset) { idx, loc in
+                        locationChip(loc, index: idx)
+                    }
+                    ForEach(Array(vm.pendingContacts.enumerated()), id: \.offset) { idx, card in
+                        contactChip(card, index: idx)
+                    }
                 }
                 .padding(.vertical, 2)
             }
             .transition(.move(edge: .bottom).combined(with: .opacity))
+        }
+    }
+
+    private func locationChip(_ loc: LocationPayload, index: Int) -> some View {
+        ZStack(alignment: .topTrailing) {
+            VStack(spacing: 4) {
+                Image(systemName: "location.fill")
+                    .scaledIcon(18)
+                    .foregroundStyle(Theme.textMuted)
+                Text(loc.name.isEmpty ? "Location" : loc.name)
+                    .scaledUI(8)
+                    .foregroundStyle(Theme.textFaint)
+                    .lineLimit(1)
+                    .frame(width: 48)
+            }
+            .frame(width: 56, height: 56)
+            .background(Theme.surfaceAlt, in: RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.border, lineWidth: 1))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+
+            Button {
+                vm.removePendingLocation(at: index)
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .scaledIcon(14)
+                    .foregroundStyle(.white, .black.opacity(0.55))
+            }
+            .buttonStyle(.plain)
+            .padding(2)
+            .help("Remove")
+        }
+    }
+
+    private func contactChip(_ card: ContactPayload, index: Int) -> some View {
+        ZStack(alignment: .topTrailing) {
+            VStack(spacing: 4) {
+                Image(systemName: "person.crop.circle.fill")
+                    .scaledIcon(18)
+                    .foregroundStyle(Theme.textMuted)
+                Text(card.displayName.isEmpty ? "Contact" : card.displayName)
+                    .scaledUI(8)
+                    .foregroundStyle(Theme.textFaint)
+                    .lineLimit(1)
+                    .frame(width: 48)
+            }
+            .frame(width: 56, height: 56)
+            .background(Theme.surfaceAlt, in: RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.border, lineWidth: 1))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+
+            Button {
+                vm.removePendingContact(at: index)
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .scaledIcon(14)
+                    .foregroundStyle(.white, .black.opacity(0.55))
+            }
+            .buttonStyle(.plain)
+            .padding(2)
+            .help("Remove")
         }
     }
 
