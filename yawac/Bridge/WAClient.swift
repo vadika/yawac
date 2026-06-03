@@ -196,12 +196,12 @@ class WAClient: PhoneValidating, LIDResolving {
         return try JSONDecoder().decode(BridgeSendResult.self, from: Data(json.utf8))
     }
 
-    func sendLocation(chatJID: String,
-                      latitude: Double,
-                      longitude: Double,
-                      name: String,
-                      address: String,
-                      ephemeralSeconds: Int32 = 0) throws -> BridgeSendResult {
+    nonisolated func sendLocation(chatJID: String,
+                                  latitude: Double,
+                                  longitude: Double,
+                                  name: String,
+                                  address: String,
+                                  ephemeralSeconds: Int32 = 0) throws -> BridgeSendResult {
         var err: NSError?
         let json = go.sendLocation(chatJID,
                                    lat: latitude,
@@ -214,10 +214,10 @@ class WAClient: PhoneValidating, LIDResolving {
         return try JSONDecoder().decode(BridgeSendResult.self, from: Data(json.utf8))
     }
 
-    func sendContact(chatJID: String,
-                     vcard: String,
-                     displayName: String,
-                     ephemeralSeconds: Int32 = 0) throws -> BridgeSendResult {
+    nonisolated func sendContact(chatJID: String,
+                                 vcard: String,
+                                 displayName: String,
+                                 ephemeralSeconds: Int32 = 0) throws -> BridgeSendResult {
         var err: NSError?
         let json = go.sendContact(chatJID,
                                   vcard: vcard,
@@ -228,7 +228,7 @@ class WAClient: PhoneValidating, LIDResolving {
         return try JSONDecoder().decode(BridgeSendResult.self, from: Data(json.utf8))
     }
 
-    func setDisappearingTimer(chatJID: String, seconds: Int32) throws {
+    nonisolated func setDisappearingTimer(chatJID: String, seconds: Int32) throws {
         try go.setDisappearingTimer(chatJID, seconds: seconds)
     }
 
