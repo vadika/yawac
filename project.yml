@@ -41,10 +41,11 @@ targets:
       properties:
         NSAppleEventsUsageDescription: yawac needs Apple events for notifications
         NSMicrophoneUsageDescription: yawac needs the microphone to record voice messages
+        NSLocationWhenInUseUsageDescription: yawac uses your location only when you choose Send current location.
         LSMinimumSystemVersion: "14.0"
         CFBundleDisplayName: yawac
-        CFBundleShortVersionString: "0.7.1"
-        CFBundleVersion: "8"
+        CFBundleShortVersionString: "0.8.0"
+        CFBundleVersion: "9"
         ATSApplicationFontsPath: Fonts
         CFBundleIconName: AppIcon
   yawacTests:
