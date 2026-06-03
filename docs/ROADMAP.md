@@ -75,13 +75,29 @@ relevant context lingers).
 
 ## Groups
 
-- ✅ **Group management** — edit name + edit description
+- ◐ **Group management** — edit name + edit description
   (admin-only) shipped in v0.4.0; live participant add (contacts +
   +phone fallback with `AddRequest` privacy-block surfacing) /
   remove / promote / demote and avatar edit (with crop sheet)
   shipped 2026-06-02. **New group creation** (sidebar `+` menu)
-  shipped in v0.7.1 — composer + multi-select participant picker
-  hits `WAClient.createGroup`.
+  shipped in v0.7.1.
+  Gaps:
+    - ☐ **"Admins only" message-send toggle** (`SetGroupAnnounce`) —
+      announcement-group mode; whatsmeow has the RPC, yawac doesn't
+      expose it.
+    - ☐ **"Admins only" edit-info toggle** (`SetGroupLocked`) — locks
+      name / description / avatar to admins only; whatsmeow has the
+      RPC, yawac doesn't expose it.
+    - ☐ **Promote plain group → community parent** — whatsmeow's
+      `CreateGroup{IsParent:true}` is create-time only. Post-hoc
+      conversion isn't exposed upstream.
+    - ☐ **Group "deletion"** — WhatsApp protocol has no destroy
+      primitive. Members leave; group persists server-side until the
+      last member is gone. Local `deleteChat` removes the row from
+      the sidebar + cross-device-syncs the deletion (shipped); no
+      true delete on the wire.
+    - ☐ **Super-admin badge** — `isSuperAdmin` flag is decoded on
+      participants but the row UI doesn't surface it.
 - ✅ **Invite link / QR** — generate, copy, share, admin-only revoke
   with cooldown; ⌘K paste-to-join with preview + pending-approval
   state. Shipped 2026-06-02.
@@ -93,7 +109,7 @@ relevant context lingers).
 
 - ☐ **Newsletter / Channels** — upstream blocker: `Platform == MACOS`
   triggers `argo decoding is currently broken` (whatsmeow patch needed).
-- ✅ **Communities** — parent / sub-group display + directory +
+- ◐ **Communities** — parent / sub-group display + directory +
   best-effort join shipped earlier; admin actions (link / unlink
   sub-groups, approve / reject join requests with sidebar pending
   chip, "require admin approval to join" toggle) and create-new-
@@ -104,6 +120,19 @@ relevant context lingers).
   with `400 bad-request`. Pending-request count refresh is bounded
   by foreground polling (whatsmeow does not emit an inbound
   `JoinRequest` event).
+  Gaps:
+    - ☐ **Leave community** — multi-step "leave all sub-groups +
+      leave parent" workflow. Today user leaves each sub-group +
+      parent individually via Leave group on each chat info.
+    - ☐ **Demote community parent → plain group** — whatsmeow has no
+      RPC to undo `IsParent`; create-time only.
+    - ☐ **Approve from sidebar chip tap** — sidebar pending-count
+      chip is read-only; tapping doesn't jump to the PENDING
+      REQUESTS section. Tap currently opens the chat as normal.
+    - ☐ **Default-subgroup unlink** — server allows the IQ but it
+      breaks the community's announcements channel. yawac hides the
+      Unlink action for `isDefaultSubGroup` rows. No "delete
+      community" workflow.
 
 ## Productivity / macOS
 
