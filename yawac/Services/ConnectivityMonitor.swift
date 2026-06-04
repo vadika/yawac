@@ -39,9 +39,14 @@ final class ConnectivityMonitor {
     private var sawFirstPath = false
     private var observers: [NSObjectProtocol] = []
 
+    // Escalates 2s → 4s → 8s → 30s → 60s, then holds at 60s. Long
+    // tail saves wake cycles when the network is genuinely gone; the
+    // NSWorkspace.didWakeNotification + NWPathMonitor satisfied-path
+    // observers still poke the loop awake the moment connectivity
+    // returns, so the 60s ceiling is purely a "no signal at all" gate.
     init(debounce: Duration = .seconds(2),
          retryBackoff: [Duration] = [.seconds(2), .seconds(4), .seconds(8),
-                                     .seconds(8), .seconds(8)],
+                                     .seconds(30), .seconds(60)],
          isReady: @escaping () -> Bool,
          isConnected: @escaping () -> Bool,
          reconnect: @escaping (_ force: Bool) async -> Void) {

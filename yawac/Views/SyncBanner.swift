@@ -63,7 +63,9 @@ struct SyncBanner: View {
 
 private struct AnimatedDots: View {
     @State private var phase = 0
-    private let timer = Timer.publish(every: 0.18, on: .main, in: .common)
+    // 0.45s is the slowest interval that still reads as "animating" —
+    // saves ~2/3 of the wake cycles vs the prior 0.18s pace.
+    private let timer = Timer.publish(every: 0.45, on: .main, in: .common)
         .autoconnect()
 
     var body: some View {

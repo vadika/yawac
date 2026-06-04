@@ -32,22 +32,24 @@ final class MenuBarController: NSObject {
 
     /// Re-arms whenever `session.totalUnread` mutates so the menubar
     /// glyph flips between `MenuBarIdle` and `MenuBarActive` without
-    /// extra wiring.
+    /// extra wiring. `withObservationTracking` fires `onChange` exactly
+    /// once per change — we re-arm from inside the callback so the task
+    /// stays purely event-driven (no 60s wake loop).
     private func startObservingUnread() {
         observationTask?.cancel()
         observationTask = Task { @MainActor [weak self] in
-            while !Task.isCancelled {
-                guard let self else { return }
-                withObservationTracking {
-                    _ = self.session?.totalUnread
-                } onChange: {
-                    Task { @MainActor [weak self] in self?.refreshIcon() }
-                }
-                // Block until the next change fires onChange; the
-                // continuation in onChange re-enters this loop, so the
-                // outer await is just keeping the task alive between
-                // changes.
-                try? await Task.sleep(for: .seconds(60))
+            self?.armUnreadObserver()
+        }
+    }
+
+    @MainActor
+    private func armUnreadObserver() {
+        withObservationTracking {
+            _ = self.session?.totalUnread
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.refreshIcon()
+                self?.armUnreadObserver()
             }
         }
     }
