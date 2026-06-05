@@ -196,6 +196,17 @@ type JGroupLockedChanged struct {
 	Timestamp int64  `json:"timestamp"`
 }
 
+// JGroupMemberAddModeChanged carries a group's member-add-mode toggle.
+// AllMembersCanAdd=true means any member can add new participants
+// (whatsmeow's "all_member_add"); false is the default "admin_add"
+// where only admins can add.
+type JGroupMemberAddModeChanged struct {
+	ChatJID          string `json:"chat_jid"`
+	AllMembersCanAdd bool   `json:"all_members_can_add"`
+	ActorJID         string `json:"actor_jid,omitempty"`
+	Timestamp        int64  `json:"timestamp"`
+}
+
 // JEphemeralTimerChanged carries a disappearing-messages timer change for
 // a chat. Seconds == 0 means "off" (timer cleared). Fan-out source is
 // either a group GroupInfo with non-nil Ephemeral, or a 1:1 inbound
