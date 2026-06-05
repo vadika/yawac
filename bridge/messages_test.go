@@ -460,3 +460,23 @@ func TestForwardTextSignatureCompiles(t *testing.T) {
 			return c.ForwardText
 		}
 }
+
+func TestForwardMediaEphemeralWrap(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/fm.db")
+	defer c.Close()
+	_, err := c.ForwardMedia(
+		"1@s.whatsapp.net",
+		`{"kind":"image","url":"u","direct_path":"p","media_key":"AA==","file_enc_sha256":"AA==","file_sha256":"AA==","file_length":1,"mimetype":"image/jpeg"}`,
+		"caption", "name.jpg",
+		86400)
+	if err == nil {
+		t.Fatal("expected error on unpaired client")
+	}
+}
+
+func TestForwardMediaSignatureCompiles(t *testing.T) {
+	var _ func(*Client) func(string, string, string, string, int32) (string, error) =
+		func(c *Client) func(string, string, string, string, int32) (string, error) {
+			return c.ForwardMedia
+		}
+}
