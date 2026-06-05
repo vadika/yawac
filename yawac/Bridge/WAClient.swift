@@ -798,6 +798,18 @@ class WAClient: PhoneValidating, LIDResolving {
         try go.removeGroupPhoto(chatJID)
     }
 
+    nonisolated func setSelfAvatar(jpegBytes: Data) throws {
+        try go.setSelfAvatar(jpegBytes)
+    }
+
+    nonisolated func removeSelfAvatar() throws {
+        try go.removeSelfAvatar()
+    }
+
+    nonisolated func setSelfAbout(_ message: String) throws {
+        try go.setSelfAbout(message)
+    }
+
     func getGroupInviteLink(chatJID: String, reset: Bool) throws -> String {
         var err: NSError?
         let link = go.getGroupInviteLink(chatJID, reset: reset, error: &err)
