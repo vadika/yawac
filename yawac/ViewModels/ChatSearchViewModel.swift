@@ -6,6 +6,18 @@ final class ChatSearchViewModel {
     var query: String = "" {
         didSet { onQueryChanged() }
     }
+    /// Filter knobs for the global ⌘K Messages section.
+    /// Mutating any field re-runs the existing debounced search.
+    var filters: MessageIndex.SearchFilters = .init() {
+        didSet { if oldValue != filters { onFiltersChanged() } }
+    }
+    /// Optional "scope to this chat" knob, kept separate from
+    /// `MessageIndex.SearchFilters` so the chip-strip can render a
+    /// nameable picker against the chat list without leaking JID
+    /// strings into the SQL filter struct.
+    var globalChatFilter: String? = nil {
+        didSet { if oldValue != globalChatFilter { onFiltersChanged() } }
+    }
     private(set) var filteredChats: [Chat] = []
     private(set) var suggestion: PhoneSuggestion? = nil
     private(set) var validating: Bool = false
@@ -145,14 +157,53 @@ final class ChatSearchViewModel {
             return
         }
         let idx = messageIndex
+        let f = filters
+        let chatFilter = globalChatFilter
         messageTask = Task { [weak self] in
             let hits = await Task.detached(priority: .userInitiated) {
-                idx.searchGlobal(query: trimmed)
+                idx.searchGlobal(query: trimmed, filters: f, chatJID: chatFilter)
             }.value
             guard let self, !Task.isCancelled else { return }
             self.messageHits = hits
         }
         await messageTask?.value
+    }
+
+    /// Re-runs the global message search when filters change without
+    /// touching the chat-name local filter (those are query-driven).
+    /// Single-shot — no debounce, since filter changes are user-driven
+    /// taps not key strokes.
+    private func onFiltersChanged() {
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard q.count >= 2 else {
+            messageHits = []
+            return
+        }
+        Task { @MainActor [weak self] in
+            await self?.refreshMessages(q)
+        }
+    }
+
+    /// Distinct sender JIDs observed in the current global hit set,
+    /// paired with their display names (push name if known). Used by
+    /// the chip-strip's Sender menu in the global search surface.
+    var knownGlobalSenders: [(jid: String, name: String)] {
+        // The index stores the push-name as the `sender` field, but
+        // the Hit only exposes the push-name string. We can't recover
+        // the JID from the hit alone, so we fall back to mapping the
+        // chat JIDs of 1:1 hits as a best-effort. Group hits go
+        // unfiltered for now — the index doesn't carry senderJID per
+        // hit, and adding it is a v0.8.5 schema concern.
+        var seen = Set<String>()
+        var out: [(jid: String, name: String)] = []
+        for hit in messageHits {
+            let key = hit.sender.isEmpty ? hit.chatJID : hit.sender
+            if seen.insert(key).inserted {
+                out.append((jid: key,
+                            name: hit.sender.isEmpty ? hit.chatJID : hit.sender))
+            }
+        }
+        return out
     }
 
     private func maybeResolveInviteLink(_ q: String) async {

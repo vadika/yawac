@@ -100,9 +100,34 @@ final class ConversationViewModel {
     var findQuery: String = "" {
         didSet { scheduleFind() }
     }
+    /// Optional filter knobs applied on top of the find-bar query.
+    /// Mutating any field re-runs the search (no debounce — filter
+    /// changes are tap-driven not key-stroke driven).
+    var findFilters: MessageIndex.SearchFilters = .init() {
+        didSet { if oldValue != findFilters { scheduleFind() } }
+    }
     var findHits: [MessageIndex.Hit] = []
     var findCurrentIdx: Int = 0
     var findHitIDs: Set<String> { Set(findHits.map(\.messageID)) }
+
+    /// Sender push-names seen in messages currently loaded for this
+    /// chat. Used by the in-chat filter chip's Sender menu — the FTS
+    /// index stores push-name strings (sourced from `senderPushName`
+    /// at index time), so the chip's `value` is the push name itself.
+    /// Falls back to the SessionViewModel display-name map when the
+    /// in-memory UIMessage row doesn't carry the push name.
+    func knownSendersInChat(session: SessionViewModel) -> [(jid: String, name: String)] {
+        var seen = Set<String>()
+        var out: [(jid: String, name: String)] = []
+        for m in messages {
+            let name = session.displayName(for: m.senderJID)
+            guard !name.isEmpty else { continue }
+            if seen.insert(name).inserted {
+                out.append((jid: name, name: name))
+            }
+        }
+        return out
+    }
 
     private var findTask: Task<Void, Never>?
     private let findDebounceMs: Int = 120
@@ -117,11 +142,12 @@ final class ConversationViewModel {
         }
         let jid = chatJID
         let idx = messageIndex
+        let f = findFilters
         findTask = Task { [weak self, findDebounceMs] in
             try? await Task.sleep(for: .milliseconds(findDebounceMs))
             guard let self, !Task.isCancelled else { return }
             let hits = await Task.detached(priority: .userInitiated) {
-                idx.searchInChat(jid: jid, query: q)
+                idx.searchInChat(jid: jid, query: q, filters: f)
             }.value
             guard !Task.isCancelled else { return }
             self.findHits = hits
@@ -135,8 +161,9 @@ final class ConversationViewModel {
         let q = findQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         if q.isEmpty { findHits = []; findCurrentIdx = 0; return }
         let idx = messageIndex; let jid = chatJID
+        let f = findFilters
         let hits = await Task.detached(priority: .userInitiated) {
-            idx.searchInChat(jid: jid, query: q)
+            idx.searchInChat(jid: jid, query: q, filters: f)
         }.value
         findHits = hits
         findCurrentIdx = 0
