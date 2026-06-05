@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 struct SettingsView: View {
     @Environment(TranslationViewModel.self) private var translation
@@ -7,6 +8,16 @@ struct SettingsView: View {
     @AppStorage("yawac.translate.targetLang")
     private var targetLang: String = "en"
     @AppStorage(UIScaleStep.storageKey) private var scaleStepRaw = UIScaleStep.default.rawValue
+
+    // ─── About me state ──────────────────────────────────────────────
+    @State private var aboutDraft: String = ""
+    @State private var aboutBaseline: String = ""
+    @State private var aboutSaving: Bool = false
+    @State private var aboutError: String?
+    @State private var avatarMenuOpen: Bool = false
+    @State private var avatarError: String?
+    @State private var pickedAvatar: NSImage?
+    @State private var confirmRemoveAvatar: Bool = false
 
     private static let languages: [(code: String, name: String)] = [
         ("en", "English"), ("de", "German"), ("fi", "Finnish"),
@@ -23,6 +34,10 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
+            Section("About me") {
+                aboutMeSection
+            }
+
             Section("Display") {
                 let step = UIScaleStep.from(scaleStepRaw)
                 VStack(alignment: .leading, spacing: 8) {
@@ -107,6 +122,187 @@ struct SettingsView: View {
         .onAppear {
             translation.model.refreshState()
             session.loadBlocklist()
+        }
+        .task {
+            if let info = await session.fetchSelfInfo() {
+                let about = info.status ?? ""
+                aboutBaseline = about
+                aboutDraft = about
+            }
+        }
+        .sheet(item: Binding(
+            get: { pickedAvatar.map { ImageBox(image: $0) } },
+            set: { pickedAvatar = $0?.image })
+        ) { box in
+            AvatarCropSheet(original: box.image,
+                            onApply: { data in
+                                pickedAvatar = nil
+                                uploadAvatar(data)
+                            },
+                            onCancel: { pickedAvatar = nil })
+        }
+        .confirmationDialog("Remove profile photo?",
+                            isPresented: $confirmRemoveAvatar) {
+            Button("Remove", role: .destructive) { removeAvatar() }
+            Button("Cancel", role: .cancel) {}
+        }
+    }
+
+    private struct ImageBox: Identifiable {
+        let id = UUID()
+        let image: NSImage
+    }
+
+    // ─── About me section ───────────────────────────────────────────
+    @ViewBuilder
+    private var aboutMeSection: some View {
+        let own = session.client?.ownJID ?? ""
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                ZStack(alignment: .bottomTrailing) {
+                    if own.isEmpty {
+                        Circle()
+                            .fill(Color.gray.opacity(0.2))
+                            .frame(width: 64, height: 64)
+                    } else {
+                        AvatarView(jid: own,
+                                   name: session.displayName(for: own),
+                                   size: 64)
+                    }
+                    Menu {
+                        Button("Choose photo…") { pickAvatar() }
+                        Button("Remove photo", role: .destructive) {
+                            confirmRemoveAvatar = true
+                        }
+                    } label: {
+                        Image(systemName: "pencil")
+                            .font(.system(size: 11, weight: .medium))
+                            .padding(5)
+                            .background(Color.accentColor, in: Circle())
+                            .foregroundStyle(.white)
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    .disabled(own.isEmpty)
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    if own.isEmpty {
+                        Text("Not paired")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text(session.displayName(for: own))
+                            .font(.system(size: 13, weight: .semibold))
+                    }
+                    Text("Edit display name on your phone.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("About")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                TextField("", text: $aboutDraft, axis: .vertical)
+                    .textFieldStyle(.roundedBorder)
+                    .lineLimit(2...4)
+                    .disabled(own.isEmpty)
+                HStack {
+                    if let err = aboutError {
+                        Text(err).foregroundStyle(.red).font(.caption)
+                    }
+                    Spacer()
+                    Button("Save About") { saveAbout() }
+                        .disabled(aboutDraft == aboutBaseline
+                                  || aboutSaving
+                                  || own.isEmpty)
+                }
+            }
+
+            if let avatarError {
+                Text(avatarError).foregroundStyle(.red).font(.caption)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func pickAvatar() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.allowedContentTypes = [.jpeg, .png, .heic]
+        panel.begin { resp in
+            guard resp == .OK, let url = panel.url,
+                  let img = NSImage(contentsOf: url) else { return }
+            DispatchQueue.main.async {
+                pickedAvatar = img
+            }
+        }
+    }
+
+    private func uploadAvatar(_ data: Data) {
+        guard let client = session.client else {
+            avatarError = "Not paired."
+            return
+        }
+        let own = client.ownJID
+        guard !own.isEmpty else {
+            avatarError = "Not paired."
+            return
+        }
+        Task { @MainActor in
+            do {
+                try await Task.detached {
+                    try client.setSelfAvatar(jpegBytes: data)
+                }.value
+                await AvatarCache.shared.invalidate(
+                    jid: JIDNormalize.key(own, client: client))
+                avatarError = nil
+            } catch {
+                avatarError = (error as NSError).localizedDescription
+            }
+        }
+    }
+
+    private func removeAvatar() {
+        guard let client = session.client else { return }
+        let own = client.ownJID
+        guard !own.isEmpty else { return }
+        Task { @MainActor in
+            do {
+                try await Task.detached {
+                    try client.removeSelfAvatar()
+                }.value
+                await AvatarCache.shared.invalidate(
+                    jid: JIDNormalize.key(own, client: client))
+                avatarError = nil
+            } catch {
+                avatarError = (error as NSError).localizedDescription
+            }
+        }
+    }
+
+    private func saveAbout() {
+        guard let client = session.client else {
+            aboutError = "Not paired."
+            return
+        }
+        let msg = aboutDraft
+        aboutSaving = true
+        aboutError = nil
+        Task { @MainActor in
+            defer { aboutSaving = false }
+            do {
+                try await Task.detached {
+                    try client.setSelfAbout(msg)
+                }.value
+                aboutBaseline = msg
+            } catch {
+                aboutError = (error as NSError).localizedDescription
+            }
         }
     }
 
