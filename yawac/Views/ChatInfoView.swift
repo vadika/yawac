@@ -91,7 +91,22 @@ struct ChatInfoView: View {
     @State private var lockedError: String?
 
     private var isGroup: Bool { chatJID.hasSuffix("@g.us") }
+    /// True when this info pane is rendering the user's own self-chat.
+    /// Drives the v0.9.1 ABOUT editor + avatar hover overlay for the
+    /// paired account (relocated from SettingsView). Delegates to
+    /// `SessionViewModel.isSelfChat` so device-suffixed / `@lid` variants
+    /// of the own JID still match.
+    private var isSelfChat: Bool {
+        guard !isGroup else { return false }
+        return session.isSelfChat(chatJID)
+    }
     private var name: String { session.displayName(for: chatJID) }
+
+    // ─── v0.9.1: self-chat ABOUT editor state ────────────────────────
+    @State private var aboutDraft: String = ""
+    @State private var aboutBaseline: String = ""
+    @State private var aboutSaving: Bool = false
+    @State private var aboutEditError: String?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -420,7 +435,7 @@ struct ChatInfoView: View {
         VStack(spacing: 10) {
             ZStack {
                 AvatarView(jid: chatJID, name: name, size: 92)
-                if isGroup, isAdminForCurrentGroup {
+                if (isGroup && isAdminForCurrentGroup) || isSelfChat {
                     avatarHoverOverlay
                 }
             }
@@ -483,7 +498,7 @@ struct ChatInfoView: View {
             .contentShape(Circle())
             .onHover { avatarHovered = $0 }
             .onTapGesture { avatarMenuOpen = true }
-        .confirmationDialog("Group photo",
+        .confirmationDialog(isSelfChat ? "Profile photo" : "Group photo",
                             isPresented: $avatarMenuOpen,
                             titleVisibility: .visible) {
             Button("Change photo…") { pickPhoto() }
@@ -492,7 +507,8 @@ struct ChatInfoView: View {
             }
             Button("Cancel", role: .cancel) {}
         }
-        .confirmationDialog("Remove group photo?",
+        .confirmationDialog(isSelfChat ? "Remove profile photo?"
+                                        : "Remove group photo?",
                             isPresented: $confirmRemovePhoto) {
             Button("Remove", role: .destructive) { removePhoto() }
             Button("Cancel", role: .cancel) {}
@@ -535,12 +551,21 @@ struct ChatInfoView: View {
             return
         }
         let chatJID = self.chatJID
-        NSLog("[yawac/uploadAvatar] chat=%@ bytes=%d", chatJID, data.count)
+        let selfChat = isSelfChat
+        NSLog("[yawac/uploadAvatar] chat=%@ bytes=%d self=%@",
+              chatJID, data.count, selfChat ? "1" : "0")
         Task { @MainActor in
             do {
-                let pictureID = try client.setGroupPhoto(
-                    chatJID: chatJID, jpeg: data)
-                NSLog("[yawac/uploadAvatar] ok pictureID=%@", pictureID)
+                if selfChat {
+                    try await Task.detached {
+                        try client.setSelfAvatar(jpegBytes: data)
+                    }.value
+                    NSLog("[yawac/uploadAvatar] ok self")
+                } else {
+                    let pictureID = try client.setGroupPhoto(
+                        chatJID: chatJID, jpeg: data)
+                    NSLog("[yawac/uploadAvatar] ok pictureID=%@", pictureID)
+                }
                 await AvatarCache.shared.invalidate(
                     jid: JIDNormalize.key(chatJID, client: client))
             } catch {
@@ -555,11 +580,18 @@ struct ChatInfoView: View {
     private func removePhoto() {
         guard let client = session.client else { return }
         let chatJID = self.chatJID
+        let selfChat = isSelfChat
         Task { @MainActor in
             do {
-                try await Task.detached {
-                    try client.removeGroupPhoto(chatJID: chatJID)
-                }.value
+                if selfChat {
+                    try await Task.detached {
+                        try client.removeSelfAvatar()
+                    }.value
+                } else {
+                    try await Task.detached {
+                        try client.removeGroupPhoto(chatJID: chatJID)
+                    }.value
+                }
                 await AvatarCache.shared.invalidate(
                     jid: JIDNormalize.key(chatJID, client: client))
             } catch {
@@ -632,6 +664,37 @@ struct ChatInfoView: View {
                         action: { confirmBlock = true }),
         ])
 
+        // v0.9.1: own-profile About editor — only rendered in self-chat.
+        // Hydrated by `loadUserInfo` from `getUserInfo(jid: ownJID).status`.
+        if isSelfChat {
+            sectionCard(label: "ABOUT") {
+                VStack(alignment: .leading, spacing: 6) {
+                    TextField("Edit your About line",
+                              text: $aboutDraft, axis: .vertical)
+                        .textFieldStyle(.roundedBorder)
+                        .lineLimit(2...4)
+                        .scaledUI(13)
+                    HStack {
+                        if let err = aboutEditError {
+                            Text(err)
+                                .foregroundStyle(Color.red.opacity(0.9))
+                                .scaledUI(11)
+                                .task(id: err) {
+                                    try? await Task.sleep(
+                                        nanoseconds: 6 * 1_000_000_000)
+                                    aboutEditError = nil
+                                }
+                        }
+                        Spacer()
+                        Button(aboutSaving ? "Saving…" : "Save") {
+                            saveSelfAbout()
+                        }
+                        .disabled(aboutDraft == aboutBaseline || aboutSaving)
+                    }
+                }
+            }
+        }
+
         // DISAPPEARING MESSAGES — 1:1. Ungated (either party may set
         // the timer). Hydrates from `Chat.ephemeralExpirationSeconds`;
         // live `EphemeralTimerChanged` events refresh it.
@@ -691,6 +754,35 @@ struct ChatInfoView: View {
         defer { loadingUserInfo = false }
         let info = try? client.getUserInfo(jid: chatJID)
         userAbout = info?.status
+        if isSelfChat {
+            let current = userAbout ?? ""
+            aboutBaseline = current
+            aboutDraft = current
+        }
+    }
+
+    /// Persist `aboutDraft` to the server via `WAClient.setSelfAbout`.
+    /// Only meaningful when `isSelfChat`; the Save button is gated on
+    /// `aboutDraft != aboutBaseline` so this won't get called for noop
+    /// edits. Mirrors the SettingsView v0.9.0 path that this view
+    /// replaces.
+    private func saveSelfAbout() {
+        guard let client = session.client else { return }
+        let msg = aboutDraft
+        aboutSaving = true
+        aboutEditError = nil
+        Task { @MainActor in
+            defer { aboutSaving = false }
+            do {
+                try await Task.detached {
+                    try client.setSelfAbout(msg)
+                }.value
+                aboutBaseline = msg
+                userAbout = msg
+            } catch {
+                aboutEditError = (error as NSError).localizedDescription
+            }
+        }
     }
 
     // ─── Group body ──────────────────────────────────────────────────

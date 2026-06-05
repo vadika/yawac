@@ -144,6 +144,11 @@ rare-use utilities) ships only when the important list is clear.
   About me (v0.9.0). Push name still phone-only — whatsmeow has no
   top-level setter; would need a `SETTING_PUSHNAME` app-state patch.
   Tracked for a v0.9.x follow-up.
+
+    **v0.9.1 update:** About + avatar edit relocated to the User
+    Info pane (self-chat ChatInfoView) using the same hover
+    overlay + crop sheet mechanism as group photos. Settings ABOUT
+    ME section removed.
 - ☐ **2FA** (account-level).
 
 ## Messaging gaps (against shipped surface)
