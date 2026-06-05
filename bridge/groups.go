@@ -683,3 +683,41 @@ func (c *Client) SetGroupJoinApprovalMode(chatJIDStr string, on bool) error {
 	}
 	return nil
 }
+
+// SetGroupAnnounce toggles announcement-mode on a group. When on,
+// only admins can send messages.
+func (c *Client) SetGroupAnnounce(chatJIDStr string, on bool) error {
+	if c.wa == nil {
+		return errors.New("client closed")
+	}
+	jid, err := types.ParseJID(chatJIDStr)
+	if err != nil {
+		return fmt.Errorf("parse jid: %w", err)
+	}
+	if jid.User == "" || jid.Server == "" {
+		return fmt.Errorf("parse jid: empty user or server")
+	}
+	if err := c.wa.SetGroupAnnounce(context.Background(), jid, on); err != nil {
+		return fmt.Errorf("set group announce: %w", err)
+	}
+	return nil
+}
+
+// SetGroupLocked toggles edit-locked-mode on a group. When on,
+// only admins can edit name / description / avatar.
+func (c *Client) SetGroupLocked(chatJIDStr string, on bool) error {
+	if c.wa == nil {
+		return errors.New("client closed")
+	}
+	jid, err := types.ParseJID(chatJIDStr)
+	if err != nil {
+		return fmt.Errorf("parse jid: %w", err)
+	}
+	if jid.User == "" || jid.Server == "" {
+		return fmt.Errorf("parse jid: empty user or server")
+	}
+	if err := c.wa.SetGroupLocked(context.Background(), jid, on); err != nil {
+		return fmt.Errorf("set group locked: %w", err)
+	}
+	return nil
+}

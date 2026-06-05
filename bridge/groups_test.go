@@ -343,6 +343,42 @@ func TestSetDisappearingTimerBadJID(t *testing.T) {
 	}
 }
 
+func TestSetGroupAnnounceUnpaired(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/sga.db")
+	defer c.Close()
+	err := c.SetGroupAnnounce("1234@g.us", true)
+	if err == nil {
+		t.Fatal("expected error on unpaired client")
+	}
+}
+
+func TestSetGroupAnnounceBadJID(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/sga2.db")
+	defer c.Close()
+	err := c.SetGroupAnnounce("not a jid", true)
+	if err == nil {
+		t.Fatal("expected parse error")
+	}
+}
+
+func TestSetGroupLockedUnpaired(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/sgl.db")
+	defer c.Close()
+	err := c.SetGroupLocked("1234@g.us", true)
+	if err == nil {
+		t.Fatal("expected error on unpaired client")
+	}
+}
+
+func TestSetGroupLockedBadJID(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/sgl2.db")
+	defer c.Close()
+	err := c.SetGroupLocked("not a jid", true)
+	if err == nil {
+		t.Fatal("expected parse error")
+	}
+}
+
 func TestMapGroupInfoCarriesEphemeralExpiration(t *testing.T) {
 	in := &types.GroupInfo{
 		JID:       types.NewJID("999", "g.us"),
