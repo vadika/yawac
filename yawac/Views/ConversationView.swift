@@ -511,8 +511,25 @@ struct ConversationView: View {
                             // Consume sidebar message-search jump once history is up.
                             guard let jumpID = session.pendingJumpMessageID,
                                   !vm.messages.isEmpty else { return }
+                            // Gate on chat match so a stale CVM for a chat the
+                            // user is leaving doesn't drain the jump before the
+                            // destination CVM mounts.
+                            if let target = session.pendingJumpChatJID,
+                               target != chatJID { return }
                             vm.jumpToQuoted(id: jumpID)
                             session.pendingJumpMessageID = nil
+                            session.pendingJumpChatJID = nil
+                        }
+                        .onChange(of: session.pendingJumpMessageID) { _, _ in
+                            // Same-chat case: pendingJumpMessageID flips while
+                            // vm.messages.count stays stable. Mirror the gate.
+                            guard let jumpID = session.pendingJumpMessageID,
+                                  !vm.messages.isEmpty else { return }
+                            if let target = session.pendingJumpChatJID,
+                               target != chatJID { return }
+                            vm.jumpToQuoted(id: jumpID)
+                            session.pendingJumpMessageID = nil
+                            session.pendingJumpChatJID = nil
                         }
                     }
                     if vm.peerTyping {

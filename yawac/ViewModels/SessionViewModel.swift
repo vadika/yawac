@@ -90,6 +90,12 @@ final class SessionViewModel {
     /// inside the freshly-opened chat. ConversationView consumes + clears.
     var pendingJumpMessageID: String?
 
+    /// Chat that owns `pendingJumpMessageID`. Only the matching
+    /// ConversationView is allowed to consume the message-id, so a
+    /// stale CVM (still mounted while the chat swap is in flight)
+    /// doesn't drain the jump before the destination chat takes over.
+    var pendingJumpChatJID: String?
+
     /// Reply target carried across a chat switch. Set by the
     /// "Reply privately" affordance in `ConversationView` immediately
     /// after `requestSelectChat(sender)`, then consumed + cleared by the
@@ -141,7 +147,9 @@ final class SessionViewModel {
     /// Open `chatJID` and scroll to message `messageID` after the
     /// chat's history is loaded.
     func requestJumpToMessage(chatJID: String, messageID: String) {
-        pendingChatSelection = JIDNormalize.canonical(chatJID, client: client)
+        let canonical = JIDNormalize.canonical(chatJID, client: client)
+        pendingChatSelection = canonical
+        pendingJumpChatJID = canonical
         pendingJumpMessageID = messageID
     }
 
