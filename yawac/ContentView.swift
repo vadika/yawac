@@ -236,6 +236,10 @@ struct ContentView: View {
                 case .groupLockedChanged(let chatJID, let on, _, _):
                     let canonical = JIDNormalize.canonical(chatJID, client: client)
                     vm.applyGroupLocked(chatJID: canonical, on: on)
+                case .groupMemberAddModeChanged(let chatJID, let allMembersCanAdd, _, _):
+                    let canonical = JIDNormalize.canonical(chatJID, client: client)
+                    vm.applyGroupMemberAddMode(chatJID: canonical,
+                                               allMembersCanAdd: allMembersCanAdd)
                 case .ephemeralTimerChanged(let chatJID, let seconds, _, _):
                     // Server-side timer change (either side of a 1:1 or a
                     // group admin). Refresh the in-memory Chat row so the
