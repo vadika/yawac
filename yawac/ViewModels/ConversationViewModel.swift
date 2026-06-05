@@ -1163,7 +1163,8 @@ final class ConversationViewModel {
                     quotedFromMe: q.fromMe,
                     quotedKind: Self.quotedKind(of: q),
                     quotedSnippet: Self.quotedSnippet(of: q),
-                    mentionedJIDs: mentionedJIDs)
+                    mentionedJIDs: mentionedJIDs,
+                    ephemeralSeconds: ephemeralExpirationSeconds)
             } else {
                 res = try client.sendText(chatJID, body,
                                           mentionedJIDs: mentionedJIDs,
@@ -1766,7 +1767,8 @@ final class ConversationViewModel {
             body: trimmed, mentions: mentionsSnapshot, allParticipants: allP)
         do {
             _ = try client.editText(chatJID, m.id, body,
-                                    mentionedJIDs: mentionedJIDs)
+                                    mentionedJIDs: mentionedJIDs,
+                                    ephemeralSeconds: ephemeralExpirationSeconds)
             applyLocalEdit(messageID: m.id, newText: body, at: Date())
             editTarget = nil
         } catch {
@@ -2009,7 +2011,8 @@ final class ConversationViewModel {
                     pollSenderJID: resolvedSender,
                     pollFromMe: pollFromMe,
                     optionHashes: hashes,
-                    pollOptions: options)
+                    pollOptions: options,
+                    ephemeralSeconds: self.ephemeralExpirationSeconds)
                 // Optimistically tally our own vote so the bubble updates
                 // immediately. Use the account's bare JID so the phone's
                 // PollUpdate echo coalesces with this entry instead of
@@ -2090,7 +2093,8 @@ final class ConversationViewModel {
                     targetMsgID: messageID,
                     targetSenderJID: targetSenderJID,
                     targetFromMe: targetFromMe,
-                    emoji: emoji)
+                    emoji: emoji,
+                    ephemeralSeconds: self.ephemeralExpirationSeconds)
                 let rx = BridgeReaction(
                     chatJID: self.chatJID,
                     targetMessageID: messageID,
