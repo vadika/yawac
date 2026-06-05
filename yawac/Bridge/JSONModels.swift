@@ -180,6 +180,11 @@ struct BridgeGroupModel: Codable, Identifiable {
     // default to `false` via the decoder.
     var isAnnounce: Bool
     var isLocked: Bool
+    // `var` so the v0.9.8 member-add-mode toggle can optimistically flip
+    // ahead of the server confirmation event. `true` maps to whatsmeow's
+    // "all_member_add" mode; `false` is the default "admin_add". Cold
+    // payloads default to `false` via the decoder.
+    var isAllMemberAdd: Bool
 
     enum CodingKeys: String, CodingKey {
         case jid, name, topic
@@ -192,6 +197,7 @@ struct BridgeGroupModel: Codable, Identifiable {
         case ephemeralExpirationSeconds = "ephemeral_expiration_seconds"
         case isAnnounce = "is_announce"
         case isLocked = "is_locked"
+        case isAllMemberAdd = "is_all_member_add"
     }
 
     init(jid: String, name: String, topic: String, ownerJID: String,
@@ -201,7 +207,8 @@ struct BridgeGroupModel: Codable, Identifiable {
          joinApprovalMode: Bool = false,
          ephemeralExpirationSeconds: Int32 = 0,
          isAnnounce: Bool = false,
-         isLocked: Bool = false) {
+         isLocked: Bool = false,
+         isAllMemberAdd: Bool = false) {
         self.jid = jid
         self.name = name
         self.topic = topic
@@ -215,6 +222,7 @@ struct BridgeGroupModel: Codable, Identifiable {
         self.ephemeralExpirationSeconds = ephemeralExpirationSeconds
         self.isAnnounce = isAnnounce
         self.isLocked = isLocked
+        self.isAllMemberAdd = isAllMemberAdd
     }
 
     init(from decoder: Decoder) throws {
@@ -239,6 +247,7 @@ struct BridgeGroupModel: Codable, Identifiable {
             try c.decodeIfPresent(Int32.self, forKey: .ephemeralExpirationSeconds) ?? 0
         isAnnounce = try c.decodeIfPresent(Bool.self, forKey: .isAnnounce) ?? false
         isLocked   = try c.decodeIfPresent(Bool.self, forKey: .isLocked) ?? false
+        isAllMemberAdd = try c.decodeIfPresent(Bool.self, forKey: .isAllMemberAdd) ?? false
     }
 }
 

@@ -77,7 +77,8 @@ extension BridgeGroupModel {
                      meJID: String = "me@s.whatsapp.net",
                      ephemeralExpirationSeconds: Int32 = 0,
                      isAnnounce: Bool = false,
-                     isLocked: Bool = false)
+                     isLocked: Bool = false,
+                     isAllMemberAdd: Bool = false)
         -> BridgeGroupModel
     {
         let participants: [BridgeParticipantModel] = [
@@ -96,7 +97,8 @@ extension BridgeGroupModel {
             joinApprovalMode: false,
             ephemeralExpirationSeconds: ephemeralExpirationSeconds,
             isAnnounce: isAnnounce,
-            isLocked: isLocked
+            isLocked: isLocked,
+            isAllMemberAdd: isAllMemberAdd
         )
     }
 }
