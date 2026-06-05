@@ -406,6 +406,23 @@ struct ConversationView: View {
                                                 session.requestSelectChat(jid)
                                             },
                                             onReply: { m in vm.startReply(to: m) },
+                                            onReplyPrivately: { m in
+                                                // UX shortcut: open the DM
+                                                // with the message sender,
+                                                // then stash the reply
+                                                // target on the session so
+                                                // the destination CVM
+                                                // picks it up on mount.
+                                                // 100ms sleep lets the
+                                                // chat-selection swap a
+                                                // fresh CVM into place
+                                                // before we set the field.
+                                                Task { @MainActor in
+                                                    session.requestSelectChat(m.senderJID)
+                                                    try? await Task.sleep(nanoseconds: 100_000_000)
+                                                    session.pendingReplyTarget = m
+                                                }
+                                            },
                                             onEdit: { m in vm.startEdit(m) },
                                             onDeleteForEveryone: { m in Task { await vm.deleteForEveryone(m) } },
                                             onDeleteForMe: { m in vm.deleteForMe(m) },
@@ -604,6 +621,14 @@ struct ConversationView: View {
             self.vm = vm
             session.currentConversation = vm
             vm.chatList = session.chatList
+            // Consume a reply target stashed by the "Reply privately"
+            // affordance in a prior CVM (see MessageRow's
+            // onReplyPrivately wiring above). Clear after read so the
+            // next chat swap doesn't re-trigger.
+            if let pending = session.pendingReplyTarget {
+                vm.replyTarget = pending
+                session.pendingReplyTarget = nil
+            }
             vm.replayPendingForLoadedRows()
             try? client.subscribePresence(chatJID)
             let stream = client.eventStream()
