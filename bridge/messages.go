@@ -115,7 +115,7 @@ func (c *Client) PinMessageInChat(chatJID, targetMsgID, targetSenderJID string, 
 // sent by us.
 //
 // Returns JSON of JSendResult.
-func (c *Client) SendReaction(chatJID, targetMsgID, targetSenderJID string, targetFromMe bool, emoji string) (string, error) {
+func (c *Client) SendReaction(chatJID, targetMsgID, targetSenderJID string, targetFromMe bool, emoji string, ephemeralSec int32) (string, error) {
 	if c.wa == nil {
 		return "", errors.New("client closed")
 	}
@@ -136,7 +136,8 @@ func (c *Client) SendReaction(chatJID, targetMsgID, targetSenderJID string, targ
 			return "", fmt.Errorf("parse sender: %w", err)
 		}
 	}
-	msg := c.wa.BuildReaction(chat, sender, targetMsgID, emoji)
+	inner := c.wa.BuildReaction(chat, sender, targetMsgID, emoji)
+	msg := wrapForChat(inner, ephemeralSec, false)
 	resp, err := c.wa.SendMessage(context.Background(), chat, msg)
 	if err != nil {
 		return "", fmt.Errorf("send reaction: %w", err)

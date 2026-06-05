@@ -407,3 +407,19 @@ func TestDispatchEmitsEphemeralTimerOnInboundWithExpiration(t *testing.T) {
 		t.Errorf("Seconds = %d", got.Seconds)
 	}
 }
+
+func TestSendReactionEphemeralWrap(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/sr.db")
+	defer c.Close()
+	_, err := c.SendReaction("1@s.whatsapp.net", "MSG1", "1@s.whatsapp.net", false, "👍", 86400)
+	if err == nil {
+		t.Fatal("expected error on unpaired client")
+	}
+}
+
+func TestSendReactionSignatureCompiles(t *testing.T) {
+	var _ func(*Client) func(string, string, string, bool, string, int32) (string, error) =
+		func(c *Client) func(string, string, string, bool, string, int32) (string, error) {
+			return c.SendReaction
+		}
+}
