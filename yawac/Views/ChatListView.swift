@@ -44,6 +44,7 @@ struct ChatListView: View {
         case suggestion(PhoneSuggestion)
         case archivedHeader(count: Int)
         case messageSection(count: Int)
+        case messageFilterChips
         case messageHit(hit: MessageIndex.Hit, chatName: String)
         case invitePreview
         var id: String {
@@ -53,6 +54,7 @@ struct ChatListView: View {
             case .suggestion(let s):     return "sug:" + s.jid
             case .archivedHeader:        return "sec:archived-header"
             case .messageSection:        return "sec:messages"
+            case .messageFilterChips:    return "sec:messages-filters"
             case .messageHit(let h, _):  return "mhit:\(h.messageID)"
             case .invitePreview:         return "sec:invite-preview"
             }
@@ -172,8 +174,12 @@ struct ChatListView: View {
             }
         }
 
-        if !search.query.isEmpty && !search.messageHits.isEmpty {
+        if !search.query.isEmpty
+            && (!search.messageHits.isEmpty
+                || !search.filters.isEmpty
+                || search.globalChatFilter != nil) {
             out.append(.messageSection(count: search.messageHits.count))
+            out.append(.messageFilterChips)
             let nameLookup = Dictionary(uniqueKeysWithValues:
                 vm.chats.map { ($0.jid, $0.name) })
             for hit in search.messageHits {
@@ -316,6 +322,8 @@ struct ChatListView: View {
                             archivedHeaderRow(count: count)
                         case .messageSection(let count):
                             sectionLabel("Messages", count: count)
+                        case .messageFilterChips:
+                            messageFilterChipsRow()
                         case .messageHit(let hit, let chatName):
                             messageHitRowButton(hit: hit, chatName: chatName)
                         case .invitePreview:
@@ -512,6 +520,18 @@ struct ChatListView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private func messageFilterChipsRow() -> some View {
+        let chatsList = vm.chats.map { (jid: $0.jid, name: $0.name) }
+        SearchFilterChips(
+            filters: Bindable(search).filters,
+            availableSenders: search.knownGlobalSenders,
+            showChatChip: true,
+            availableChats: chatsList,
+            chatJID: Bindable(search).globalChatFilter
+        )
     }
 
     @ViewBuilder

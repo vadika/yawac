@@ -6,46 +6,58 @@ import SwiftUI
 struct ConversationFindBar: View {
 
     @Bindable var vm: ConversationViewModel
+    @Environment(SessionViewModel.self) private var session
     @FocusState private var fieldFocused: Bool
 
     var body: some View {
-        HStack(spacing: 8) {
-            Button {
-                vm.findActive = false
-            } label: {
-                Image(systemName: "xmark")
-                    .scaledIcon(12, weight: .semibold)
-                    .foregroundStyle(Theme.textMuted)
+        VStack(spacing: 4) {
+            HStack(spacing: 8) {
+                Button {
+                    vm.findActive = false
+                } label: {
+                    Image(systemName: "xmark")
+                        .scaledIcon(12, weight: .semibold)
+                        .foregroundStyle(Theme.textMuted)
+                }
+                .buttonStyle(.plain)
+                .keyboardShortcut(.escape, modifiers: [])
+
+                TextField("Find in conversation", text: $vm.findQuery)
+                    .textFieldStyle(.plain)
+                    .scaledUI(13)
+                    .focused($fieldFocused)
+                    .onSubmit { vm.findNext() }
+
+                counter
+
+                Button { vm.findPrev() } label: {
+                    Image(systemName: "chevron.up")
+                        .scaledIcon(11, weight: .semibold)
+                }
+                .buttonStyle(.plain)
+                .disabled(vm.findHits.isEmpty)
+                .keyboardShortcut("g", modifiers: [.command, .shift])
+
+                Button { vm.findNext() } label: {
+                    Image(systemName: "chevron.down")
+                        .scaledIcon(11, weight: .semibold)
+                }
+                .buttonStyle(.plain)
+                .disabled(vm.findHits.isEmpty)
+                .keyboardShortcut("g", modifiers: .command)
             }
-            .buttonStyle(.plain)
-            .keyboardShortcut(.escape, modifiers: [])
+            .padding(.horizontal, 12)
+            .padding(.top, 6)
 
-            TextField("Find in conversation", text: $vm.findQuery)
-                .textFieldStyle(.plain)
-                .scaledUI(13)
-                .focused($fieldFocused)
-                .onSubmit { vm.findNext() }
-
-            counter
-
-            Button { vm.findPrev() } label: {
-                Image(systemName: "chevron.up")
-                    .scaledIcon(11, weight: .semibold)
-            }
-            .buttonStyle(.plain)
-            .disabled(vm.findHits.isEmpty)
-            .keyboardShortcut("g", modifiers: [.command, .shift])
-
-            Button { vm.findNext() } label: {
-                Image(systemName: "chevron.down")
-                    .scaledIcon(11, weight: .semibold)
-            }
-            .buttonStyle(.plain)
-            .disabled(vm.findHits.isEmpty)
-            .keyboardShortcut("g", modifiers: .command)
+            SearchFilterChips(
+                filters: $vm.findFilters,
+                availableSenders: vm.knownSendersInChat(session: session),
+                showChatChip: false,
+                availableChats: [],
+                chatJID: nil
+            )
+            .padding(.bottom, 4)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
         .background(Theme.surface)
         .overlay(Rectangle().frame(height: 1)
                     .foregroundStyle(Theme.border), alignment: .bottom)
