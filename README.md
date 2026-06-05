@@ -49,9 +49,16 @@ A native macOS SwiftUI client backed by [tulir/whatsmeow](https://github.com/tul
 ## Install via Homebrew
 
 ```sh
-brew tap vadika/yawac https://github.com/vadika/yawac
-brew install --cask vadika/yawac/yawac
+brew install --cask --no-quarantine \
+  https://raw.githubusercontent.com/vadika/yawac/main/Casks/yawac.rb
 ```
+
+Direct cask install avoids `brew tap`, which would do a `git clone`
+and trip on local credential helpers (recent GitHub disables password
+auth and credential helpers prompt unnecessarily for public repos).
+
+To update later, re-run the same command — Homebrew refreshes the cask
+from the raw URL each time.
 
 Builds are ad-hoc signed; the cask strips the macOS quarantine flag
 automatically. Releases are cut from `vX.Y.Z` git tags (e.g. `git tag v0.6.0
