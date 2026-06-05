@@ -152,7 +152,9 @@ final class ChatSearchViewModel {
     private func refreshMessages(_ q: String) async {
         messageTask?.cancel()
         let trimmed = q.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.count < 2 {
+        let hasFilter = !filters.isEmpty
+            || !(globalChatFilter ?? "").isEmpty
+        if trimmed.count < 2 && !hasFilter {
             messageHits = []
             return
         }
