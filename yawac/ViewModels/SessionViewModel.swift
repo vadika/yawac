@@ -211,6 +211,21 @@ final class SessionViewModel {
         return JIDNormalize.same(jid, own, client: client)
     }
 
+    /// Fetch the paired account's own About/status from the server.
+    /// Mirrors `ChatInfoView.loadUserInfo` — the same `getUserInfo`
+    /// path, just keyed by `ownJID`. Returns nil when no client is
+    /// bound, the account isn't paired (empty `ownJID`), or the IQ
+    /// fails. Runs the bridge call on a detached task so the
+    /// multi-second round-trip doesn't block the main actor.
+    func fetchSelfInfo() async -> BridgeUserInfo? {
+        guard let client else { return nil }
+        let own = client.ownJID
+        guard !own.isEmpty else { return nil }
+        return await Task.detached(priority: .userInitiated) {
+            try? client.getUserInfo(jid: own)
+        }.value
+    }
+
     func isBlocked(_ jid: String) -> Bool {
         let bare = JIDNormalize.bare(jid)
         if blockedJIDs.contains(bare) { return true }

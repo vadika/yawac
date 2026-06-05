@@ -598,7 +598,7 @@ class WAClient: PhoneValidating, LIDResolving {
         return try JSONDecoder().decode([BridgeContact].self, from: Data(json.utf8))
     }
 
-    func getUserInfo(jid: String) throws -> BridgeUserInfo {
+    nonisolated func getUserInfo(jid: String) throws -> BridgeUserInfo {
         var err: NSError?
         let json = go.getUserInfo(jid, error: &err)
         if let err { throw err }
