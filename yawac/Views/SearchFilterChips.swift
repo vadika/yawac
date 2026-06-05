@@ -62,15 +62,22 @@ struct SearchFilterChips: View {
     // MARK: - Chips
 
     private var senderChip: some View {
-        let selected = filters.sender
+        // Chip value is the senderJID (stable across push-name
+        // changes). Selected label resolves to the display name via
+        // the availableSenders lookup so the chip reads "Sender:
+        // Anna" instead of "Sender: 49…@s.whatsapp.net".
+        let selectedJID = filters.sender
+        let selectedLabel = selectedJID.flatMap { jid in
+            availableSenders.first(where: { $0.jid == jid })?.name ?? jid
+        }
         return FilterChipShell(
             label: "Sender",
-            selectedLabel: selected,
+            selectedLabel: selectedLabel,
             isDisabled: availableSenders.isEmpty,
             onClear: { filters.sender = nil }
         ) {
             ForEach(availableSenders, id: \.jid) { item in
-                Button(item.name) { filters.sender = item.name }
+                Button(item.name) { filters.sender = item.jid }
             }
             if !availableSenders.isEmpty {
                 Divider()
