@@ -71,14 +71,30 @@ rare-use utilities) ships only when the important list is clear.
 ## Search
 
 - ● **In-chat message search** — ⌘F find bar with ↑/↓ navigation,
-  highlights, locale-aware tokenizer (FTS5). v0.8.4 adds chip-strip
+  highlights, locale-aware tokenizer (FTS5). v0.8.4 added chip-strip
   filters for sender, kind, and date range (Today / Last 7 / 30 /
-  90 / Custom…).
+  90 / Custom…). Sender filter is JID-based (stable across
+  push-name changes) since v0.9.4.
 - ● **Global message search** — sidebar `⌘K` Messages section,
-  tap-to-jump with brief flash highlight. v0.8.4 adds chip-strip
-  filters for chat, sender, kind, and date range. Schema bumped
-  to v2 with `kind UNINDEXED`; existing rows re-bootstrapped on
-  first v0.8.4 launch.
+  tap-to-jump with brief flash highlight. v0.8.4 added chip-strip
+  filters for chat, sender, kind, and date range. v0.9.9 fixed the
+  hit-click → chat-swap + scroll-to-message race so the jump
+  fires reliably across same-chat and cross-chat hits.
+
+    **FTS schema saga (v0.9.2–v0.9.7):** `MessageFTS` schema went
+    v2 → v5 to settle the Sender filter:
+    - v0.9.2: filter-only search (empty query + chips returns hits;
+      adds row count to the find bar).
+    - v0.9.3: cache the paired account's own push name so own
+      outbound rows get a non-empty `sender` value.
+    - v0.9.4: add `sender_jid` UNINDEXED column; filter matches on
+      JID so push-name changes don't fragment chip values.
+    - v0.9.5–v0.9.6: canonicalize sender JIDs (LID → PN) and force
+      a re-bootstrap on the first `.connected` after the initial
+      bootstrap walk, since the setters arrive too late for the
+      app-init pass.
+    - v0.9.7: chip writes JID into `filters.sender` (was display
+      name); label still resolves via the availableSenders lookup.
 
 ## Groups
 
@@ -87,6 +103,8 @@ rare-use utilities) ships only when the important list is clear.
   with `AddRequest` privacy-block surfacing) / remove / promote /
   demote and avatar edit (with crop sheet) shipped 2026-06-02.
   **New group creation** (sidebar `+` menu) shipped in v0.7.1.
+  Announce-mode + edit-info lock + member-add mode shipped in v0.8.2
+  and v0.9.8 (see Shipped section).
   Gaps:
     - ☐ **Promote plain group → community parent** — whatsmeow's
       `CreateGroup{IsParent:true}` is create-time only. Post-hoc
@@ -96,15 +114,6 @@ rare-use utilities) ships only when the important list is clear.
       last member is gone. Local `deleteChat` removes the row from
       the sidebar + cross-device-syncs the deletion (shipped); no
       true delete on the wire.
-
-    **v0.8.2 fix:** SetGroupAnnounce + SetGroupLocked toggles
-    shipped in ChatInfoView; ComposerView hides input for non-admins
-    in announce-mode groups. Super-admin badge is rendered at
-    `ChatInfoView:1343` (SUPER role badge).
-
-    **v0.9.8 fix:** SetGroupMemberAddMode toggle shipped — admins
-    can switch between admin-only and all-member-can-add modes via
-    a "MEMBERS CAN ADD NEW MEMBERS" row in ChatInfoView.
 
 ## Channels / Communities
 
@@ -144,15 +153,10 @@ rare-use utilities) ships only when the important list is clear.
 
 - ☐ **Linked-devices** view + manage.
 - ☐ **Privacy settings** (last seen / about / profile photo).
-- ◐ **Own profile edit** — About + avatar editable in Settings →
-  About me (v0.9.0). Push name still phone-only — whatsmeow has no
-  top-level setter; would need a `SETTING_PUSHNAME` app-state patch.
-  Tracked for a v0.9.x follow-up.
-
-    **v0.9.1 update:** About + avatar edit relocated to the User
-    Info pane (self-chat ChatInfoView) using the same hover
-    overlay + crop sheet mechanism as group photos. Settings ABOUT
-    ME section removed.
+- ☐ **Push-name edit** — About + avatar shipped (v0.9.0 / v0.9.1,
+  see Shipped). Push name (display name) is the only remaining
+  profile field — whatsmeow has no top-level setter, so a
+  `SETTING_PUSHNAME` app-state patch is needed. Phone-only for now.
 - ☐ **2FA** (account-level).
 
 ## Messaging gaps (against shipped surface)
@@ -161,17 +165,12 @@ rare-use utilities) ships only when the important list is clear.
   captures + transmits waveform bytes, but the inbound bubble shows
   a plain `ProgressView` linear bar instead of the WhatsApp-style
   bar visualization.
-- ☑ **Reply-privately to group message** — right-click an inbound
-  group message → "Reply privately…" switches to the sender's DM
-  with the original message quoted. Pure UX shortcut (no protocol
-  changes). Shipped in v0.8.3.
 - ☐ **Cross-device-sync own outbound edits / reactions** — edits + own
   reactions made on the phone don't always re-merge into yawac's
   bubble without a fresh history sync.
-- ☑ **Self-chat ("Message yourself")** — sidebar row + chat header now
-  carry a " (You)" suffix at the self-chat (`<ownJID>@s.whatsapp.net`).
-  Composer + receipt path already worked as a generic 1:1; smoke
-  pass confirmed no edge-case regressions. Shipped in v0.8.3.
+
+> Reply-privately + self-chat "(You)" suffix shipped in v0.8.3 —
+> see Shipped section.
 
 ---
 
@@ -197,6 +196,27 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **Group admin polish** (v0.8.2) — `SetGroupAnnounce` /
+  `SetGroupLocked` toggles in ChatInfoView; ComposerView hides
+  input for non-admins in announce-mode groups. Super-admin badge
+  rendered with `Theme.superRole` purple.
+- ✅ **Reply-privately + self-chat (You) label** (v0.8.3) — group
+  ctx menu "Reply privately…" routes to DM with quote handoff;
+  "(You)" suffix on sidebar + chat header for `<ownJID>@s.whatsapp.net`.
+- ✅ **Search filters** (v0.8.4) — sender / kind / date / chat
+  chips in ⌘F + ⌘K. Schema migrations v2 → v5 with JID-based
+  sender filter, canonical LID→PN, filter-only path. See Search
+  section above for the full saga.
+- ✅ **Own profile edit (About + avatar)** (v0.9.0 → v0.9.1) —
+  About editor + avatar pencil overlay live in the User Info pane
+  (self-chat ChatInfoView), reusing the group-avatar
+  AvatarCropSheet flow. Push name remains phone-only (no
+  whatsmeow top-level setter; would need a
+  `SETTING_PUSHNAME` app-state patch). Tracked separately under
+  Account / Privacy.
+- ✅ **Members can add new members** (v0.9.8) —
+  `SetGroupMemberAddMode` toggle in ChatInfoView lets admins
+  switch between `admin_add` and `all_member_add`.
 - ✅ **Mute chat** — 8h/1w/Always submenu in sidebar + header context
   menus; bell-slash badge + dimmed unread chip; banner/dock/reaction
   suppression; @-mention pierce; cross-device sync via events.Mute +
