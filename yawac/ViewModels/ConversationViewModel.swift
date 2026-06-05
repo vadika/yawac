@@ -110,15 +110,17 @@ final class ConversationViewModel {
     var findCurrentIdx: Int = 0
     var findHitIDs: Set<String> { Set(findHits.map(\.messageID)) }
 
-    /// Sender values from the FTS index for this chat — used to populate
-    /// the in-chat Sender filter picker. Values are read directly from
-    /// `MessageFTS.sender` so the chip label matches what an
-    /// equality-filter query will compare against. The `session`
-    /// argument is unused now but kept for the call-site signature.
+    /// Sender (jid, displayName) pairs from the FTS index for this
+    /// chat. Drives the in-chat Sender filter picker. The chip value is
+    /// the JID so filter equality survives push-name changes; the label
+    /// resolves via `session.displayName` when known, falling back to
+    /// the indexed push name.
     func knownSendersInChat(session: SessionViewModel) -> [(jid: String, name: String)] {
-        _ = session
-        return messageIndex.distinctSendersInChat(jid: chatJID)
-            .map { (jid: $0, name: $0) }
+        return messageIndex.distinctSendersInChat(jid: chatJID).map { row in
+            let resolved = session.displayName(for: row.jid)
+            let label = resolved.isEmpty ? row.name : resolved
+            return (jid: row.jid, name: label)
+        }
     }
 
     private var findTask: Task<Void, Never>?

@@ -436,12 +436,14 @@ final class SessionViewModel {
             markConnected()
             syncing = true
             armSyncWatchdog()
-            // Cache the paired account's own push name on the FTS index
-            // so own-outbound rows (whatsmeow never sets senderPushName
-            // on fromMe = true) get a non-empty `sender` value for the
-            // in-chat / global Sender filter.
+            // Cache the paired account's own push name + bare JID on
+            // the FTS index. Push name fills `sender` for own-outbound
+            // rows (whatsmeow never sets senderPushName on fromMe =
+            // true); bare JID fills `sender_jid` so the Sender filter
+            // is stable across push-name changes.
             if let client {
                 MessageIndex.shared.setOwnPushName(client.ownPushName)
+                MessageIndex.shared.setOwnBareJID(client.ownJID)
             }
             // Publish our own presence as available so whatsmeow honors
             // SubscribePresence(jid) calls — peers don't share presence

@@ -21,6 +21,7 @@ final class MessageIndex {
         let quoted: String
         let sender: String
         let fromMe: Bool
+        let senderJID: String
     }
 
     /// Optional filter knobs layered on top of the FTS5 MATCH clause.
@@ -63,13 +64,13 @@ final class MessageIndex {
 
     init(storeURL: URL) {
         self.storeURL = storeURL
-        // Restore the cached own push name from a prior launch so the
-        // bootstrap walk (which runs before .connected fires the live
-        // pushName setter) can fill in fromMe rows with a non-empty
-        // sender value.
-        let cached = UserDefaults.standard
+        // Restore the cached own push name + bare JID from a prior
+        // launch so the bootstrap walk (which runs before .connected
+        // fires the live setters) gets non-empty values.
+        self.ownPushName = UserDefaults.standard
             .string(forKey: "messageIndexOwnPushName") ?? ""
-        self.ownPushName = cached
+        self.ownBareJID = UserDefaults.standard
+            .string(forKey: "messageIndexOwnBareJID") ?? ""
     }
 
     private static func defaultStoreURL() -> URL {
@@ -98,21 +99,21 @@ final class MessageIndex {
             sqlite3_exec(db, "PRAGMA journal_mode=WAL;", nil, nil, nil)
             sqlite3_exec(db, "PRAGMA synchronous=NORMAL;", nil, nil, nil)
         }
-        // Schema v1 → v2: added `kind` column. Schema v2 → v3: rebuilds
-        // the index so fromMe rows with empty `senderPushName` get the
-        // own-push-name fallback at upsert time. FTS5 can't ALTER ADD
-        // COLUMN; both bumps drop and re-create, letting
+        // Schema v1 → v2: added `kind` column. v2 → v3: rebuilt for the
+        // own-push-name fallback. v3 → v4: added `sender_jid` so the
+        // Sender filter is stable across push-name changes. FTS5 can't
+        // ALTER ADD COLUMN; bumps drop and re-create, letting
         // `bootstrapIfNeeded` repopulate from ZPERSISTEDMESSAGE.
         let schemaKey = "messageIndexSchemaVersion"
         let currentVersion = UserDefaults.standard.integer(forKey: schemaKey)
-        if currentVersion < 3 {
+        if currentVersion < 4 {
             sqlite3_exec(db, "DROP TABLE IF EXISTS MessageFTS;", nil, nil, nil)
-            UserDefaults.standard.set(3, forKey: schemaKey)
+            UserDefaults.standard.set(4, forKey: schemaKey)
         }
         let create = """
             CREATE VIRTUAL TABLE IF NOT EXISTS MessageFTS USING fts5(
                 msgid UNINDEXED, chatjid UNINDEXED, ts UNINDEXED,
-                kind UNINDEXED,
+                kind UNINDEXED, sender_jid UNINDEXED,
                 text, caption, quoted, sender,
                 tokenize = 'unicode61'
             );
@@ -129,22 +130,43 @@ final class MessageIndex {
     private func upsertLocked(_ f: MessageFields) {
         ensureSchemaLocked()
         let sender = senderForIndex(f)
+        let jid = senderJIDForIndex(f)
         sqlite3_exec(db, "BEGIN IMMEDIATE;", nil, nil, nil)
         var ok = execStep(sql: "DELETE FROM MessageFTS WHERE msgid = ?;",
                           binds: [.text(f.messageID)])
         if ok {
             ok = execStep(sql: """
-                INSERT INTO MessageFTS(msgid, chatjid, ts, kind, text, caption, quoted, sender)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+                INSERT INTO MessageFTS(msgid, chatjid, ts, kind, sender_jid,
+                                       text, caption, quoted, sender)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
                 """,
                 binds: [
                     .text(f.messageID), .text(f.chatJID), .int(f.timestamp),
-                    .text(f.kind),
+                    .text(f.kind), .text(jid),
                     .text(f.text), .text(f.caption),
                     .text(f.quoted), .text(sender),
                 ])
         }
         sqlite3_exec(db, ok ? "COMMIT;" : "ROLLBACK;", nil, nil, nil)
+    }
+
+    /// Sender JID we should index for a row. Own outbound rows often
+    /// carry no senderJID (or the device-suffixed own JID) — normalise
+    /// to the bare own JID so equality filters work uniformly.
+    private func senderJIDForIndex(_ f: MessageFields) -> String {
+        if f.fromMe { return ownBareJID }
+        return JIDNormalize.bare(f.senderJID)
+    }
+
+    /// Bare paired-account JID. Cached so the upsert path doesn't have
+    /// to thread a client reference. Set on .connected.
+    private var ownBareJID: String = ""
+
+    func setOwnBareJID(_ jid: String) {
+        let bare = JIDNormalize.bare(jid)
+        guard !bare.isEmpty else { return }
+        queue.sync { ownBareJID = bare }
+        UserDefaults.standard.set(bare, forKey: "messageIndexOwnBareJID")
     }
 
     /// Returns the sender string we should index for a row. Own outbound
@@ -260,17 +282,18 @@ final class MessageIndex {
         }
     }
 
-    /// Distinct, non-empty `sender` values currently indexed for the
-    /// given chat. Drives the in-chat Sender filter picker — values
-    /// match the FTS5 column verbatim so an equality filter never
-    /// drifts away from what the chip shows.
-    func distinctSendersInChat(jid: String) -> [String] {
+    /// (senderJID, lastSeenPushName) pairs observed in the given chat.
+    /// Drives the in-chat Sender filter picker. Filter equality matches
+    /// on the JID so push-name changes over time don't fragment the
+    /// chip list.
+    func distinctSendersInChat(jid: String) -> [(jid: String, name: String)] {
         return queue.sync {
             ensureSchemaLocked()
             var stmt: OpaquePointer?
             let sql = """
-                SELECT DISTINCT sender FROM MessageFTS
-                WHERE chatjid = ? AND sender != ''
+                SELECT sender_jid, sender FROM MessageFTS
+                WHERE chatjid = ? AND sender_jid != ''
+                GROUP BY sender_jid
                 ORDER BY sender COLLATE NOCASE ASC;
                 """
             guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK
@@ -280,31 +303,36 @@ final class MessageIndex {
                 OpaquePointer(bitPattern: -1)!,
                 to: sqlite3_destructor_type.self)
             sqlite3_bind_text(stmt, 1, jid, -1, TRANSIENT)
-            var out: [String] = []
+            var out: [(jid: String, name: String)] = []
             while sqlite3_step(stmt) == SQLITE_ROW {
-                out.append(stringCol(stmt, 0))
+                let j = stringCol(stmt, 0)
+                let n = stringCol(stmt, 1)
+                out.append((jid: j, name: n.isEmpty ? j : n))
             }
             return out
         }
     }
 
-    /// Distinct, non-empty `sender` values across all chats. Drives the
+    /// (senderJID, lastSeenPushName) pairs across all chats. Drives the
     /// global ⌘K Sender filter picker.
-    func distinctSendersGlobal() -> [String] {
+    func distinctSendersGlobal() -> [(jid: String, name: String)] {
         return queue.sync {
             ensureSchemaLocked()
             var stmt: OpaquePointer?
             let sql = """
-                SELECT DISTINCT sender FROM MessageFTS
-                WHERE sender != ''
+                SELECT sender_jid, sender FROM MessageFTS
+                WHERE sender_jid != ''
+                GROUP BY sender_jid
                 ORDER BY sender COLLATE NOCASE ASC;
                 """
             guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK
             else { return [] }
             defer { sqlite3_finalize(stmt) }
-            var out: [String] = []
+            var out: [(jid: String, name: String)] = []
             while sqlite3_step(stmt) == SQLITE_ROW {
-                out.append(stringCol(stmt, 0))
+                let j = stringCol(stmt, 0)
+                let n = stringCol(stmt, 1)
+                out.append((jid: j, name: n.isEmpty ? j : n))
             }
             return out
         }
@@ -317,7 +345,7 @@ final class MessageIndex {
                                      clauses: inout [String],
                                      binds: inout [Bind]) {
         if let sender = f.sender, !sender.isEmpty {
-            clauses.append("sender = ?")
+            clauses.append("sender_jid = ?")
             binds.append(.text(sender))
         }
         if let kind = f.kind, !kind.isEmpty {
@@ -376,12 +404,13 @@ final class MessageIndex {
                     if !execStep(sql: "DELETE FROM MessageFTS WHERE msgid = ?;",
                                  binds: [.text(f.messageID)]) { ok = false; break }
                     if !execStep(sql: """
-                        INSERT INTO MessageFTS(msgid, chatjid, ts, kind, text, caption, quoted, sender)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+                        INSERT INTO MessageFTS(msgid, chatjid, ts, kind, sender_jid,
+                                               text, caption, quoted, sender)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
                         """,
                         binds: [
                             .text(f.messageID), .text(f.chatJID), .int(f.timestamp),
-                            .text(f.kind),
+                            .text(f.kind), .text(senderJIDForIndex(f)),
                             .text(f.text), .text(f.caption),
                             .text(f.quoted), .text(senderForIndex(f)),
                         ]) { ok = false; break }
@@ -411,7 +440,7 @@ final class MessageIndex {
         var stmt: OpaquePointer?
         let sql = """
             SELECT ZID, ZCHATJID, ZTIMESTAMP, ZKIND, ZTEXT, ZMEDIACAPTION,
-                   ZQUOTEDTEXTSNIPPET, ZSENDERPUSHNAME, ZFROMME
+                   ZQUOTEDTEXTSNIPPET, ZSENDERPUSHNAME, ZFROMME, ZSENDERJID
             FROM ZPERSISTEDMESSAGE
             ORDER BY Z_PK ASC
             LIMIT ? OFFSET ?;
@@ -437,7 +466,8 @@ final class MessageIndex {
                 caption:   stringFromStmt(stmt, 5),
                 quoted:    stringFromStmt(stmt, 6),
                 sender:    stringFromStmt(stmt, 7),
-                fromMe:    sqlite3_column_int64(stmt, 8) != 0))
+                fromMe:    sqlite3_column_int64(stmt, 8) != 0,
+                senderJID: stringFromStmt(stmt, 9)))
         }
         return out
     }

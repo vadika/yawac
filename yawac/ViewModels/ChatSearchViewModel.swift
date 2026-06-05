@@ -186,12 +186,12 @@ final class ChatSearchViewModel {
         }
     }
 
-    /// Distinct sender push-name strings indexed across all chats.
-    /// Values come straight from `MessageFTS.sender` so the chip label
-    /// matches what an equality-filter query compares against.
+    /// Distinct (senderJID, label) pairs indexed globally. JID stable
+    /// across push-name changes; label resolves through
+    /// SessionViewModel display names when available, falling back to
+    /// the indexed push name otherwise.
     var knownGlobalSenders: [(jid: String, name: String)] {
         return messageIndex.distinctSendersGlobal()
-            .map { (jid: $0, name: $0) }
     }
 
     private func maybeResolveInviteLink(_ q: String) async {

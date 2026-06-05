@@ -20,11 +20,13 @@ final class MessageSearchViewModelTests: XCTestCase {
         idx.upsert(.init(messageID: "m1", chatJID: "A@s.whatsapp.net",
                          timestamp: 10, kind: "text",
                          text: "Hello Finland", caption: "",
-                         quoted: "", sender: "Alice", fromMe: false))
+                         quoted: "", sender: "Alice", fromMe: false,
+                         senderJID: ""))
         idx.upsert(.init(messageID: "m2", chatJID: "B@s.whatsapp.net",
                          timestamp: 20, kind: "text",
                          text: "Hello world", caption: "",
-                         quoted: "", sender: "Bob", fromMe: false))
+                         quoted: "", sender: "Bob", fromMe: false,
+                         senderJID: ""))
     }
     override func tearDown() async throws {
         try? FileManager.default.removeItem(at: tmpDB)

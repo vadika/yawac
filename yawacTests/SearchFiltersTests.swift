@@ -27,13 +27,17 @@ final class SearchFiltersTests: XCTestCase {
     }
 
     /// Tuple shape: (msgid, chatjid, ts, kind, text, sender_push_name).
+    /// The senderJID stored on the FTS row mirrors `sender_push_name`
+    /// so the existing per-test fixtures keep working when the filter
+    /// became JID-based: tests pass the push name verbatim into both
+    /// the row's senderJID column and the filter's `sender` selector.
     private func seed(_ idx: MessageIndex,
                       _ rows: [(String, String, Int64, String, String, String)]) {
         for r in rows {
             idx.upsert(.init(
                 messageID: r.0, chatJID: r.1, timestamp: r.2,
                 kind: r.3, text: r.4, caption: "", quoted: "",
-                sender: r.5, fromMe: false))
+                sender: r.5, fromMe: false, senderJID: r.5))
         }
     }
 

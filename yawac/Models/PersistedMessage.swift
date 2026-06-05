@@ -250,6 +250,7 @@ extension PersistedMessage {
             caption:   mediaCaption ?? "",
             quoted:    quotedTextSnippet ?? "",
             sender:    senderPushName ?? "",
-            fromMe:    fromMe)
+            fromMe:    fromMe,
+            senderJID: senderJID)
     }
 }
