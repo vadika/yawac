@@ -88,6 +88,7 @@ struct ContentView: View {
             let vm = ChatListViewModel(client: client, context: modelContext)
             vm.session = session
             session.chatList = vm
+            session.modelContext = modelContext
             self.chatList = vm
             self.chatSearch = ChatSearchViewModel(listVM: vm, validator: client)
             // Restore last-opened chat if it's in our chats list.
@@ -137,6 +138,9 @@ struct ContentView: View {
                     vm.reconcileLIDDuplicates()
                     session.loadBlocklist()
                 case .historySync:
+                    if !UserDefaults.standard.bool(forKey: "historyBackfillCompleted") {
+                        UserDefaults.standard.set(true, forKey: "historyBackfillCompleted")
+                    }
                     let cs = (try? client.listContacts()) ?? []
                     vm.resolveNames(cs)
                     vm.mergeContacts(cs)
