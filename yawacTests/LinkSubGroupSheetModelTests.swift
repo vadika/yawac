@@ -75,7 +75,9 @@ extension BridgeGroupModel {
                      linkedParent: String? = nil,
                      amAdmin: Bool = false,
                      meJID: String = "me@s.whatsapp.net",
-                     ephemeralExpirationSeconds: Int32 = 0)
+                     ephemeralExpirationSeconds: Int32 = 0,
+                     isAnnounce: Bool = false,
+                     isLocked: Bool = false)
         -> BridgeGroupModel
     {
         let participants: [BridgeParticipantModel] = [
@@ -92,7 +94,9 @@ extension BridgeGroupModel {
             linkedParentJID: linkedParent,
             isDefaultSubGroup: false,
             joinApprovalMode: false,
-            ephemeralExpirationSeconds: ephemeralExpirationSeconds
+            ephemeralExpirationSeconds: ephemeralExpirationSeconds,
+            isAnnounce: isAnnounce,
+            isLocked: isLocked
         )
     }
 }

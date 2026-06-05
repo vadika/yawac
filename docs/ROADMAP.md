@@ -92,12 +92,6 @@ rare-use utilities) ships only when the important list is clear.
   demote and avatar edit (with crop sheet) shipped 2026-06-02.
   **New group creation** (sidebar `+` menu) shipped in v0.7.1.
   Gaps:
-    - ☐ **"Admins only" message-send toggle** (`SetGroupAnnounce`) —
-      announcement-group mode; whatsmeow has the RPC, yawac doesn't
-      expose it.
-    - ☐ **"Admins only" edit-info toggle** (`SetGroupLocked`) — locks
-      name / description / avatar to admins only; whatsmeow has the
-      RPC, yawac doesn't expose it.
     - ☐ **Promote plain group → community parent** — whatsmeow's
       `CreateGroup{IsParent:true}` is create-time only. Post-hoc
       conversion isn't exposed upstream.
@@ -106,8 +100,11 @@ rare-use utilities) ships only when the important list is clear.
       last member is gone. Local `deleteChat` removes the row from
       the sidebar + cross-device-syncs the deletion (shipped); no
       true delete on the wire.
-    - ☐ **Super-admin badge** — `isSuperAdmin` flag is decoded on
-      participants but the row UI doesn't surface it.
+
+    **v0.8.2 fix:** SetGroupAnnounce + SetGroupLocked toggles
+    shipped in ChatInfoView; ComposerView hides input for non-admins
+    in announce-mode groups. Super-admin badge is rendered at
+    `ChatInfoView:1343` (SUPER role badge).
 
 ## Channels / Communities
 

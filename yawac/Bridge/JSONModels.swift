@@ -175,6 +175,11 @@ struct BridgeGroupModel: Codable, Identifiable {
     // apply a new timer (mirrors the `joinApprovalMode` pattern). Cold
     // payloads default to 0 via the decoder.
     var ephemeralExpirationSeconds: Int32
+    // `var` so the group-admin polish UI (Task 8) can optimistically flip
+    // these flags ahead of the server confirmation event. Cold payloads
+    // default to `false` via the decoder.
+    var isAnnounce: Bool
+    var isLocked: Bool
 
     enum CodingKeys: String, CodingKey {
         case jid, name, topic
@@ -185,6 +190,8 @@ struct BridgeGroupModel: Codable, Identifiable {
         case isDefaultSubGroup = "is_default_sub_group"
         case joinApprovalMode = "join_approval_mode"
         case ephemeralExpirationSeconds = "ephemeral_expiration_seconds"
+        case isAnnounce = "is_announce"
+        case isLocked = "is_locked"
     }
 
     init(jid: String, name: String, topic: String, ownerJID: String,
@@ -192,7 +199,9 @@ struct BridgeGroupModel: Codable, Identifiable {
          isParent: Bool = false, linkedParentJID: String? = nil,
          isDefaultSubGroup: Bool = false,
          joinApprovalMode: Bool = false,
-         ephemeralExpirationSeconds: Int32 = 0) {
+         ephemeralExpirationSeconds: Int32 = 0,
+         isAnnounce: Bool = false,
+         isLocked: Bool = false) {
         self.jid = jid
         self.name = name
         self.topic = topic
@@ -204,6 +213,8 @@ struct BridgeGroupModel: Codable, Identifiable {
         self.isDefaultSubGroup = isDefaultSubGroup
         self.joinApprovalMode = joinApprovalMode
         self.ephemeralExpirationSeconds = ephemeralExpirationSeconds
+        self.isAnnounce = isAnnounce
+        self.isLocked = isLocked
     }
 
     init(from decoder: Decoder) throws {
@@ -226,6 +237,8 @@ struct BridgeGroupModel: Codable, Identifiable {
         joinApprovalMode = try c.decodeIfPresent(Bool.self, forKey: .joinApprovalMode) ?? false
         ephemeralExpirationSeconds =
             try c.decodeIfPresent(Int32.self, forKey: .ephemeralExpirationSeconds) ?? 0
+        isAnnounce = try c.decodeIfPresent(Bool.self, forKey: .isAnnounce) ?? false
+        isLocked   = try c.decodeIfPresent(Bool.self, forKey: .isLocked) ?? false
     }
 }
 

@@ -177,6 +177,25 @@ type JJoinApprovalModeChanged struct {
 	Timestamp int64  `json:"timestamp"`
 }
 
+// JGroupAnnounceChanged carries a group's announce-mode toggle (admin-only
+// posting). On=true means only admins can send messages.
+type JGroupAnnounceChanged struct {
+	ChatJID   string `json:"chat_jid"`
+	On        bool   `json:"on"`
+	ActorJID  string `json:"actor_jid,omitempty"`
+	Timestamp int64  `json:"timestamp"`
+}
+
+// JGroupLockedChanged carries a group's locked-mode toggle (admin-only
+// edit-info). On=true means only admins can edit group info (name,
+// description, icon).
+type JGroupLockedChanged struct {
+	ChatJID   string `json:"chat_jid"`
+	On        bool   `json:"on"`
+	ActorJID  string `json:"actor_jid,omitempty"`
+	Timestamp int64  `json:"timestamp"`
+}
+
 // JEphemeralTimerChanged carries a disappearing-messages timer change for
 // a chat. Seconds == 0 means "off" (timer cleared). Fan-out source is
 // either a group GroupInfo with non-nil Ephemeral, or a 1:1 inbound

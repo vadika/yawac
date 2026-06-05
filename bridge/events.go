@@ -283,6 +283,38 @@ func (c *Client) dispatchGroupInfo(evt *events.GroupInfo) {
 		c.dispatch("JoinApprovalModeChanged", string(b))
 	}
 
+	// Announce-mode toggle (admin-only posting). types.GroupAnnounce
+	// carries IsAnnounce; forward as on=true/false.
+	if evt.Announce != nil {
+		actor := ""
+		if evt.Sender != nil {
+			actor = evt.Sender.String()
+		}
+		b, _ := json.Marshal(JGroupAnnounceChanged{
+			ChatJID:   evt.JID.String(),
+			On:        evt.Announce.IsAnnounce,
+			ActorJID:  actor,
+			Timestamp: evt.Timestamp.Unix(),
+		})
+		c.dispatch("GroupAnnounceChanged", string(b))
+	}
+
+	// Locked-mode toggle (admin-only edit-info). types.GroupLocked
+	// carries IsLocked; forward as on=true/false.
+	if evt.Locked != nil {
+		actor := ""
+		if evt.Sender != nil {
+			actor = evt.Sender.String()
+		}
+		b, _ := json.Marshal(JGroupLockedChanged{
+			ChatJID:   evt.JID.String(),
+			On:        evt.Locked.IsLocked,
+			ActorJID:  actor,
+			Timestamp: evt.Timestamp.Unix(),
+		})
+		c.dispatch("GroupLockedChanged", string(b))
+	}
+
 	// Disappearing-messages timer change. types.GroupEphemeral carries
 	// IsEphemeral + DisappearingTimer; we forward the timer regardless of
 	// IsEphemeral (timer==0 already encodes "off" on the Swift side).

@@ -545,6 +545,8 @@ final class ChatListViewModel {
                 c.joinApprovalMode = g.joinApprovalMode
                 c.amAdmin = amAdmin
                 c.ephemeralExpirationSeconds = g.ephemeralExpirationSeconds
+                c.isAnnounce = g.isAnnounce
+                c.isLocked = g.isLocked
                 if c.name == jid && !g.name.isEmpty { c.name = g.name }
                 chats[idx] = c
                 upsertPersisted(c)
@@ -563,6 +565,8 @@ final class ChatListViewModel {
             fresh.joinApprovalMode = g.joinApprovalMode
             fresh.amAdmin = amAdmin
             fresh.ephemeralExpirationSeconds = g.ephemeralExpirationSeconds
+            fresh.isAnnounce = g.isAnnounce
+            fresh.isLocked = g.isLocked
             chats.append(fresh)
             upsertPersisted(chats[chats.count - 1])
         }
@@ -1083,6 +1087,30 @@ final class ChatListViewModel {
             return
         }
         chats[idx].ephemeralExpirationSeconds = seconds
+    }
+
+    /// Apply a live "Only admins can send messages" flip (or an optimistic
+    /// local toggle from the group-admin inspector row) onto `Chat.isAnnounce`
+    /// so the inspector reflects the new state without waiting for the next
+    /// `mergeGroups`. Runtime-only — the field is not persisted (a fresh
+    /// ListGroups on the next connect repopulates it).
+    func applyGroupAnnounce(chatJID: String, on: Bool) {
+        guard let idx = chats.firstIndex(where: { $0.jid == chatJID }) else {
+            return
+        }
+        chats[idx].isAnnounce = on
+    }
+
+    /// Apply a live "Only admins can edit group info" flip (or an optimistic
+    /// local toggle from the group-admin inspector row) onto `Chat.isLocked`
+    /// so the inspector reflects the new state without waiting for the next
+    /// `mergeGroups`. Runtime-only — the field is not persisted (a fresh
+    /// ListGroups on the next connect repopulates it).
+    func applyGroupLocked(chatJID: String, on: Bool) {
+        guard let idx = chats.firstIndex(where: { $0.jid == chatJID }) else {
+            return
+        }
+        chats[idx].isLocked = on
     }
 
     /// Pending join-request count to render in the sidebar chip for

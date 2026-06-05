@@ -35,6 +35,41 @@ struct ComposerView: View {
     @State private var showContactPicker = false
 
     var body: some View {
+        if let chat = currentChat, chat.isAnnounce, !chat.amAdmin {
+            announceLockedNotice
+        } else {
+            composerBody
+        }
+    }
+
+    /// The active `Chat` for `vm.chatJID`. Resolved through the session's
+    /// canonical chat list so the gate stays in sync with the same
+    /// `isAnnounce` / `amAdmin` fields ChatInfoView mutates.
+    private var currentChat: Chat? {
+        session.chatList?.chats.first(where: { $0.jid == vm.chatJID })
+    }
+
+    /// Shown in place of the composer when the chat is in announce mode
+    /// and the user is not an admin. WhatsApp would reject the message
+    /// server-side anyway; replacing the input row makes the gate
+    /// visible up-front instead of surfacing a delivery failure later.
+    private var announceLockedNotice: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "megaphone.fill")
+                .scaledIcon(14)
+                .foregroundStyle(Theme.textMuted)
+            Text("Only admins can send messages in this group.")
+                .italic()
+                .scaledUI(12)
+                .foregroundStyle(Theme.textMuted)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 12)
+        .padding(.horizontal, 16)
+        .background(Theme.surface)
+    }
+
+    private var composerBody: some View {
         VStack(spacing: 8) {
             replyChip
             editChip

@@ -515,3 +515,56 @@ func TestDispatchEphemeralTimerChangedOnDirectMessage(t *testing.T) {
 		t.Error("expected EphemeralSetting carrier message to be suppressed")
 	}
 }
+
+// TestDispatchGroupInfoFiresGroupAnnounceChanged verifies that when
+// whatsmeow surfaces a GroupInfo carrying a non-nil Announce (admin-only
+// posting toggle), dispatchGroupInfo fans out a GroupAnnounceChanged
+// event with the new on/off flag.
+func TestDispatchGroupInfoFiresGroupAnnounceChanged(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/gi_ann.db")
+	defer c.Close()
+	sink := newRecSink()
+	c.SetEventSink(sink)
+	chat := types.JID{User: "888", Server: types.GroupServer}
+	sender, _ := types.ParseJID("999@s.whatsapp.net")
+	c.dispatchGroupInfo(&events.GroupInfo{
+		JID:       chat,
+		Sender:    &sender,
+		Announce:  &types.GroupAnnounce{IsAnnounce: true},
+		Timestamp: time.Unix(1700000000, 0),
+	})
+	ev := sink.wait(t, "GroupAnnounceChanged", time.Second)
+	if !strings.Contains(ev.payload, `"on":true`) {
+		t.Errorf("payload missing on=true: %s", ev.payload)
+	}
+	if !strings.Contains(ev.payload, `"chat_jid":"888@g.us"`) {
+		t.Errorf("payload missing chat_jid: %s", ev.payload)
+	}
+	if !strings.Contains(ev.payload, `"actor_jid":"999@s.whatsapp.net"`) {
+		t.Errorf("payload missing actor_jid: %s", ev.payload)
+	}
+}
+
+// TestDispatchGroupInfoFiresGroupLockedChanged verifies that when
+// whatsmeow surfaces a GroupInfo carrying a non-nil Locked (admin-only
+// edit-info toggle), dispatchGroupInfo fans out a GroupLockedChanged
+// event with the new on/off flag.
+func TestDispatchGroupInfoFiresGroupLockedChanged(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/gi_lck.db")
+	defer c.Close()
+	sink := newRecSink()
+	c.SetEventSink(sink)
+	chat := types.JID{User: "888", Server: types.GroupServer}
+	c.dispatchGroupInfo(&events.GroupInfo{
+		JID:       chat,
+		Locked:    &types.GroupLocked{IsLocked: false},
+		Timestamp: time.Unix(1700000000, 0),
+	})
+	ev := sink.wait(t, "GroupLockedChanged", time.Second)
+	if !strings.Contains(ev.payload, `"on":false`) {
+		t.Errorf("payload missing on=false: %s", ev.payload)
+	}
+	if !strings.Contains(ev.payload, `"chat_jid":"888@g.us"`) {
+		t.Errorf("payload missing chat_jid: %s", ev.payload)
+	}
+}
