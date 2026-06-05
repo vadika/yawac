@@ -52,6 +52,14 @@ class WAClient: PhoneValidating, LIDResolving {
                                      on: Bool,
                                      actorJID: String,
                                      timestamp: Int64)
+        case groupAnnounceChanged(chatJID: String,
+                                  on: Bool,
+                                  actorJID: String,
+                                  timestamp: Int64)
+        case groupLockedChanged(chatJID: String,
+                                on: Bool,
+                                actorJID: String,
+                                timestamp: Int64)
         case ephemeralTimerChanged(chatJID: String,
                                    seconds: Int32,
                                    actorJID: String,
@@ -705,6 +713,19 @@ class WAClient: PhoneValidating, LIDResolving {
         try go.setGroupJoinApprovalMode(chatJID, on: on)
     }
 
+    /// Toggles announcement-mode on a group. When on, only admins may post.
+    /// Admin only.
+    nonisolated func setGroupAnnounce(chatJID: String, on: Bool) throws {
+        try go.setGroupAnnounce(chatJID, on: on)
+    }
+
+    /// Toggles edit-locked-mode on a group. When on, only admins may edit
+    /// group info (name / description / icon).
+    /// Admin only.
+    nonisolated func setGroupLocked(chatJID: String, on: Bool) throws {
+        try go.setGroupLocked(chatJID, on: on)
+    }
+
     nonisolated func leaveGroup(jid: String) throws {
         try go.leaveGroup(jid)
     }
@@ -1081,6 +1102,44 @@ class WAClient: PhoneValidating, LIDResolving {
                                                 on: j.on,
                                                 actorJID: j.actorJID ?? "",
                                                 timestamp: j.timestamp)
+            }
+        case "GroupAnnounceChanged":
+            struct A: Codable {
+                let chatJID: String
+                let on: Bool
+                let actorJID: String?
+                let timestamp: Int64
+                enum CodingKeys: String, CodingKey {
+                    case chatJID = "chat_jid"
+                    case on
+                    case actorJID = "actor_jid"
+                    case timestamp
+                }
+            }
+            if let a = try? dec.decode(A.self, from: data) {
+                return .groupAnnounceChanged(chatJID: a.chatJID,
+                                             on: a.on,
+                                             actorJID: a.actorJID ?? "",
+                                             timestamp: a.timestamp)
+            }
+        case "GroupLockedChanged":
+            struct L: Codable {
+                let chatJID: String
+                let on: Bool
+                let actorJID: String?
+                let timestamp: Int64
+                enum CodingKeys: String, CodingKey {
+                    case chatJID = "chat_jid"
+                    case on
+                    case actorJID = "actor_jid"
+                    case timestamp
+                }
+            }
+            if let l = try? dec.decode(L.self, from: data) {
+                return .groupLockedChanged(chatJID: l.chatJID,
+                                           on: l.on,
+                                           actorJID: l.actorJID ?? "",
+                                           timestamp: l.timestamp)
             }
         case "EphemeralTimerChanged":
             struct E: Codable {
