@@ -222,6 +222,56 @@ final class MessageIndex {
         }
     }
 
+    /// Distinct, non-empty `sender` values currently indexed for the
+    /// given chat. Drives the in-chat Sender filter picker — values
+    /// match the FTS5 column verbatim so an equality filter never
+    /// drifts away from what the chip shows.
+    func distinctSendersInChat(jid: String) -> [String] {
+        return queue.sync {
+            ensureSchemaLocked()
+            var stmt: OpaquePointer?
+            let sql = """
+                SELECT DISTINCT sender FROM MessageFTS
+                WHERE chatjid = ? AND sender != ''
+                ORDER BY sender COLLATE NOCASE ASC;
+                """
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK
+            else { return [] }
+            defer { sqlite3_finalize(stmt) }
+            let TRANSIENT = unsafeBitCast(
+                OpaquePointer(bitPattern: -1)!,
+                to: sqlite3_destructor_type.self)
+            sqlite3_bind_text(stmt, 1, jid, -1, TRANSIENT)
+            var out: [String] = []
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                out.append(stringCol(stmt, 0))
+            }
+            return out
+        }
+    }
+
+    /// Distinct, non-empty `sender` values across all chats. Drives the
+    /// global ⌘K Sender filter picker.
+    func distinctSendersGlobal() -> [String] {
+        return queue.sync {
+            ensureSchemaLocked()
+            var stmt: OpaquePointer?
+            let sql = """
+                SELECT DISTINCT sender FROM MessageFTS
+                WHERE sender != ''
+                ORDER BY sender COLLATE NOCASE ASC;
+                """
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK
+            else { return [] }
+            defer { sqlite3_finalize(stmt) }
+            var out: [String] = []
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                out.append(stringCol(stmt, 0))
+            }
+            return out
+        }
+    }
+
     /// Appends optional WHERE clauses + their bind values for sender /
     /// kind / date-range filters. Keeping this in one place avoids the
     /// two read paths drifting out of sync on bind order.

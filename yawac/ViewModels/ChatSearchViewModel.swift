@@ -186,26 +186,12 @@ final class ChatSearchViewModel {
         }
     }
 
-    /// Distinct sender JIDs observed in the current global hit set,
-    /// paired with their display names (push name if known). Used by
-    /// the chip-strip's Sender menu in the global search surface.
+    /// Distinct sender push-name strings indexed across all chats.
+    /// Values come straight from `MessageFTS.sender` so the chip label
+    /// matches what an equality-filter query compares against.
     var knownGlobalSenders: [(jid: String, name: String)] {
-        // The index stores the push-name as the `sender` field, but
-        // the Hit only exposes the push-name string. We can't recover
-        // the JID from the hit alone, so we fall back to mapping the
-        // chat JIDs of 1:1 hits as a best-effort. Group hits go
-        // unfiltered for now — the index doesn't carry senderJID per
-        // hit, and adding it is a v0.8.5 schema concern.
-        var seen = Set<String>()
-        var out: [(jid: String, name: String)] = []
-        for hit in messageHits {
-            let key = hit.sender.isEmpty ? hit.chatJID : hit.sender
-            if seen.insert(key).inserted {
-                out.append((jid: key,
-                            name: hit.sender.isEmpty ? hit.chatJID : hit.sender))
-            }
-        }
-        return out
+        return messageIndex.distinctSendersGlobal()
+            .map { (jid: $0, name: $0) }
     }
 
     private func maybeResolveInviteLink(_ q: String) async {

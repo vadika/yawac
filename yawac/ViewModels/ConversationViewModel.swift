@@ -110,23 +110,15 @@ final class ConversationViewModel {
     var findCurrentIdx: Int = 0
     var findHitIDs: Set<String> { Set(findHits.map(\.messageID)) }
 
-    /// Sender push-names seen in messages currently loaded for this
-    /// chat. Used by the in-chat filter chip's Sender menu — the FTS
-    /// index stores push-name strings (sourced from `senderPushName`
-    /// at index time), so the chip's `value` is the push name itself.
-    /// Falls back to the SessionViewModel display-name map when the
-    /// in-memory UIMessage row doesn't carry the push name.
+    /// Sender values from the FTS index for this chat — used to populate
+    /// the in-chat Sender filter picker. Values are read directly from
+    /// `MessageFTS.sender` so the chip label matches what an
+    /// equality-filter query will compare against. The `session`
+    /// argument is unused now but kept for the call-site signature.
     func knownSendersInChat(session: SessionViewModel) -> [(jid: String, name: String)] {
-        var seen = Set<String>()
-        var out: [(jid: String, name: String)] = []
-        for m in messages {
-            let name = session.displayName(for: m.senderJID)
-            guard !name.isEmpty else { continue }
-            if seen.insert(name).inserted {
-                out.append((jid: name, name: name))
-            }
-        }
-        return out
+        _ = session
+        return messageIndex.distinctSendersInChat(jid: chatJID)
+            .map { (jid: $0, name: $0) }
     }
 
     private var findTask: Task<Void, Never>?
