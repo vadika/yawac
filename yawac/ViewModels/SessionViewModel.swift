@@ -98,6 +98,13 @@ final class SessionViewModel {
     @ObservationIgnored
     var pendingReplyTarget: UIMessage?
 
+    /// One-shot guard so we only force-rebootstrap the FTS Sender
+    /// column once per session — after `.connected` has handed the
+    /// MessageIndex its canonicalizer + own JID. Bootstrap that ran at
+    /// app-init couldn't have used either.
+    @ObservationIgnored
+    private var didRebootstrapMessageIndex: Bool = false
+
     /// Per-peer presence. `online == true` → currently connected.
     /// `lastSeen` is seconds-since-epoch when peer went offline; 0 means
     /// peer hasn't shared lastSeen privacy (the most common case).
@@ -449,6 +456,18 @@ final class SessionViewModel {
                     JIDNormalize.canonical(jid, client: client)
                 }
                 MessageIndex.shared.setOwnBareJID(client.ownJID)
+                // The app-init bootstrap walked before any of the
+                // setters above existed — own outbound rows ended up
+                // with empty / device-suffixed sender_jid and LID /
+                // PN siblings of the same contact got separate ids.
+                // Rebuild once per session now that the setters are
+                // primed.
+                if !didRebootstrapMessageIndex {
+                    didRebootstrapMessageIndex = true
+                    Task.detached(priority: .utility) {
+                        await MessageIndex.shared.forceRebootstrap()
+                    }
+                }
             }
             // Publish our own presence as available so whatsmeow honors
             // SubscribePresence(jid) calls — peers don't share presence
