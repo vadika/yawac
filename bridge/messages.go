@@ -227,7 +227,7 @@ func (c *Client) SendText(chatJID, body string, mentionedJIDsJSON string, epheme
 // ForwardText re-sends text to another chat tagged as forwarded. Plain
 // Conversation carries no ContextInfo, so forwards use ExtendedTextMessage
 // to carry the IsForwarded flag.
-func (c *Client) ForwardText(chatJID, text string) (string, error) {
+func (c *Client) ForwardText(chatJID, text string, ephemeralSec int32) (string, error) {
 	if c.wa == nil {
 		return "", errors.New("client closed")
 	}
@@ -238,10 +238,11 @@ func (c *Client) ForwardText(chatJID, text string) (string, error) {
 	if chat.User == "" || chat.Server == "" {
 		return "", fmt.Errorf("parse chat: %q is not a valid jid", chatJID)
 	}
-	msg := &waE2E.Message{ExtendedTextMessage: &waE2E.ExtendedTextMessage{
+	inner := &waE2E.Message{ExtendedTextMessage: &waE2E.ExtendedTextMessage{
 		Text:        proto.String(text),
 		ContextInfo: &waE2E.ContextInfo{IsForwarded: proto.Bool(true), ForwardingScore: proto.Uint32(1)},
 	}}
+	msg := wrapForChat(inner, ephemeralSec, false)
 	resp, err := c.wa.SendMessage(context.Background(), chat, msg)
 	if err != nil {
 		return "", fmt.Errorf("send forward text: %w", err)

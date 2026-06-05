@@ -444,3 +444,19 @@ func TestSendTextReplySignatureCompiles(t *testing.T) {
 			return c.SendTextReply
 		}
 }
+
+func TestForwardTextEphemeralWrap(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/ft.db")
+	defer c.Close()
+	_, err := c.ForwardText("1@s.whatsapp.net", "hi", 86400)
+	if err == nil {
+		t.Fatal("expected error on unpaired client")
+	}
+}
+
+func TestForwardTextSignatureCompiles(t *testing.T) {
+	var _ func(*Client) func(string, string, int32) (string, error) =
+		func(c *Client) func(string, string, int32) (string, error) {
+			return c.ForwardText
+		}
+}

@@ -8,7 +8,7 @@ import (
 func TestForwardTextBadJID(t *testing.T) {
 	c, _ := NewClient(t.TempDir() + "/fw.db")
 	defer c.Close()
-	_, err := c.ForwardText("abc:def@x", "hi")
+	_, err := c.ForwardText("abc:def@x", "hi", 0)
 	if err == nil || !strings.Contains(err.Error(), "parse") {
 		t.Fatalf("got %v, want parse error", err)
 	}
