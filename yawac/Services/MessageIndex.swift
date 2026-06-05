@@ -20,6 +20,7 @@ final class MessageIndex {
         let caption: String
         let quoted: String
         let sender: String
+        let fromMe: Bool
     }
 
     /// Optional filter knobs layered on top of the FTS5 MATCH clause.
@@ -62,6 +63,13 @@ final class MessageIndex {
 
     init(storeURL: URL) {
         self.storeURL = storeURL
+        // Restore the cached own push name from a prior launch so the
+        // bootstrap walk (which runs before .connected fires the live
+        // pushName setter) can fill in fromMe rows with a non-empty
+        // sender value.
+        let cached = UserDefaults.standard
+            .string(forKey: "messageIndexOwnPushName") ?? ""
+        self.ownPushName = cached
     }
 
     private static func defaultStoreURL() -> URL {
@@ -90,15 +98,16 @@ final class MessageIndex {
             sqlite3_exec(db, "PRAGMA journal_mode=WAL;", nil, nil, nil)
             sqlite3_exec(db, "PRAGMA synchronous=NORMAL;", nil, nil, nil)
         }
-        // Schema v1 → v2 migration: FTS5 can't ALTER TABLE ADD COLUMN,
-        // so we drop and re-create. `bootstrapIfNeeded` repopulates on
-        // next launch because the row count drops to 0. One-shot,
-        // gated by UserDefaults so a single migration runs per device.
+        // Schema v1 → v2: added `kind` column. Schema v2 → v3: rebuilds
+        // the index so fromMe rows with empty `senderPushName` get the
+        // own-push-name fallback at upsert time. FTS5 can't ALTER ADD
+        // COLUMN; both bumps drop and re-create, letting
+        // `bootstrapIfNeeded` repopulate from ZPERSISTEDMESSAGE.
         let schemaKey = "messageIndexSchemaVersion"
         let currentVersion = UserDefaults.standard.integer(forKey: schemaKey)
-        if currentVersion < 2 {
+        if currentVersion < 3 {
             sqlite3_exec(db, "DROP TABLE IF EXISTS MessageFTS;", nil, nil, nil)
-            UserDefaults.standard.set(2, forKey: schemaKey)
+            UserDefaults.standard.set(3, forKey: schemaKey)
         }
         let create = """
             CREATE VIRTUAL TABLE IF NOT EXISTS MessageFTS USING fts5(
@@ -119,6 +128,7 @@ final class MessageIndex {
 
     private func upsertLocked(_ f: MessageFields) {
         ensureSchemaLocked()
+        let sender = senderForIndex(f)
         sqlite3_exec(db, "BEGIN IMMEDIATE;", nil, nil, nil)
         var ok = execStep(sql: "DELETE FROM MessageFTS WHERE msgid = ?;",
                           binds: [.text(f.messageID)])
@@ -131,10 +141,38 @@ final class MessageIndex {
                     .text(f.messageID), .text(f.chatJID), .int(f.timestamp),
                     .text(f.kind),
                     .text(f.text), .text(f.caption),
-                    .text(f.quoted), .text(f.sender),
+                    .text(f.quoted), .text(sender),
                 ])
         }
         sqlite3_exec(db, ok ? "COMMIT;" : "ROLLBACK;", nil, nil, nil)
+    }
+
+    /// Returns the sender string we should index for a row. Own outbound
+    /// messages with no push-name persisted (the WhatsApp side never
+    /// echoes one for fromMe = true) fall back to the paired account's
+    /// own push name so Sender-filter equality matches own messages
+    /// consistently across chats.
+    private func senderForIndex(_ f: MessageFields) -> String {
+        if !f.sender.isEmpty { return f.sender }
+        if f.fromMe { return ownPushName }
+        return ""
+    }
+
+    /// Cache of the paired account's own push name — read at upsert
+    /// time when a fromMe row has no `senderPushName` of its own.
+    /// Set once on launch (see `setOwnPushName(_:)`); changes between
+    /// launches trigger a re-bootstrap via schema-version bump.
+    private var ownPushName: String = ""
+
+    /// Update the cached own push name. Safe to call repeatedly — only
+    /// non-empty values overwrite (the bridge may return "" before
+    /// app-state has settled).
+    func setOwnPushName(_ name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        queue.sync { ownPushName = trimmed }
+        UserDefaults.standard.set(
+            trimmed, forKey: "messageIndexOwnPushName")
     }
 
     func delete(messageID: String) {
@@ -345,7 +383,7 @@ final class MessageIndex {
                             .text(f.messageID), .text(f.chatJID), .int(f.timestamp),
                             .text(f.kind),
                             .text(f.text), .text(f.caption),
-                            .text(f.quoted), .text(f.sender),
+                            .text(f.quoted), .text(senderForIndex(f)),
                         ]) { ok = false; break }
                 }
                 sqlite3_exec(db, ok ? "COMMIT;" : "ROLLBACK;", nil, nil, nil)
@@ -373,7 +411,7 @@ final class MessageIndex {
         var stmt: OpaquePointer?
         let sql = """
             SELECT ZID, ZCHATJID, ZTIMESTAMP, ZKIND, ZTEXT, ZMEDIACAPTION,
-                   ZQUOTEDTEXTSNIPPET, ZSENDERPUSHNAME
+                   ZQUOTEDTEXTSNIPPET, ZSENDERPUSHNAME, ZFROMME
             FROM ZPERSISTEDMESSAGE
             ORDER BY Z_PK ASC
             LIMIT ? OFFSET ?;
@@ -398,7 +436,8 @@ final class MessageIndex {
                 text:      stringFromStmt(stmt, 4),
                 caption:   stringFromStmt(stmt, 5),
                 quoted:    stringFromStmt(stmt, 6),
-                sender:    stringFromStmt(stmt, 7)))
+                sender:    stringFromStmt(stmt, 7),
+                fromMe:    sqlite3_column_int64(stmt, 8) != 0))
         }
         return out
     }

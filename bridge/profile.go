@@ -50,3 +50,13 @@ func (c *Client) SetSelfAbout(msg string) error {
 	}
 	return nil
 }
+
+// OwnPushName returns the paired account's own push name as known to
+// whatsmeow's local store (synced from the phone via app-state). Empty
+// string when not paired or before app-state has settled.
+func (c *Client) OwnPushName() string {
+	if c.wa == nil || c.wa.Store == nil {
+		return ""
+	}
+	return c.wa.Store.PushName
+}

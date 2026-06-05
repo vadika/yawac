@@ -117,6 +117,9 @@ class WAClient: PhoneValidating, LIDResolving {
     var isLoggedIn: Bool { go.isLoggedIn() }
     /// Bare JID of the paired account, empty when not paired.
     var ownJID: String { go.ownJID() }
+    /// Own push name as known to whatsmeow's local store. Empty before
+    /// pairing or before app-state has settled.
+    var ownPushName: String { go.ownPushName() }
 
     func connect() throws { try go.connect() }
     func logout() throws { try go.logout() }

@@ -33,7 +33,7 @@ final class SearchFiltersTests: XCTestCase {
             idx.upsert(.init(
                 messageID: r.0, chatJID: r.1, timestamp: r.2,
                 kind: r.3, text: r.4, caption: "", quoted: "",
-                sender: r.5))
+                sender: r.5, fromMe: false))
         }
     }
 

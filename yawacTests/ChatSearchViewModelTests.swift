@@ -356,11 +356,13 @@ final class ChatSearchViewModelTests: XCTestCase {
         idx.upsert(.init(messageID: "m1", chatJID: "A@s.whatsapp.net",
                          timestamp: 10, kind: "text",
                          text: "Hello Finland",
-                         caption: "", quoted: "", sender: "Alice"))
+                         caption: "", quoted: "", sender: "Alice",
+                         fromMe: false))
         idx.upsert(.init(messageID: "m2", chatJID: "B@s.whatsapp.net",
                          timestamp: 20, kind: "text",
                          text: "Goodbye Finland",
-                         caption: "", quoted: "", sender: "Bob"))
+                         caption: "", quoted: "", sender: "Bob",
+                         fromMe: false))
 
         let list = makeListVM(chats: [])
         let vm = ChatSearchViewModel(listVM: list,
@@ -382,11 +384,13 @@ final class ChatSearchViewModelTests: XCTestCase {
         idx.upsert(.init(messageID: "m1", chatJID: "A@s.whatsapp.net",
                          timestamp: 10, kind: "text",
                          text: "Finland",
-                         caption: "", quoted: "", sender: ""))
+                         caption: "", quoted: "", sender: "",
+                         fromMe: false))
         idx.upsert(.init(messageID: "m2", chatJID: "A@s.whatsapp.net",
                          timestamp: 20, kind: "text",
                          text: "Sweden",
-                         caption: "", quoted: "", sender: ""))
+                         caption: "", quoted: "", sender: "",
+                         fromMe: false))
 
         let list = makeListVM(chats: [])
         let vm = ChatSearchViewModel(listVM: list,

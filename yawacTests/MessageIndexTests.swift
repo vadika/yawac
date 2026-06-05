@@ -32,7 +32,8 @@ final class MessageIndexTests: XCTestCase {
         MessageIndex.MessageFields(
             messageID: id, chatJID: chat, timestamp: ts,
             kind: kind,
-            text: text, caption: caption, quoted: quoted, sender: sender)
+            text: text, caption: caption, quoted: quoted, sender: sender,
+            fromMe: false)
     }
 
     func testSchemaIsIdempotent() {
@@ -121,7 +122,7 @@ final class MessageIndexTests: XCTestCase {
             messageID: "m1", chatJID: "c@s.whatsapp.net", timestamp: 0,
             kind: "image",
             text: "", caption: "vacation pic",
-            quoted: "earlier reply", sender: "Alice"))
+            quoted: "earlier reply", sender: "Alice", fromMe: false))
         XCTAssertEqual(idx.searchGlobal(query: "vacation", limit: 10).count, 1)
         XCTAssertEqual(idx.searchGlobal(query: "earlier", limit: 10).count, 1)
         XCTAssertEqual(idx.searchGlobal(query: "alice", limit: 10).count, 1)
@@ -144,7 +145,8 @@ final class MessageIndexTests: XCTestCase {
                 ZTEXT TEXT,
                 ZMEDIACAPTION TEXT,
                 ZQUOTEDTEXTSNIPPET TEXT,
-                ZSENDERPUSHNAME TEXT
+                ZSENDERPUSHNAME TEXT,
+                ZFROMME INTEGER DEFAULT 0
             );
         """, nil, nil, nil)
         for (id, jid, ts, kind, txt, cap, quo, sender) in rows {

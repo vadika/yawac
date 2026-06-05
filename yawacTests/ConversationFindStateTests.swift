@@ -19,13 +19,16 @@ final class ConversationFindStateTests: XCTestCase {
         let jid = "A@s.whatsapp.net"
         idx.upsert(.init(messageID: "a", chatJID: jid, timestamp: 10,
                          kind: "text",
-                         text: "alpha", caption: "", quoted: "", sender: ""))
+                         text: "alpha", caption: "", quoted: "", sender: "",
+                         fromMe: false))
         idx.upsert(.init(messageID: "b", chatJID: jid, timestamp: 20,
                          kind: "text",
-                         text: "alpha beta", caption: "", quoted: "", sender: ""))
+                         text: "alpha beta", caption: "", quoted: "", sender: "",
+                         fromMe: false))
         idx.upsert(.init(messageID: "c", chatJID: jid, timestamp: 30,
                          kind: "text",
-                         text: "alpha gamma", caption: "", quoted: "", sender: ""))
+                         text: "alpha gamma", caption: "", quoted: "", sender: "",
+                         fromMe: false))
     }
     override func tearDown() async throws {
         try? FileManager.default.removeItem(at: tmpDB)
