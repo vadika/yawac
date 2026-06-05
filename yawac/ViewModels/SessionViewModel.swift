@@ -90,6 +90,14 @@ final class SessionViewModel {
     /// inside the freshly-opened chat. ConversationView consumes + clears.
     var pendingJumpMessageID: String?
 
+    /// Reply target carried across a chat switch. Set by the
+    /// "Reply privately" affordance in `ConversationView` immediately
+    /// after `requestSelectChat(sender)`, then consumed + cleared by the
+    /// destination `ConversationViewModel` when its `.task` boots.
+    /// Ephemeral UX state — not persisted, not observed for view updates.
+    @ObservationIgnored
+    var pendingReplyTarget: UIMessage?
+
     /// Per-peer presence. `online == true` → currently connected.
     /// `lastSeen` is seconds-since-epoch when peer went offline; 0 means
     /// peer hasn't shared lastSeen privacy (the most common case).
@@ -190,6 +198,17 @@ final class SessionViewModel {
             return String(bare[..<at])
         }
         return bare
+    }
+
+    /// True when `jid` resolves to the paired account's own JID (i.e. the
+    /// self-chat at `<ownJID>@s.whatsapp.net`). Uses `JIDNormalize.same` so
+    /// device-suffixed / `@lid` variants of the own JID still match. Returns
+    /// false before pairing (empty `ownJID`) or when no client is bound.
+    func isSelfChat(_ jid: String) -> Bool {
+        guard let client else { return false }
+        let own = client.ownJID
+        guard !own.isEmpty else { return false }
+        return JIDNormalize.same(jid, own, client: client)
     }
 
     func isBlocked(_ jid: String) -> Bool {
