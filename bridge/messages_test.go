@@ -39,7 +39,7 @@ func TestSendTextReplyRejectsBadJID(t *testing.T) {
 	c := &Client{}
 	_, err := c.SendTextReply("not-a-jid", "hi",
 		"ABCD1234", "12345@s.whatsapp.net", false,
-		"text", "hello", "")
+		"text", "hello", "", 0)
 	if err == nil {
 		t.Fatal("expected error for bad chat jid")
 	}
@@ -49,7 +49,7 @@ func TestSendTextReplyClosedClient(t *testing.T) {
 	c := &Client{} // wa is nil
 	_, err := c.SendTextReply("12345@s.whatsapp.net", "hi",
 		"ABCD1234", "12345@s.whatsapp.net", false,
-		"text", "hello", "")
+		"text", "hello", "", 0)
 	if err == nil {
 		t.Fatal("expected error for closed client")
 	}
@@ -421,5 +421,26 @@ func TestSendReactionSignatureCompiles(t *testing.T) {
 	var _ func(*Client) func(string, string, string, bool, string, int32) (string, error) =
 		func(c *Client) func(string, string, string, bool, string, int32) (string, error) {
 			return c.SendReaction
+		}
+}
+
+func TestSendTextReplyEphemeralWrap(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/str.db")
+	defer c.Close()
+	_, err := c.SendTextReply(
+		"1@s.whatsapp.net", "hi",
+		"QUOTEDMSG", "1@s.whatsapp.net", false,
+		"text", "previous",
+		`[]`,
+		86400)
+	if err == nil {
+		t.Fatal("expected error on unpaired client")
+	}
+}
+
+func TestSendTextReplySignatureCompiles(t *testing.T) {
+	var _ func(*Client) func(string, string, string, string, bool, string, string, string, int32) (string, error) =
+		func(c *Client) func(string, string, string, string, bool, string, string, string, int32) (string, error) {
+			return c.SendTextReply
 		}
 }

@@ -957,6 +957,7 @@ func (c *Client) SendTextReply(
 	chatJID, body, quotedID, quotedSenderJID string,
 	quotedFromMe bool, quotedKind, quotedSnippet string,
 	mentionedJIDsJSON string,
+	ephemeralSec int32,
 ) (string, error) {
 	if c.wa == nil {
 		return "", errors.New("client closed")
@@ -990,12 +991,13 @@ func (c *Client) SendTextReply(
 		QuotedMessage: stubQuoted(quotedKind, quotedSnippet),
 		MentionedJID:  mentionedJIDs,
 	}
-	msg := &waE2E.Message{
+	inner := &waE2E.Message{
 		ExtendedTextMessage: &waE2E.ExtendedTextMessage{
 			Text:        proto.String(body),
 			ContextInfo: ctx,
 		},
 	}
+	msg := wrapForChat(inner, ephemeralSec, false)
 	resp, err := c.wa.SendMessage(context.Background(), chat, msg)
 	if err != nil {
 		return "", fmt.Errorf("send: %w", err)
