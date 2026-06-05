@@ -13,6 +13,12 @@ struct MessageContextMenu: View {
     let canRevoke: Bool
     let onPickReaction: (String) -> Void
     let onReply: () -> Void
+    /// Group-only affordance: switch to a DM with the sender and seed
+    /// that conversation's reply target with this message. nil when the
+    /// menu is shown in a 1:1 chat, when this is an own message, or when
+    /// the caller didn't wire the handoff — the item only renders when
+    /// the closure is non-nil AND the gating conditions hold.
+    let onReplyPrivately: (() -> Void)?
     let onForward: () -> Void
     let onCopyText: () -> Void
     let onStar: () -> Void
@@ -38,6 +44,17 @@ struct MessageContextMenu: View {
                         label: "Reply",
                         shortcut: "⌘R",
                         action: { dismiss(); onReply() })
+                // Group-only: surface "Reply privately…" for inbound
+                // messages so the user can DM the sender with the group
+                // message quoted. Gating mirrors WhatsApp behaviour —
+                // hidden in 1:1 chats and for own messages.
+                if message.chatJID.hasSuffix("@g.us"),
+                   !message.fromMe,
+                   let onReplyPrivately {
+                    MenuRow(icon: "arrowshape.turn.up.left.fill",
+                            label: "Reply privately…",
+                            action: { dismiss(); onReplyPrivately() })
+                }
                 MenuRow(icon: "arrowshape.turn.up.right",
                         label: "Forward",
                         action: { dismiss(); onForward() })

@@ -74,6 +74,10 @@ struct MessageRow: View {
     let mentionResolver: (String) -> String
     let onOpenChat: ((String) -> Void)?
     let onReply: ((UIMessage) -> Void)?
+    /// Group-only "Reply privately" handoff. Forwarded to the context
+    /// menu, which gates rendering on group + not-fromMe. nil in 1:1
+    /// contexts (or for callers that don't wire the affordance).
+    let onReplyPrivately: ((UIMessage) -> Void)?
     let onEdit: ((UIMessage) -> Void)?
     let onDeleteForEveryone: ((UIMessage) -> Void)?
     let onDeleteForMe: ((UIMessage) -> Void)?
@@ -121,6 +125,7 @@ struct MessageRow: View {
          mentionResolver: @escaping (String) -> String = { $0 },
          onOpenChat: ((String) -> Void)? = nil,
          onReply: ((UIMessage) -> Void)? = nil,
+         onReplyPrivately: ((UIMessage) -> Void)? = nil,
          onEdit: ((UIMessage) -> Void)? = nil,
          onDeleteForEveryone: ((UIMessage) -> Void)? = nil,
          onDeleteForMe: ((UIMessage) -> Void)? = nil,
@@ -153,6 +158,7 @@ struct MessageRow: View {
         self.mentionResolver = mentionResolver
         self.onOpenChat = onOpenChat
         self.onReply = onReply
+        self.onReplyPrivately = onReplyPrivately
         self.onEdit = onEdit
         self.onDeleteForEveryone = onDeleteForEveryone
         self.onDeleteForMe = onDeleteForMe
@@ -279,6 +285,9 @@ struct MessageRow: View {
                         canRevoke: MessageLifecycle.canRevoke(message),
                         onPickReaction: { emoji in onReact?(emoji) },
                         onReply: { onReply?(message) },
+                        onReplyPrivately: onReplyPrivately != nil
+                            ? { onReplyPrivately?(message) }
+                            : nil,
                         onForward: { onForward?(message) },
                         onCopyText: {
                             if case .text(let body) = message.body, !body.isEmpty {

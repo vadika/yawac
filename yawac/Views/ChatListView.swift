@@ -631,7 +631,13 @@ struct ChatListView: View {
                 .padding(.top, 1)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(chat.name)
+                    // Self-chat surface: append " (You)" to the row name
+                    // so the paired account's own DM is unambiguous in
+                    // the sidebar. Surgical render-site override (not in
+                    // `displayName`) because that helper feeds mentions
+                    // + notifications too, where the suffix would read
+                    // wrong.
+                    Text(chat.name + (session.isSelfChat(chat.jid) ? " (You)" : ""))
                         .scaledUI(14, weight: isSelected ? .semibold : .medium)
                         .foregroundStyle(isSelected ? Theme.text : Theme.text)
                         .lineLimit(1)
