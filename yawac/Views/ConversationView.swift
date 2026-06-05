@@ -140,10 +140,14 @@ struct ConversationView: View {
     /// .windowStyle(.hiddenTitleBar) on the WindowGroup).
     @ViewBuilder
     private var headerBar: some View {
-        let name = session.displayName(for: chatJID)
+        let baseName = session.displayName(for: chatJID)
+        // Self-chat treatment: suffix " (You)" on the header title to
+        // match the sidebar row. Avatar still uses the raw name so its
+        // initials don't include "(You)".
+        let name = baseName + (session.isSelfChat(chatJID) ? " (You)" : "")
         let isGroup = chatJID.hasSuffix("@g.us")
         HStack(spacing: 14) {
-            AvatarView(jid: chatJID, name: name, size: 36)
+            AvatarView(jid: chatJID, name: baseName, size: 36)
             VStack(alignment: .leading, spacing: 2) {
                 Text(name)
                     .scaledUI(16, weight: .semibold)

@@ -155,15 +155,17 @@ rare-use utilities) ships only when the important list is clear.
   captures + transmits waveform bytes, but the inbound bubble shows
   a plain `ProgressView` linear bar instead of the WhatsApp-style
   bar visualization.
-- ☐ **Reply-privately to group message** — DM the sender quoting the
-  group message (right-click → Reply privately). WhatsApp surface.
+- ☑ **Reply-privately to group message** — right-click an inbound
+  group message → "Reply privately…" switches to the sender's DM
+  with the original message quoted. Pure UX shortcut (no protocol
+  changes). Shipped in v0.8.3.
 - ☐ **Cross-device-sync own outbound edits / reactions** — edits + own
   reactions made on the phone don't always re-merge into yawac's
   bubble without a fresh history sync.
-- ☐ **Self-chat ("Message yourself")** — WhatsApp surfaces a self
-  conversation at `<ownJID>@s.whatsapp.net`; yawac lists it but
-  composer / receipt path treats it as a generic 1:1. Worth a
-  smoke pass for any edge-case regressions.
+- ☑ **Self-chat ("Message yourself")** — sidebar row + chat header now
+  carry a " (You)" suffix at the self-chat (`<ownJID>@s.whatsapp.net`).
+  Composer + receipt path already worked as a generic 1:1; smoke
+  pass confirmed no edge-case regressions. Shipped in v0.8.3.
 
 ---
 
