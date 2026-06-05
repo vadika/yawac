@@ -51,20 +51,19 @@ rare-use utilities) ships only when the important list is clear.
   `ContextInfo.Expiration` on any regular inbound message (v0.8.0
   fix). Shipped in v0.8.0.
   Gaps:
-    - ☐ Reply send (`sendTextReply`) doesn't thread
-      `ephemeralSeconds` — replies in disappearing chats arrive
-      unwrapped on the recipient.
-    - ☐ Edit / Forward / Reaction send paths likewise un-threaded.
-    - ☐ 1:1 cold-read still unavailable upstream (whatsmeow has no
-      `GetChatEphemeralSetting(jid)` API); fresh chats default to
-      Off until any inbound message arrives.
+    **v0.8.1 fix:** reply / edit / forward / reaction / poll-vote
+    now wrap in `EphemeralMessage` per the chat's timer (edit accepts
+    the param but defers to WhatsApp's edit-inherits-original
+    convention). 1:1 cold-read worked around via an on-demand
+    history backfill on first v0.8.1 boot.
 - ◐ **View-once enforce** — incoming view-once renders "Tap to reveal"
   → reveals media once → locks + deletes on-disk file; outbound
   per-attachment toggle on image/video chips. `viewOnceLocked`
   survives scroll + restart. Shipped in v0.8.0.
   Gaps:
-    - ☐ Existing pre-v0.8.0 view-once messages persisted as regular
-      images — no migration to detect them. Forward-only fix.
+    **v0.8.1 fix:** one-shot history backfill on first boot re-flows
+    pre-v0.8.0 image/video payloads through the v0.8.0 classifier,
+    re-flagging them with `isViewOnce`.
     - ☐ Forward / Quote already hidden from context menu, but
       screenshot / copy-image is uncatchable. Same posture as
       WhatsApp; document only.
