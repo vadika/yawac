@@ -83,6 +83,12 @@ struct ChatInfoView: View {
     /// and approval-mode is on; nilled out otherwise so a non-admin or
     /// approval-off chat doesn't render the section header.
     @State private var pendingRequestsModel: PendingRequestsSectionModel?
+    /// Transient error from the "Restrict messages to admins" toggle
+    /// (announce mode). Surfaced under the row for ~6s and cleared.
+    @State private var announceError: String?
+    /// Transient error from the "Lock name/description/avatar to admins"
+    /// toggle (locked mode). Surfaced under the row for ~6s and cleared.
+    @State private var lockedError: String?
 
     private var isGroup: Bool { chatJID.hasSuffix("@g.us") }
     private var name: String { session.displayName(for: chatJID) }
@@ -326,6 +332,61 @@ struct ChatInfoView: View {
                     group = s
                 }
                 disappearingError = (error as NSError).localizedDescription
+            }
+        }
+    }
+
+    /// Flip the "Restrict messages to admins" toggle on `chatJID`.
+    /// Mirrors `applyDisappearingTimer`: optimistically flips the local
+    /// `group` shadow before the bridge call so the toggle reflects the
+    /// change immediately, then reverts and surfaces the error on
+    /// failure. The server-side success path emits
+    /// `GroupAnnounceChanged`, which the ContentView event arm routes
+    /// into `Chat.isAnnounce` for the canonical refresh.
+    private func applyAnnounceToggle(_ on: Bool, chatJID: String) {
+        guard let client = session.client else { return }
+        let prior = group?.isAnnounce ?? false
+        if var s = group {
+            s.isAnnounce = on
+            group = s
+        }
+        Task {
+            do {
+                try await Task.detached {
+                    try client.setGroupAnnounce(chatJID: chatJID, on: on)
+                }.value
+            } catch {
+                if var s = group {
+                    s.isAnnounce = prior
+                    group = s
+                }
+                announceError = (error as NSError).localizedDescription
+            }
+        }
+    }
+
+    /// Flip the "Lock name / description / avatar to admins" toggle on
+    /// `chatJID`. Same optimistic-flip + revert-on-failure pattern as
+    /// `applyAnnounceToggle`. Success path: `GroupLockedChanged` ->
+    /// `Chat.isLocked`.
+    private func applyLockedToggle(_ on: Bool, chatJID: String) {
+        guard let client = session.client else { return }
+        let prior = group?.isLocked ?? false
+        if var s = group {
+            s.isLocked = on
+            group = s
+        }
+        Task {
+            do {
+                try await Task.detached {
+                    try client.setGroupLocked(chatJID: chatJID, on: on)
+                }.value
+            } catch {
+                if var s = group {
+                    s.isLocked = prior
+                    group = s
+                }
+                lockedError = (error as NSError).localizedDescription
             }
         }
     }
@@ -891,6 +952,74 @@ struct ChatInfoView: View {
                                 try? await Task.sleep(
                                     nanoseconds: 6 * 1_000_000_000)
                                 toggleError = nil
+                            }
+                    }
+                }
+            }
+        }
+
+        // ANNOUNCE + LOCKED — admin-only toggles for sub-groups and
+        // standalone groups. Hidden on the parent shell: announce/lock
+        // semantics on a community parent are surfaced through the
+        // community itself, and the parent's own toggle is rarely the
+        // user's mental model. Optimistic flip on the @State shadow;
+        // revert + surface error on backend failure.
+        if isCurrentUserAdmin(g) && !g.isParent {
+            sectionCard(label: "ADMINS ONLY — SEND MESSAGES") {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text("Restrict messages to admins")
+                            .scaledUI(13)
+                            .foregroundStyle(Theme.text)
+                        Spacer()
+                        Toggle("", isOn: Binding(
+                            get: { group?.isAnnounce ?? g.isAnnounce },
+                            set: { newValue in
+                                applyAnnounceToggle(newValue, chatJID: g.jid)
+                            }
+                        ))
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+                    }
+                    if let err = announceError {
+                        Text(err)
+                            .scaledUI(11)
+                            .foregroundStyle(Color.red.opacity(0.9))
+                            .task(id: err) {
+                                try? await Task.sleep(
+                                    nanoseconds: 6 * 1_000_000_000)
+                                announceError = nil
+                            }
+                    }
+                }
+            }
+
+            sectionCard(label: "ADMINS ONLY — EDIT GROUP INFO") {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text("Lock name / description / avatar to admins")
+                            .scaledUI(13)
+                            .foregroundStyle(Theme.text)
+                        Spacer()
+                        Toggle("", isOn: Binding(
+                            get: { group?.isLocked ?? g.isLocked },
+                            set: { newValue in
+                                applyLockedToggle(newValue, chatJID: g.jid)
+                            }
+                        ))
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+                    }
+                    if let err = lockedError {
+                        Text(err)
+                            .scaledUI(11)
+                            .foregroundStyle(Color.red.opacity(0.9))
+                            .task(id: err) {
+                                try? await Task.sleep(
+                                    nanoseconds: 6 * 1_000_000_000)
+                                lockedError = nil
                             }
                     }
                 }
