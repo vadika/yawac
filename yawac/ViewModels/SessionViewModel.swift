@@ -479,7 +479,7 @@ final class SessionViewModel {
     /// `historyBackfillCompleted` flag is flipped to true on the first
     /// HistorySync arrival (see ContentView, T12) and reset by `logout()`.
     @MainActor
-    private func requestHistoryBackfillIfNeeded() async {
+    func requestHistoryBackfillIfNeeded() async {
         guard !historyBackfillCompleted else { return }
         guard let client else { return }
         guard let context = modelContext else { return }
