@@ -67,7 +67,8 @@ struct ConversationFindBar: View {
     @ViewBuilder
     private var counter: some View {
         let q = vm.findQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        if q.isEmpty {
+        let active = !q.isEmpty || !vm.findFilters.isEmpty
+        if !active {
             EmptyView()
         } else if vm.findHits.isEmpty {
             Text("No matches")
