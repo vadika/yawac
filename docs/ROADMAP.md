@@ -140,9 +140,10 @@ rare-use utilities) ships only when the important list is clear.
 
 - ☐ **Linked-devices** view + manage.
 - ☐ **Privacy settings** (last seen / about / profile photo).
-- ☐ **Own profile edit** — change own display name (`SetPushName`),
-  avatar, and About from a settings sheet. No surface today; phone
-  is the only path.
+- ◐ **Own profile edit** — About + avatar editable in Settings →
+  About me (v0.9.0). Push name still phone-only — whatsmeow has no
+  top-level setter; would need a `SETTING_PUSHNAME` app-state patch.
+  Tracked for a v0.9.x follow-up.
 - ☐ **2FA** (account-level).
 
 ## Messaging gaps (against shipped surface)

@@ -598,7 +598,7 @@ class WAClient: PhoneValidating, LIDResolving {
         return try JSONDecoder().decode([BridgeContact].self, from: Data(json.utf8))
     }
 
-    func getUserInfo(jid: String) throws -> BridgeUserInfo {
+    nonisolated func getUserInfo(jid: String) throws -> BridgeUserInfo {
         var err: NSError?
         let json = go.getUserInfo(jid, error: &err)
         if let err { throw err }
@@ -796,6 +796,18 @@ class WAClient: PhoneValidating, LIDResolving {
 
     nonisolated func removeGroupPhoto(chatJID: String) throws {
         try go.removeGroupPhoto(chatJID)
+    }
+
+    nonisolated func setSelfAvatar(jpegBytes: Data) throws {
+        try go.setSelfAvatar(jpegBytes)
+    }
+
+    nonisolated func removeSelfAvatar() throws {
+        try go.removeSelfAvatar()
+    }
+
+    nonisolated func setSelfAbout(_ message: String) throws {
+        try go.setSelfAbout(message)
     }
 
     func getGroupInviteLink(chatJID: String, reset: Bool) throws -> String {
