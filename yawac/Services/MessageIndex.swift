@@ -157,14 +157,21 @@ final class MessageIndex {
     func searchInChat(jid: String, query: String,
                       filters: SearchFilters = .init(),
                       limit: Int = 500) -> [Hit] {
-        guard let match = makeMatch(query) else { return [] }
-        var clauses = ["chatjid = ?", "MessageFTS MATCH ?"]
-        var binds: [Bind] = [.text(jid), .text(match)]
+        let match = makeMatch(query)
+        if match == nil && filters.isEmpty { return [] }
+        var clauses = ["chatjid = ?"]
+        var binds: [Bind] = [.text(jid)]
+        if let match {
+            clauses.append("MessageFTS MATCH ?")
+            binds.append(.text(match))
+        }
         appendFilterClauses(filters, clauses: &clauses, binds: &binds)
         binds.append(.int(Int64(limit)))
+        let snippetExpr = match != nil
+            ? "snippet(MessageFTS, -1, '⟦', '⟧', '…', 12)"
+            : "substr(coalesce(nullif(text, ''), caption), 1, 80)"
         let sql = """
-            SELECT msgid, chatjid, ts, sender,
-                   snippet(MessageFTS, -1, '⟦', '⟧', '…', 12)
+            SELECT msgid, chatjid, ts, sender, \(snippetExpr)
             FROM MessageFTS
             WHERE \(clauses.joined(separator: " AND "))
             ORDER BY ts ASC
@@ -180,21 +187,33 @@ final class MessageIndex {
                       filters: SearchFilters = .init(),
                       chatJID: String? = nil,
                       limit: Int = 200) -> [Hit] {
-        guard let match = makeMatch(query) else { return [] }
-        var clauses = ["MessageFTS MATCH ?"]
-        var binds: [Bind] = [.text(match)]
+        let match = makeMatch(query)
+        if match == nil && filters.isEmpty && (chatJID?.isEmpty ?? true) {
+            return []
+        }
+        var clauses: [String] = []
+        var binds: [Bind] = []
+        if let match {
+            clauses.append("MessageFTS MATCH ?")
+            binds.append(.text(match))
+        }
         if let chatJID, !chatJID.isEmpty {
             clauses.append("chatjid = ?")
             binds.append(.text(chatJID))
         }
         appendFilterClauses(filters, clauses: &clauses, binds: &binds)
         binds.append(.int(Int64(limit)))
+        let snippetExpr = match != nil
+            ? "snippet(MessageFTS, -1, '⟦', '⟧', '…', 12)"
+            : "substr(coalesce(nullif(text, ''), caption), 1, 80)"
+        let orderBy = match != nil
+            ? "bm25(MessageFTS) ASC, ts DESC"
+            : "ts DESC"
         let sql = """
-            SELECT msgid, chatjid, ts, sender,
-                   snippet(MessageFTS, -1, '⟦', '⟧', '…', 12)
+            SELECT msgid, chatjid, ts, sender, \(snippetExpr)
             FROM MessageFTS
             WHERE \(clauses.joined(separator: " AND "))
-            ORDER BY bm25(MessageFTS) ASC, ts DESC
+            ORDER BY \(orderBy)
             LIMIT ?;
             """
         return queue.sync {

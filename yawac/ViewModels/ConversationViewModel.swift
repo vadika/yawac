@@ -135,7 +135,7 @@ final class ConversationViewModel {
     private func scheduleFind() {
         findTask?.cancel()
         let q = findQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        if q.isEmpty {
+        if q.isEmpty && findFilters.isEmpty {
             findHits = []
             findCurrentIdx = 0
             return
@@ -159,7 +159,9 @@ final class ConversationViewModel {
     /// Synchronous test seam — bypasses the debounce.
     func runFindForTest() async {
         let q = findQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        if q.isEmpty { findHits = []; findCurrentIdx = 0; return }
+        if q.isEmpty && findFilters.isEmpty {
+            findHits = []; findCurrentIdx = 0; return
+        }
         let idx = messageIndex; let jid = chatJID
         let f = findFilters
         let hits = await Task.detached(priority: .userInitiated) {

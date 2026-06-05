@@ -47,7 +47,9 @@ final class MessageSearchViewModel {
     private func onQueryChanged() {
         debounceTask?.cancel()
         let q = query
-        if q.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        let qEmpty = q.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let scopeEmpty = (chatScope ?? "").isEmpty
+        if qEmpty && filters.isEmpty && scopeEmpty {
             globalHits = []
             return
         }
