@@ -89,6 +89,9 @@ struct ChatInfoView: View {
     /// Transient error from the "Lock name/description/avatar to admins"
     /// toggle (locked mode). Surfaced under the row for ~6s and cleared.
     @State private var lockedError: String?
+    /// Transient error from the "Members can add new members" toggle
+    /// (member-add mode). Surfaced under the row for ~6s and cleared.
+    @State private var memberAddError: String?
 
     private var isGroup: Bool { chatJID.hasSuffix("@g.us") }
     /// True when this info pane is rendering the user's own self-chat.
@@ -402,6 +405,33 @@ struct ChatInfoView: View {
                     group = s
                 }
                 lockedError = (error as NSError).localizedDescription
+            }
+        }
+    }
+
+    /// Optimistic flip + revert-on-failure for the
+    /// "Members can add new members" toggle. Mirrors the
+    /// `applyAnnounceToggle` / `applyLockedToggle` shape. Success
+    /// path: `GroupMemberAddModeChanged` -> `Chat.isAllMemberAdd`.
+    private func applyMemberAddModeToggle(_ on: Bool, chatJID: String) {
+        guard let client = session.client else { return }
+        let prior = group?.isAllMemberAdd ?? false
+        if var s = group {
+            s.isAllMemberAdd = on
+            group = s
+        }
+        Task {
+            do {
+                try await Task.detached {
+                    try client.setGroupMemberAddMode(chatJID: chatJID,
+                                                     allMembersCanAdd: on)
+                }.value
+            } catch {
+                if var s = group {
+                    s.isAllMemberAdd = prior
+                    group = s
+                }
+                memberAddError = (error as NSError).localizedDescription
             }
         }
     }
@@ -1112,6 +1142,36 @@ struct ChatInfoView: View {
                                 try? await Task.sleep(
                                     nanoseconds: 6 * 1_000_000_000)
                                 lockedError = nil
+                            }
+                    }
+                }
+            }
+
+            sectionCard(label: "MEMBERS CAN ADD NEW MEMBERS") {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text("Let any member add participants")
+                            .scaledUI(13)
+                            .foregroundStyle(Theme.text)
+                        Spacer()
+                        Toggle("", isOn: Binding(
+                            get: { group?.isAllMemberAdd ?? g.isAllMemberAdd },
+                            set: { newValue in
+                                applyMemberAddModeToggle(newValue, chatJID: g.jid)
+                            }
+                        ))
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+                    }
+                    if let err = memberAddError {
+                        Text(err)
+                            .scaledUI(11)
+                            .foregroundStyle(Color.red.opacity(0.9))
+                            .task(id: err) {
+                                try? await Task.sleep(
+                                    nanoseconds: 6 * 1_000_000_000)
+                                memberAddError = nil
                             }
                     }
                 }

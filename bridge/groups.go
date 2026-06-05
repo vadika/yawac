@@ -26,6 +26,7 @@ type JGroup struct {
 	EphemeralExpirationSeconds int32 `json:"ephemeral_expiration_seconds,omitempty"`
 	IsAnnounce        bool           `json:"is_announce,omitempty"`
 	IsLocked          bool           `json:"is_locked,omitempty"`
+	IsAllMemberAdd    bool           `json:"is_all_member_add,omitempty"`
 	Participants      []JParticipant `json:"participants"`
 }
 
@@ -55,6 +56,7 @@ func mapGroupInfo(g *types.GroupInfo) JGroup {
 	out.EphemeralExpirationSeconds = int32(g.GroupEphemeral.DisappearingTimer)
 	out.IsAnnounce = g.GroupAnnounce.IsAnnounce
 	out.IsLocked = g.GroupLocked.IsLocked
+	out.IsAllMemberAdd = g.MemberAddMode == types.GroupMemberAddModeAllMember
 	out.Participants = make([]JParticipant, 0, len(g.Participants))
 	for _, p := range g.Participants {
 		out.Participants = append(out.Participants, JParticipant{
@@ -703,6 +705,33 @@ func (c *Client) SetGroupAnnounce(chatJIDStr string, on bool) error {
 	}
 	if err := c.wa.SetGroupAnnounce(context.Background(), jid, on); err != nil {
 		return fmt.Errorf("set group announce: %w", err)
+	}
+	return nil
+}
+
+// SetGroupMemberAddMode toggles who can add new members to the
+// group. When `allMembersCanAdd` is true, every member can add;
+// otherwise only admins. Mirrors v0.8.2 SetGroupAnnounce / SetGroupLocked.
+// Server fans the change out as a group notification node with tag
+// `member_add_mode` — see dispatchGroupInfo for the inbound arm.
+func (c *Client) SetGroupMemberAddMode(chatJIDStr string, allMembersCanAdd bool) error {
+	if c.wa == nil {
+		return errors.New("client closed")
+	}
+	jid, err := types.ParseJID(chatJIDStr)
+	if err != nil {
+		return fmt.Errorf("parse jid: %w", err)
+	}
+	if jid.User == "" || jid.Server == "" {
+		return fmt.Errorf("parse jid: empty user or server")
+	}
+	mode := types.GroupMemberAddModeAdmin
+	if allMembersCanAdd {
+		mode = types.GroupMemberAddModeAllMember
+	}
+	if err := c.wa.SetGroupMemberAddMode(
+		context.Background(), jid, mode); err != nil {
+		return fmt.Errorf("set member add mode: %w", err)
 	}
 	return nil
 }

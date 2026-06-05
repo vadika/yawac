@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	waBinary "go.mau.fi/whatsmeow/binary"
 	waE2E "go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/proto/waSyncAction"
 	"go.mau.fi/whatsmeow/types"
@@ -566,5 +567,91 @@ func TestDispatchGroupInfoFiresGroupLockedChanged(t *testing.T) {
 	}
 	if !strings.Contains(ev.payload, `"chat_jid":"888@g.us"`) {
 		t.Errorf("payload missing chat_jid: %s", ev.payload)
+	}
+}
+
+// TestDispatchGroupInfoFiresGroupMemberAddModeChanged verifies that
+// when the server fans out a peer-driven member_add_mode change,
+// dispatchGroupInfo plucks it out of UnknownChanges and emits a
+// typed GroupMemberAddModeChanged event. whatsmeow does not promote
+// this to a typed field on events.GroupInfo (unlike Announce / Locked
+// / Ephemeral), so the dispatcher walks the raw node list.
+func TestDispatchGroupInfoFiresGroupMemberAddModeChanged(t *testing.T) {
+	cases := []struct {
+		mode   string
+		wantOn bool
+	}{
+		{"all_member_add", true},
+		{"admin_add", false},
+	}
+	for _, tc := range cases {
+		c, _ := NewClient(t.TempDir() + "/gi_mam_" + tc.mode + ".db")
+		sink := newRecSink()
+		c.SetEventSink(sink)
+		chat := types.JID{User: "888", Server: types.GroupServer}
+		sender, _ := types.ParseJID("999@s.whatsapp.net")
+		c.dispatchGroupInfo(&events.GroupInfo{
+			JID:       chat,
+			Sender:    &sender,
+			Timestamp: time.Unix(1700000000, 0),
+			UnknownChanges: []*waBinary.Node{
+				{Tag: "member_add_mode", Content: []byte(tc.mode)},
+			},
+		})
+		ev := sink.wait(t, "GroupMemberAddModeChanged", time.Second)
+		wantOnJSON := `"all_members_can_add":` + boolJSON(tc.wantOn)
+		if !strings.Contains(ev.payload, wantOnJSON) {
+			t.Errorf("mode=%q payload=%s want contains %s",
+				tc.mode, ev.payload, wantOnJSON)
+		}
+		if !strings.Contains(ev.payload, `"chat_jid":"888@g.us"`) {
+			t.Errorf("payload missing chat_jid: %s", ev.payload)
+		}
+		if !strings.Contains(ev.payload, `"actor_jid":"999@s.whatsapp.net"`) {
+			t.Errorf("payload missing actor_jid: %s", ev.payload)
+		}
+		c.Close()
+	}
+}
+
+// TestDispatchGroupInfoMemberAddModeStringContent guards the helper
+// against string-typed Content (whatsmeow Node.Content is interface{}).
+func TestDispatchGroupInfoMemberAddModeStringContent(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/gi_mam_s.db")
+	defer c.Close()
+	sink := newRecSink()
+	c.SetEventSink(sink)
+	chat := types.JID{User: "777", Server: types.GroupServer}
+	c.dispatchGroupInfo(&events.GroupInfo{
+		JID:       chat,
+		Timestamp: time.Unix(1700000000, 0),
+		UnknownChanges: []*waBinary.Node{
+			{Tag: "member_add_mode", Content: "all_member_add"},
+		},
+	})
+	ev := sink.wait(t, "GroupMemberAddModeChanged", time.Second)
+	if !strings.Contains(ev.payload, `"all_members_can_add":true`) {
+		t.Errorf("payload: %s", ev.payload)
+	}
+}
+
+// TestDispatchGroupInfoMemberAddModeAbsentNoEmit confirms we skip the
+// dispatch when UnknownChanges does not include a member_add_mode node.
+func TestDispatchGroupInfoMemberAddModeAbsentNoEmit(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/gi_mam_none.db")
+	defer c.Close()
+	sink := newRecSink()
+	c.SetEventSink(sink)
+	chat := types.JID{User: "666", Server: types.GroupServer}
+	c.dispatchGroupInfo(&events.GroupInfo{
+		JID:       chat,
+		Timestamp: time.Unix(1700000000, 0),
+		UnknownChanges: []*waBinary.Node{
+			{Tag: "unrelated", Content: []byte("noise")},
+		},
+	})
+	time.Sleep(80 * time.Millisecond)
+	if findInSink(sink, "GroupMemberAddModeChanged") != nil {
+		t.Fatal("unexpected GroupMemberAddModeChanged dispatch")
 	}
 }

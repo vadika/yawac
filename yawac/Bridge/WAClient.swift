@@ -60,6 +60,10 @@ class WAClient: PhoneValidating, LIDResolving {
                                 on: Bool,
                                 actorJID: String,
                                 timestamp: Int64)
+        case groupMemberAddModeChanged(chatJID: String,
+                                       allMembersCanAdd: Bool,
+                                       actorJID: String,
+                                       timestamp: Int64)
         case ephemeralTimerChanged(chatJID: String,
                                    seconds: Int32,
                                    actorJID: String,
@@ -729,6 +733,14 @@ class WAClient: PhoneValidating, LIDResolving {
         try go.setGroupLocked(chatJID, on: on)
     }
 
+    /// Toggles who can add new participants. `allMembersCanAdd == true`
+    /// flips whatsmeow's "all_member_add" mode; false restores the
+    /// default "admin_add". Admin only — server returns 403 otherwise.
+    nonisolated func setGroupMemberAddMode(chatJID: String,
+                                           allMembersCanAdd: Bool) throws {
+        try go.setGroupMemberAddMode(chatJID, allMembersCanAdd: allMembersCanAdd)
+    }
+
     nonisolated func leaveGroup(jid: String) throws {
         try go.leaveGroup(jid)
     }
@@ -1155,6 +1167,26 @@ class WAClient: PhoneValidating, LIDResolving {
                                            on: l.on,
                                            actorJID: l.actorJID ?? "",
                                            timestamp: l.timestamp)
+            }
+        case "GroupMemberAddModeChanged":
+            struct M: Codable {
+                let chatJID: String
+                let allMembersCanAdd: Bool
+                let actorJID: String?
+                let timestamp: Int64
+                enum CodingKeys: String, CodingKey {
+                    case chatJID = "chat_jid"
+                    case allMembersCanAdd = "all_members_can_add"
+                    case actorJID = "actor_jid"
+                    case timestamp
+                }
+            }
+            if let m = try? dec.decode(M.self, from: data) {
+                return .groupMemberAddModeChanged(
+                    chatJID: m.chatJID,
+                    allMembersCanAdd: m.allMembersCanAdd,
+                    actorJID: m.actorJID ?? "",
+                    timestamp: m.timestamp)
             }
         case "EphemeralTimerChanged":
             struct E: Codable {

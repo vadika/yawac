@@ -102,6 +102,10 @@ rare-use utilities) ships only when the important list is clear.
     in announce-mode groups. Super-admin badge is rendered at
     `ChatInfoView:1343` (SUPER role badge).
 
+    **v0.9.8 fix:** SetGroupMemberAddMode toggle shipped — admins
+    can switch between admin-only and all-member-can-add modes via
+    a "MEMBERS CAN ADD NEW MEMBERS" row in ChatInfoView.
+
 ## Channels / Communities
 
 - ☐ **Newsletter / Channels** — upstream blocker: `Platform == MACOS`

@@ -547,6 +547,7 @@ final class ChatListViewModel {
                 c.ephemeralExpirationSeconds = g.ephemeralExpirationSeconds
                 c.isAnnounce = g.isAnnounce
                 c.isLocked = g.isLocked
+                c.isAllMemberAdd = g.isAllMemberAdd
                 if c.name == jid && !g.name.isEmpty { c.name = g.name }
                 chats[idx] = c
                 upsertPersisted(c)
@@ -567,6 +568,7 @@ final class ChatListViewModel {
             fresh.ephemeralExpirationSeconds = g.ephemeralExpirationSeconds
             fresh.isAnnounce = g.isAnnounce
             fresh.isLocked = g.isLocked
+            fresh.isAllMemberAdd = g.isAllMemberAdd
             chats.append(fresh)
             upsertPersisted(chats[chats.count - 1])
         }
@@ -1111,6 +1113,19 @@ final class ChatListViewModel {
             return
         }
         chats[idx].isLocked = on
+    }
+
+    /// Apply a live "Any member can add new members" flip (or an optimistic
+    /// local toggle from the group-admin inspector row) onto
+    /// `Chat.isAllMemberAdd` so the inspector reflects the new state without
+    /// waiting for the next `mergeGroups`. Runtime-only — the field is not
+    /// persisted (a fresh ListGroups on the next connect repopulates it).
+    /// `true` means whatsmeow's "all_member_add"; `false` is "admin_add".
+    func applyGroupMemberAddMode(chatJID: String, allMembersCanAdd: Bool) {
+        guard let idx = chats.firstIndex(where: { $0.jid == chatJID }) else {
+            return
+        }
+        chats[idx].isAllMemberAdd = allMembersCanAdd
     }
 
     /// Pending join-request count to render in the sidebar chip for

@@ -41,6 +41,12 @@ struct Chat: Identifiable, Hashable {
     /// admin events. Not persisted — a fresh ListGroups on connect
     /// repopulates it.
     var isLocked: Bool = false
+    /// Runtime-only: "Any member can add new members" flag (v0.9.8).
+    /// Mirrors `BridgeGroupModel.isAllMemberAdd`. Populated by
+    /// `mergeGroups` and live `groupMemberAddModeChanged` events.
+    /// Not persisted — a fresh ListGroups on connect repopulates it.
+    /// `false` (default) means admin_add; `true` means all_member_add.
+    var isAllMemberAdd: Bool = false
     var id: String { jid }
 }
 

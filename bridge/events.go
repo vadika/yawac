@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 
+	waBinary "go.mau.fi/whatsmeow/binary"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 )
@@ -315,6 +316,25 @@ func (c *Client) dispatchGroupInfo(evt *events.GroupInfo) {
 		c.dispatch("GroupLockedChanged", string(b))
 	}
 
+	// Member-add-mode toggle (who can add new participants). whatsmeow's
+	// events.GroupInfo does NOT promote this to a typed field — the
+	// upstream parser routes "member_add_mode" change nodes into
+	// UnknownChanges. Scan for them and emit on match. Node content is
+	// the raw mode string ("admin_add" or "all_member_add").
+	if mode, ok := extractMemberAddMode(evt.UnknownChanges); ok {
+		actor := ""
+		if evt.Sender != nil {
+			actor = evt.Sender.String()
+		}
+		b, _ := json.Marshal(JGroupMemberAddModeChanged{
+			ChatJID:          evt.JID.String(),
+			AllMembersCanAdd: mode == types.GroupMemberAddModeAllMember,
+			ActorJID:         actor,
+			Timestamp:        evt.Timestamp.Unix(),
+		})
+		c.dispatch("GroupMemberAddModeChanged", string(b))
+	}
+
 	// Disappearing-messages timer change. types.GroupEphemeral carries
 	// IsEphemeral + DisappearingTimer; we forward the timer regardless of
 	// IsEphemeral (timer==0 already encodes "off" on the Swift side).
@@ -331,6 +351,26 @@ func (c *Client) dispatchGroupInfo(evt *events.GroupInfo) {
 		})
 		c.dispatch("EphemeralTimerChanged", string(b))
 	}
+}
+
+// extractMemberAddMode walks the GroupInfo's UnknownChanges looking for
+// the "member_add_mode" notification node — whatsmeow's parseGroupChange
+// doesn't promote this to a typed field, so we pluck it from the raw
+// node list. Node content is the mode string ("admin_add" /
+// "all_member_add"). Returns (mode, true) on match.
+func extractMemberAddMode(unknown []*waBinary.Node) (types.GroupMemberAddMode, bool) {
+	for _, n := range unknown {
+		if n == nil || n.Tag != "member_add_mode" {
+			continue
+		}
+		switch v := n.Content.(type) {
+		case []byte:
+			return types.GroupMemberAddMode(v), true
+		case string:
+			return types.GroupMemberAddMode(v), true
+		}
+	}
+	return "", false
 }
 
 // normalizeGroupJID treats anything that isn't a `@g.us` JID as the

@@ -409,3 +409,43 @@ func TestMapGroupInfoCarriesAnnounceLocked(t *testing.T) {
 		t.Fatalf("want IsLocked true, got %+v", got)
 	}
 }
+
+func TestSetGroupMemberAddModeUnpaired(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/sgm.db")
+	defer c.Close()
+	err := c.SetGroupMemberAddMode("1234@g.us", true)
+	if err == nil {
+		t.Fatal("expected error on unpaired client")
+	}
+}
+
+func TestSetGroupMemberAddModeBadJID(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/sgm2.db")
+	defer c.Close()
+	err := c.SetGroupMemberAddMode("not a jid", true)
+	if err == nil {
+		t.Fatal("expected parse error")
+	}
+}
+
+func TestMapGroupInfoCarriesMemberAddMode(t *testing.T) {
+	in := &types.GroupInfo{
+		JID:           types.NewJID("999", "g.us"),
+		GroupName:     types.GroupName{Name: "T"},
+		MemberAddMode: types.GroupMemberAddModeAllMember,
+	}
+	got := mapGroupInfo(in)
+	if !got.IsAllMemberAdd {
+		t.Fatalf("want IsAllMemberAdd true, got %+v", got)
+	}
+	in.MemberAddMode = types.GroupMemberAddModeAdmin
+	got = mapGroupInfo(in)
+	if got.IsAllMemberAdd {
+		t.Fatalf("want IsAllMemberAdd false for admin_add, got %+v", got)
+	}
+	in.MemberAddMode = ""
+	got = mapGroupInfo(in)
+	if got.IsAllMemberAdd {
+		t.Fatalf("want IsAllMemberAdd false for empty mode, got %+v", got)
+	}
+}
