@@ -354,10 +354,12 @@ final class ChatSearchViewModelTests: XCTestCase {
         let idx = MessageIndex(storeURL: tmp)
         idx.ensureSchema()
         idx.upsert(.init(messageID: "m1", chatJID: "A@s.whatsapp.net",
-                         timestamp: 10, text: "Hello Finland",
+                         timestamp: 10, kind: "text",
+                         text: "Hello Finland",
                          caption: "", quoted: "", sender: "Alice"))
         idx.upsert(.init(messageID: "m2", chatJID: "B@s.whatsapp.net",
-                         timestamp: 20, text: "Goodbye Finland",
+                         timestamp: 20, kind: "text",
+                         text: "Goodbye Finland",
                          caption: "", quoted: "", sender: "Bob"))
 
         let list = makeListVM(chats: [])
@@ -378,10 +380,12 @@ final class ChatSearchViewModelTests: XCTestCase {
         let idx = MessageIndex(storeURL: tmp)
         idx.ensureSchema()
         idx.upsert(.init(messageID: "m1", chatJID: "A@s.whatsapp.net",
-                         timestamp: 10, text: "Finland",
+                         timestamp: 10, kind: "text",
+                         text: "Finland",
                          caption: "", quoted: "", sender: ""))
         idx.upsert(.init(messageID: "m2", chatJID: "A@s.whatsapp.net",
-                         timestamp: 20, text: "Sweden",
+                         timestamp: 20, kind: "text",
+                         text: "Sweden",
                          caption: "", quoted: "", sender: ""))
 
         let list = makeListVM(chats: [])

@@ -15,10 +15,26 @@ final class MessageIndex {
         let messageID: String
         let chatJID: String
         let timestamp: Int64
+        let kind: String
         let text: String
         let caption: String
         let quoted: String
         let sender: String
+    }
+
+    /// Optional filter knobs layered on top of the FTS5 MATCH clause.
+    /// All fields nil = no extra constraints (back-compat with the
+    /// pre-v0.8.4 single-arg query API).
+    struct SearchFilters: Equatable {
+        var sender: String?
+        var kind: String?
+        var fromTimestamp: Int64?
+        var toTimestamp: Int64?
+
+        var isEmpty: Bool {
+            sender == nil && kind == nil
+                && fromTimestamp == nil && toTimestamp == nil
+        }
     }
 
     struct Hit: Equatable, Hashable {
@@ -74,9 +90,20 @@ final class MessageIndex {
             sqlite3_exec(db, "PRAGMA journal_mode=WAL;", nil, nil, nil)
             sqlite3_exec(db, "PRAGMA synchronous=NORMAL;", nil, nil, nil)
         }
+        // Schema v1 → v2 migration: FTS5 can't ALTER TABLE ADD COLUMN,
+        // so we drop and re-create. `bootstrapIfNeeded` repopulates on
+        // next launch because the row count drops to 0. One-shot,
+        // gated by UserDefaults so a single migration runs per device.
+        let schemaKey = "messageIndexSchemaVersion"
+        let currentVersion = UserDefaults.standard.integer(forKey: schemaKey)
+        if currentVersion < 2 {
+            sqlite3_exec(db, "DROP TABLE IF EXISTS MessageFTS;", nil, nil, nil)
+            UserDefaults.standard.set(2, forKey: schemaKey)
+        }
         let create = """
             CREATE VIRTUAL TABLE IF NOT EXISTS MessageFTS USING fts5(
                 msgid UNINDEXED, chatjid UNINDEXED, ts UNINDEXED,
+                kind UNINDEXED,
                 text, caption, quoted, sender,
                 tokenize = 'unicode61'
             );
@@ -97,11 +124,12 @@ final class MessageIndex {
                           binds: [.text(f.messageID)])
         if ok {
             ok = execStep(sql: """
-                INSERT INTO MessageFTS(msgid, chatjid, ts, text, caption, quoted, sender)
-                VALUES (?, ?, ?, ?, ?, ?, ?);
+                INSERT INTO MessageFTS(msgid, chatjid, ts, kind, text, caption, quoted, sender)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?);
                 """,
                 binds: [
                     .text(f.messageID), .text(f.chatJID), .int(f.timestamp),
+                    .text(f.kind),
                     .text(f.text), .text(f.caption),
                     .text(f.quoted), .text(f.sender),
                 ])
@@ -126,35 +154,76 @@ final class MessageIndex {
 
     // MARK: - Read paths
 
-    func searchInChat(jid: String, query: String, limit: Int = 500) -> [Hit] {
+    func searchInChat(jid: String, query: String,
+                      filters: SearchFilters = .init(),
+                      limit: Int = 500) -> [Hit] {
         guard let match = makeMatch(query) else { return [] }
+        var clauses = ["chatjid = ?", "MessageFTS MATCH ?"]
+        var binds: [Bind] = [.text(jid), .text(match)]
+        appendFilterClauses(filters, clauses: &clauses, binds: &binds)
+        binds.append(.int(Int64(limit)))
+        let sql = """
+            SELECT msgid, chatjid, ts, sender,
+                   snippet(MessageFTS, -1, '⟦', '⟧', '…', 12)
+            FROM MessageFTS
+            WHERE \(clauses.joined(separator: " AND "))
+            ORDER BY ts ASC
+            LIMIT ?;
+            """
         return queue.sync {
             ensureSchemaLocked()
-            return runQuery(sql: """
-                SELECT msgid, chatjid, ts, sender,
-                       snippet(MessageFTS, -1, '⟦', '⟧', '…', 12)
-                FROM MessageFTS
-                WHERE chatjid = ? AND MessageFTS MATCH ?
-                ORDER BY ts ASC
-                LIMIT ?;
-                """,
-                binds: [.text(jid), .text(match), .int(Int64(limit))])
+            return runQuery(sql: sql, binds: binds)
         }
     }
 
-    func searchGlobal(query: String, limit: Int = 200) -> [Hit] {
+    func searchGlobal(query: String,
+                      filters: SearchFilters = .init(),
+                      chatJID: String? = nil,
+                      limit: Int = 200) -> [Hit] {
         guard let match = makeMatch(query) else { return [] }
+        var clauses = ["MessageFTS MATCH ?"]
+        var binds: [Bind] = [.text(match)]
+        if let chatJID, !chatJID.isEmpty {
+            clauses.append("chatjid = ?")
+            binds.append(.text(chatJID))
+        }
+        appendFilterClauses(filters, clauses: &clauses, binds: &binds)
+        binds.append(.int(Int64(limit)))
+        let sql = """
+            SELECT msgid, chatjid, ts, sender,
+                   snippet(MessageFTS, -1, '⟦', '⟧', '…', 12)
+            FROM MessageFTS
+            WHERE \(clauses.joined(separator: " AND "))
+            ORDER BY bm25(MessageFTS) ASC, ts DESC
+            LIMIT ?;
+            """
         return queue.sync {
             ensureSchemaLocked()
-            return runQuery(sql: """
-                SELECT msgid, chatjid, ts, sender,
-                       snippet(MessageFTS, -1, '⟦', '⟧', '…', 12)
-                FROM MessageFTS
-                WHERE MessageFTS MATCH ?
-                ORDER BY bm25(MessageFTS) ASC, ts DESC
-                LIMIT ?;
-                """,
-                binds: [.text(match), .int(Int64(limit))])
+            return runQuery(sql: sql, binds: binds)
+        }
+    }
+
+    /// Appends optional WHERE clauses + their bind values for sender /
+    /// kind / date-range filters. Keeping this in one place avoids the
+    /// two read paths drifting out of sync on bind order.
+    private func appendFilterClauses(_ f: SearchFilters,
+                                     clauses: inout [String],
+                                     binds: inout [Bind]) {
+        if let sender = f.sender, !sender.isEmpty {
+            clauses.append("sender = ?")
+            binds.append(.text(sender))
+        }
+        if let kind = f.kind, !kind.isEmpty {
+            clauses.append("kind = ?")
+            binds.append(.text(kind))
+        }
+        if let from = f.fromTimestamp {
+            clauses.append("ts >= ?")
+            binds.append(.int(from))
+        }
+        if let to = f.toTimestamp {
+            clauses.append("ts <= ?")
+            binds.append(.int(to))
         }
     }
 
@@ -200,11 +269,12 @@ final class MessageIndex {
                     if !execStep(sql: "DELETE FROM MessageFTS WHERE msgid = ?;",
                                  binds: [.text(f.messageID)]) { ok = false; break }
                     if !execStep(sql: """
-                        INSERT INTO MessageFTS(msgid, chatjid, ts, text, caption, quoted, sender)
-                        VALUES (?, ?, ?, ?, ?, ?, ?);
+                        INSERT INTO MessageFTS(msgid, chatjid, ts, kind, text, caption, quoted, sender)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?);
                         """,
                         binds: [
                             .text(f.messageID), .text(f.chatJID), .int(f.timestamp),
+                            .text(f.kind),
                             .text(f.text), .text(f.caption),
                             .text(f.quoted), .text(f.sender),
                         ]) { ok = false; break }
@@ -233,7 +303,7 @@ final class MessageIndex {
 
         var stmt: OpaquePointer?
         let sql = """
-            SELECT ZID, ZCHATJID, ZTIMESTAMP, ZTEXT, ZMEDIACAPTION,
+            SELECT ZID, ZCHATJID, ZTIMESTAMP, ZKIND, ZTEXT, ZMEDIACAPTION,
                    ZQUOTEDTEXTSNIPPET, ZSENDERPUSHNAME
             FROM ZPERSISTEDMESSAGE
             ORDER BY Z_PK ASC
@@ -255,10 +325,11 @@ final class MessageIndex {
                 messageID: id,
                 chatJID:   stringFromStmt(stmt, 1),
                 timestamp: ts,
-                text:      stringFromStmt(stmt, 3),
-                caption:   stringFromStmt(stmt, 4),
-                quoted:    stringFromStmt(stmt, 5),
-                sender:    stringFromStmt(stmt, 6)))
+                kind:      stringFromStmt(stmt, 3),
+                text:      stringFromStmt(stmt, 4),
+                caption:   stringFromStmt(stmt, 5),
+                quoted:    stringFromStmt(stmt, 6),
+                sender:    stringFromStmt(stmt, 7)))
         }
         return out
     }

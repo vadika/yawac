@@ -70,19 +70,15 @@ rare-use utilities) ships only when the important list is clear.
 
 ## Search
 
-- ◐ **In-chat message search** — ⌘F find bar with ↑/↓ navigation,
-  highlights, locale-aware tokenizer (FTS5).
-  Gaps:
-    - ☐ Filter by sender (groups only).
-    - ☐ Filter by message kind (text / image / video / voice /
-      document / link / location).
-    - ☐ Filter by date range.
-- ◐ **Global message search** — sidebar `⌘K` Messages section, tap-to-jump
-  with brief flash highlight.
-  Gaps:
-    - ☐ Filter by chat.
-    - ☐ Filter by message kind.
-    - ☐ Filter by sender across chats.
+- ● **In-chat message search** — ⌘F find bar with ↑/↓ navigation,
+  highlights, locale-aware tokenizer (FTS5). v0.8.4 adds chip-strip
+  filters for sender, kind, and date range (Today / Last 7 / 30 /
+  90 / Custom…).
+- ● **Global message search** — sidebar `⌘K` Messages section,
+  tap-to-jump with brief flash highlight. v0.8.4 adds chip-strip
+  filters for chat, sender, kind, and date range. Schema bumped
+  to v2 with `kind UNINDEXED`; existing rows re-bootstrapped on
+  first v0.8.4 launch.
 
 ## Groups
 

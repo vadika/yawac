@@ -245,6 +245,7 @@ extension PersistedMessage {
             messageID: id,
             chatJID:   chatJID,
             timestamp: Int64(timestamp.timeIntervalSinceReferenceDate),
+            kind:      kind,
             text:      text ?? "",
             caption:   mediaCaption ?? "",
             quoted:    quotedTextSnippet ?? "",
