@@ -115,7 +115,7 @@ func (c *Client) PinMessageInChat(chatJID, targetMsgID, targetSenderJID string, 
 // sent by us.
 //
 // Returns JSON of JSendResult.
-func (c *Client) SendReaction(chatJID, targetMsgID, targetSenderJID string, targetFromMe bool, emoji string) (string, error) {
+func (c *Client) SendReaction(chatJID, targetMsgID, targetSenderJID string, targetFromMe bool, emoji string, ephemeralSec int32) (string, error) {
 	if c.wa == nil {
 		return "", errors.New("client closed")
 	}
@@ -136,7 +136,8 @@ func (c *Client) SendReaction(chatJID, targetMsgID, targetSenderJID string, targ
 			return "", fmt.Errorf("parse sender: %w", err)
 		}
 	}
-	msg := c.wa.BuildReaction(chat, sender, targetMsgID, emoji)
+	inner := c.wa.BuildReaction(chat, sender, targetMsgID, emoji)
+	msg := wrapForChat(inner, ephemeralSec, false)
 	resp, err := c.wa.SendMessage(context.Background(), chat, msg)
 	if err != nil {
 		return "", fmt.Errorf("send reaction: %w", err)
@@ -226,7 +227,7 @@ func (c *Client) SendText(chatJID, body string, mentionedJIDsJSON string, epheme
 // ForwardText re-sends text to another chat tagged as forwarded. Plain
 // Conversation carries no ContextInfo, so forwards use ExtendedTextMessage
 // to carry the IsForwarded flag.
-func (c *Client) ForwardText(chatJID, text string) (string, error) {
+func (c *Client) ForwardText(chatJID, text string, ephemeralSec int32) (string, error) {
 	if c.wa == nil {
 		return "", errors.New("client closed")
 	}
@@ -237,10 +238,11 @@ func (c *Client) ForwardText(chatJID, text string) (string, error) {
 	if chat.User == "" || chat.Server == "" {
 		return "", fmt.Errorf("parse chat: %q is not a valid jid", chatJID)
 	}
-	msg := &waE2E.Message{ExtendedTextMessage: &waE2E.ExtendedTextMessage{
+	inner := &waE2E.Message{ExtendedTextMessage: &waE2E.ExtendedTextMessage{
 		Text:        proto.String(text),
 		ContextInfo: &waE2E.ContextInfo{IsForwarded: proto.Bool(true), ForwardingScore: proto.Uint32(1)},
 	}}
+	msg := wrapForChat(inner, ephemeralSec, false)
 	resp, err := c.wa.SendMessage(context.Background(), chat, msg)
 	if err != nil {
 		return "", fmt.Errorf("send forward text: %w", err)
@@ -254,7 +256,7 @@ func (c *Client) ForwardText(chatJID, text string) (string, error) {
 // re-download/re-upload. WhatsApp media is content-addressed and
 // encrypted by mediaKey, so the same CDN blob is reusable across chats.
 // `kind` is taken from the ref. `fileName` applies to documents only.
-func (c *Client) ForwardMedia(chatJID, refJSON, caption, fileName string) (string, error) {
+func (c *Client) ForwardMedia(chatJID, refJSON, caption, fileName string, ephemeralSec int32) (string, error) {
 	if c.wa == nil {
 		return "", errors.New("client closed")
 	}
@@ -270,10 +272,10 @@ func (c *Client) ForwardMedia(chatJID, refJSON, caption, fileName string) (strin
 		return "", fmt.Errorf("parse ref: %w", err)
 	}
 	fwd := &waE2E.ContextInfo{IsForwarded: proto.Bool(true), ForwardingScore: proto.Uint32(1)}
-	var msg *waE2E.Message
+	var inner *waE2E.Message
 	switch ref.Kind {
 	case "image":
-		msg = &waE2E.Message{ImageMessage: &waE2E.ImageMessage{
+		inner = &waE2E.Message{ImageMessage: &waE2E.ImageMessage{
 			Caption: proto.String(caption), URL: proto.String(ref.URL),
 			DirectPath: proto.String(ref.DirectPath), MediaKey: ref.MediaKey,
 			Mimetype: proto.String(ref.Mimetype), FileEncSHA256: ref.FileEncSHA256,
@@ -281,7 +283,7 @@ func (c *Client) ForwardMedia(chatJID, refJSON, caption, fileName string) (strin
 			ContextInfo: fwd,
 		}}
 	case "video":
-		msg = &waE2E.Message{VideoMessage: &waE2E.VideoMessage{
+		inner = &waE2E.Message{VideoMessage: &waE2E.VideoMessage{
 			Caption: proto.String(caption), URL: proto.String(ref.URL),
 			DirectPath: proto.String(ref.DirectPath), MediaKey: ref.MediaKey,
 			Mimetype: proto.String(ref.Mimetype), FileEncSHA256: ref.FileEncSHA256,
@@ -289,14 +291,14 @@ func (c *Client) ForwardMedia(chatJID, refJSON, caption, fileName string) (strin
 			ContextInfo: fwd,
 		}}
 	case "audio":
-		msg = &waE2E.Message{AudioMessage: &waE2E.AudioMessage{
+		inner = &waE2E.Message{AudioMessage: &waE2E.AudioMessage{
 			URL: proto.String(ref.URL), DirectPath: proto.String(ref.DirectPath),
 			MediaKey: ref.MediaKey, Mimetype: proto.String(ref.Mimetype),
 			FileEncSHA256: ref.FileEncSHA256, FileSHA256: ref.FileSHA256,
 			FileLength: proto.Uint64(ref.FileLength), ContextInfo: fwd,
 		}}
 	case "document":
-		msg = &waE2E.Message{DocumentMessage: &waE2E.DocumentMessage{
+		inner = &waE2E.Message{DocumentMessage: &waE2E.DocumentMessage{
 			Caption: proto.String(caption), FileName: proto.String(fileName),
 			URL: proto.String(ref.URL), DirectPath: proto.String(ref.DirectPath),
 			MediaKey: ref.MediaKey, Mimetype: proto.String(ref.Mimetype),
@@ -304,7 +306,7 @@ func (c *Client) ForwardMedia(chatJID, refJSON, caption, fileName string) (strin
 			FileLength: proto.Uint64(ref.FileLength), ContextInfo: fwd,
 		}}
 	case "sticker":
-		msg = &waE2E.Message{StickerMessage: &waE2E.StickerMessage{
+		inner = &waE2E.Message{StickerMessage: &waE2E.StickerMessage{
 			URL: proto.String(ref.URL), DirectPath: proto.String(ref.DirectPath),
 			MediaKey: ref.MediaKey, Mimetype: proto.String(ref.Mimetype),
 			FileEncSHA256: ref.FileEncSHA256, FileSHA256: ref.FileSHA256,
@@ -313,6 +315,7 @@ func (c *Client) ForwardMedia(chatJID, refJSON, caption, fileName string) (strin
 	default:
 		return "", fmt.Errorf("unsupported kind: %q", ref.Kind)
 	}
+	msg := wrapForChat(inner, ephemeralSec, false)
 	resp, err := c.wa.SendMessage(context.Background(), chat, msg)
 	if err != nil {
 		return "", fmt.Errorf("send forward media: %w", err)
@@ -956,6 +959,7 @@ func (c *Client) SendTextReply(
 	chatJID, body, quotedID, quotedSenderJID string,
 	quotedFromMe bool, quotedKind, quotedSnippet string,
 	mentionedJIDsJSON string,
+	ephemeralSec int32,
 ) (string, error) {
 	if c.wa == nil {
 		return "", errors.New("client closed")
@@ -989,12 +993,13 @@ func (c *Client) SendTextReply(
 		QuotedMessage: stubQuoted(quotedKind, quotedSnippet),
 		MentionedJID:  mentionedJIDs,
 	}
-	msg := &waE2E.Message{
+	inner := &waE2E.Message{
 		ExtendedTextMessage: &waE2E.ExtendedTextMessage{
 			Text:        proto.String(body),
 			ContextInfo: ctx,
 		},
 	}
+	msg := wrapForChat(inner, ephemeralSec, false)
 	resp, err := c.wa.SendMessage(context.Background(), chat, msg)
 	if err != nil {
 		return "", fmt.Errorf("send: %w", err)

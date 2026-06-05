@@ -82,9 +82,11 @@ func isPollCreation(m *waE2E.Message) bool {
 //   - pollFromMe:        whether the original poll was sent by us
 //   - selectedHashesJSON: JSON array of hex-encoded SHA256(optionName) strings
 //   - pollOptionsJSON:   JSON array of JPollOption — used to resolve hash -> name
+//   - ephemeralSec:      when >0, wrap the vote in EphemeralMessage so it
+//                        inherits the chat's disappearing-message retention.
 //
 // Returns JSON of JSendResult.
-func (c *Client) SendPollVote(chatJID, pollMsgID, pollSenderJID string, pollFromMe bool, selectedHashesJSON, pollOptionsJSON string) (string, error) {
+func (c *Client) SendPollVote(chatJID, pollMsgID, pollSenderJID string, pollFromMe bool, selectedHashesJSON, pollOptionsJSON string, ephemeralSec int32) (string, error) {
 	if c.wa == nil {
 		return "", errors.New("client closed")
 	}
@@ -128,10 +130,11 @@ func (c *Client) SendPollVote(chatJID, pollMsgID, pollSenderJID string, pollFrom
 		ID: pollMsgID,
 	}
 	ctx := context.Background()
-	msg, err := c.wa.BuildPollVote(ctx, info, names)
+	inner, err := c.wa.BuildPollVote(ctx, info, names)
 	if err != nil {
 		return "", fmt.Errorf("build vote: %w", err)
 	}
+	msg := wrapForChat(inner, ephemeralSec, false)
 	resp, err := c.wa.SendMessage(ctx, chat, msg)
 	if err != nil {
 		return "", fmt.Errorf("send: %w", err)

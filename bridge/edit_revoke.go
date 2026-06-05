@@ -16,7 +16,19 @@ import (
 // menu item past 15 min and the server rejects late edits. Returns
 // JSON of JSendResult carrying the edit envelope id (UI keeps the
 // original msgID for display).
-func (c *Client) EditText(chatJID, msgID, newBody string, mentionedJIDsJSON string) (string, error) {
+//
+// EditText edits a previously-sent text message. The ephemeralSec
+// parameter is accepted for signature parity with the other five
+// threaded sends but is intentionally NOT wrapped via wrapForChat:
+// WhatsApp protocol convention is that edits inherit the original
+// message's expiration timer, so an additional EphemeralMessage
+// wrap is unnecessary (and may be rejected by the server). The
+// parameter is reserved for a future protocol-level change.
+func (c *Client) EditText(
+	chatJID, msgID, newBody, mentionedJIDsJSON string,
+	ephemeralSec int32,
+) (string, error) {
+	_ = ephemeralSec // intentional: see doc comment above
 	if c.wa == nil {
 		return "", errors.New("client closed")
 	}

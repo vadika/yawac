@@ -187,3 +187,22 @@ func TestSendPollCreationRejectsBadSelectableCount(t *testing.T) {
 		t.Fatalf("want selectable error for >len, got %v", err)
 	}
 }
+
+func TestSendPollVoteEphemeralWrap(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/spv.db")
+	defer c.Close()
+	_, err := c.SendPollVote(
+		"1@s.whatsapp.net", "POLL1", "1@s.whatsapp.net", false,
+		`[]`, `[]`,
+		86400)
+	if err == nil {
+		t.Fatal("expected error on unpaired client")
+	}
+}
+
+func TestSendPollVoteSignatureCompiles(t *testing.T) {
+	var _ func(*Client) func(string, string, string, bool, string, string, int32) (string, error) =
+		func(c *Client) func(string, string, string, bool, string, string, int32) (string, error) {
+			return c.SendPollVote
+		}
+}

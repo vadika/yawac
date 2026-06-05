@@ -344,20 +344,23 @@ final class ConversationViewModel {
                 switch m.body {
                 case .text(let t):
                     let body = prefix + t
-                    result = try client.forwardText(chatJID, text: body)
+                    result = try client.forwardText(chatJID, text: body,
+                                                    ephemeralSeconds: dstEphemeralSec(chatJID))
                     outText = body
                 case .media(let kind, let caption, let fileName, _):
                     if let ref = mediaRefJSON(for: m.id) {
                         let cap = prefix + (caption ?? "")
                         result = try client.forwardMedia(chatJID, refJSON: ref,
-                                                          caption: cap, fileName: fileName ?? "")
+                                                          caption: cap, fileName: fileName ?? "",
+                                                          ephemeralSeconds: dstEphemeralSec(chatJID))
                         outKind = kind
                         outCaption = cap.isEmpty ? nil : cap
                         outFileName = fileName
                         outRef = ref
                     } else if let c = caption, !c.isEmpty {
                         let body = prefix + c
-                        result = try client.forwardText(chatJID, text: body)
+                        result = try client.forwardText(chatJID, text: body,
+                                                        ephemeralSeconds: dstEphemeralSec(chatJID))
                         outText = body
                     } else {
                         continue
@@ -1163,7 +1166,8 @@ final class ConversationViewModel {
                     quotedFromMe: q.fromMe,
                     quotedKind: Self.quotedKind(of: q),
                     quotedSnippet: Self.quotedSnippet(of: q),
-                    mentionedJIDs: mentionedJIDs)
+                    mentionedJIDs: mentionedJIDs,
+                    ephemeralSeconds: ephemeralExpirationSeconds)
             } else {
                 res = try client.sendText(chatJID, body,
                                           mentionedJIDs: mentionedJIDs,
@@ -1766,7 +1770,8 @@ final class ConversationViewModel {
             body: trimmed, mentions: mentionsSnapshot, allParticipants: allP)
         do {
             _ = try client.editText(chatJID, m.id, body,
-                                    mentionedJIDs: mentionedJIDs)
+                                    mentionedJIDs: mentionedJIDs,
+                                    ephemeralSeconds: ephemeralExpirationSeconds)
             applyLocalEdit(messageID: m.id, newText: body, at: Date())
             editTarget = nil
         } catch {
@@ -2009,7 +2014,8 @@ final class ConversationViewModel {
                     pollSenderJID: resolvedSender,
                     pollFromMe: pollFromMe,
                     optionHashes: hashes,
-                    pollOptions: options)
+                    pollOptions: options,
+                    ephemeralSeconds: self.ephemeralExpirationSeconds)
                 // Optimistically tally our own vote so the bubble updates
                 // immediately. Use the account's bare JID so the phone's
                 // PollUpdate echo coalesces with this entry instead of
@@ -2090,7 +2096,8 @@ final class ConversationViewModel {
                     targetMsgID: messageID,
                     targetSenderJID: targetSenderJID,
                     targetFromMe: targetFromMe,
-                    emoji: emoji)
+                    emoji: emoji,
+                    ephemeralSeconds: self.ephemeralExpirationSeconds)
                 let rx = BridgeReaction(
                     chatJID: self.chatJID,
                     targetMessageID: messageID,
@@ -2393,6 +2400,16 @@ final class ConversationViewModel {
         var seen = Set<String>()
         let deduped = jids.filter { seen.insert($0).inserted }
         return (out, deduped)
+    }
+
+    /// Resolves the disappearing-message timer (seconds) of an arbitrary
+    /// chat by JID. Used by `executeForward` so each outbound forward
+    /// inherits its **destination** chat's timer, not the source
+    /// conversation's `self.ephemeralExpirationSeconds`. Falls back to 0
+    /// (non-disappearing) when the chat isn't in the sidebar yet.
+    private func dstEphemeralSec(_ dstJID: String) -> Int32 {
+        chatList?.chats.first(where: { $0.jid == dstJID })?
+            .ephemeralExpirationSeconds ?? 0
     }
 
     /// Substring before the first `@` of a JID — the phone or LID number

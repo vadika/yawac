@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import Observation
+import SwiftData
 
 @Observable @MainActor
 final class SessionViewModel {
@@ -18,6 +19,24 @@ final class SessionViewModel {
     /// badge and admin panel header. Recreated when the WAClient is built
     /// in `boot()` so the store can fan out queue refreshes via the bridge.
     private(set) var joinRequestStore: JoinRequestStore = JoinRequestStore(client: nil)
+    /// SwiftData context injected from `ContentView.task` once the
+    /// environment is in scope. Read by `requestHistoryBackfillIfNeeded`
+    /// to find the globally-oldest persisted message before issuing a
+    /// one-shot HistorySyncFromOldest IQ on first v0.8.1 boot.
+    @ObservationIgnored
+    var modelContext: ModelContext?
+    /// One-shot gate for the v0.8.1 history backfill — flipped to true on
+    /// the first HistorySync arrival (see ContentView, T12) and reset on
+    /// logout. UserDefaults-backed (matching `ChatListViewModel.deletedChats`
+    /// style) rather than `@AppStorage` because the property-wrapper
+    /// requires a SwiftUI view context and doesn't compose with the
+    /// `@Observable` macro here.
+    private static let historyBackfillCompletedKey = "historyBackfillCompleted"
+    var historyBackfillCompleted: Bool {
+        get { UserDefaults.standard.bool(forKey: Self.historyBackfillCompletedKey) }
+        set { UserDefaults.standard.set(newValue,
+                                        forKey: Self.historyBackfillCompletedKey) }
+    }
     /// Throttle for `didBecomeActive` refresh fan-out (30s).
     private var lastForegroundRefresh: Date?
     @ObservationIgnored
@@ -349,6 +368,9 @@ final class SessionViewModel {
     }
 
     func logout() async {
+        // Re-arm the v0.8.1 one-shot history backfill so the next pairing
+        // session re-runs it against whatever state the new account has.
+        historyBackfillCompleted = false
         try? client?.logout()
         client = nil
         qrCode = nil
@@ -389,6 +411,10 @@ final class SessionViewModel {
             // group so the chat-list badge is correct as soon as the
             // sidebar renders post-connect.
             Task { await self.refreshAllAdminApprovalGroups() }
+            // v0.8.1 one-shot history backfill against the globally-oldest
+            // persisted message. No-op once the flag is set; see T12 for
+            // where the flag flips on first HistorySync arrival.
+            Task { await self.requestHistoryBackfillIfNeeded() }
         case .joinApprovalModeChanged(let chatJID, let on, _, _):
             if on {
                 Task { await self.joinRequestStore.refresh(chatJID: chatJID) }
@@ -443,6 +469,50 @@ final class SessionViewModel {
                 optionHashesJSON: json,
                 timestamp: Date())
         }
+    }
+
+    /// v0.8.1 one-shot history backfill. On the first `.connected` after
+    /// upgrade we issue a single HistorySyncFromOldest IQ anchored at the
+    /// globally-oldest persisted message, so disappearing messages that
+    /// expired off the phone before the user paired this device can still
+    /// be replayed via the server-side ephemeral window. The
+    /// `historyBackfillCompleted` flag is flipped to true on the first
+    /// HistorySync arrival (see ContentView, T12) and reset by `logout()`.
+    @MainActor
+    func requestHistoryBackfillIfNeeded() async {
+        guard !historyBackfillCompleted else { return }
+        guard let client else { return }
+        guard let context = modelContext else { return }
+        var d = FetchDescriptor<PersistedMessage>(
+            sortBy: [SortDescriptor(\.timestamp, order: .forward)])
+        d.fetchLimit = 1
+        let oldest = (try? context.fetch(d))?.first
+        guard let oldest else {
+            // First-ever launch — no anchor exists, so an IQ would have
+            // nothing to seek before. Mark complete so the next boot
+            // doesn't waste an IQ once a message arrives.
+            historyBackfillCompleted = true
+            return
+        }
+        let chatJID = oldest.chatJID
+        let msgID = oldest.id
+        let fromMe = oldest.fromMe
+        let tsUnix = Int64(oldest.timestamp.timeIntervalSince1970)
+        do {
+            try await Task.detached { [client] in
+                try client.requestFullHistorySync(
+                    beforeChatJID: chatJID,
+                    beforeMsgID: msgID,
+                    beforeFromMe: fromMe,
+                    beforeTSUnix: tsUnix,
+                    count: 100_000)
+            }.value
+        } catch {
+            NSLog("[yawac/backfill] history backfill request failed: %@",
+                  String(describing: error))
+            return
+        }
+        // Flag flipped on first HistorySync arrival — see T12 (ContentView).
     }
 
     /// Fan-out refresh of pending join-request queues for every group

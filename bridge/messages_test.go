@@ -39,7 +39,7 @@ func TestSendTextReplyRejectsBadJID(t *testing.T) {
 	c := &Client{}
 	_, err := c.SendTextReply("not-a-jid", "hi",
 		"ABCD1234", "12345@s.whatsapp.net", false,
-		"text", "hello", "")
+		"text", "hello", "", 0)
 	if err == nil {
 		t.Fatal("expected error for bad chat jid")
 	}
@@ -49,7 +49,7 @@ func TestSendTextReplyClosedClient(t *testing.T) {
 	c := &Client{} // wa is nil
 	_, err := c.SendTextReply("12345@s.whatsapp.net", "hi",
 		"ABCD1234", "12345@s.whatsapp.net", false,
-		"text", "hello", "")
+		"text", "hello", "", 0)
 	if err == nil {
 		t.Fatal("expected error for closed client")
 	}
@@ -406,4 +406,77 @@ func TestDispatchEmitsEphemeralTimerOnInboundWithExpiration(t *testing.T) {
 	if got.Seconds != 86400 {
 		t.Errorf("Seconds = %d", got.Seconds)
 	}
+}
+
+func TestSendReactionEphemeralWrap(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/sr.db")
+	defer c.Close()
+	_, err := c.SendReaction("1@s.whatsapp.net", "MSG1", "1@s.whatsapp.net", false, "👍", 86400)
+	if err == nil {
+		t.Fatal("expected error on unpaired client")
+	}
+}
+
+func TestSendReactionSignatureCompiles(t *testing.T) {
+	var _ func(*Client) func(string, string, string, bool, string, int32) (string, error) =
+		func(c *Client) func(string, string, string, bool, string, int32) (string, error) {
+			return c.SendReaction
+		}
+}
+
+func TestSendTextReplyEphemeralWrap(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/str.db")
+	defer c.Close()
+	_, err := c.SendTextReply(
+		"1@s.whatsapp.net", "hi",
+		"QUOTEDMSG", "1@s.whatsapp.net", false,
+		"text", "previous",
+		`[]`,
+		86400)
+	if err == nil {
+		t.Fatal("expected error on unpaired client")
+	}
+}
+
+func TestSendTextReplySignatureCompiles(t *testing.T) {
+	var _ func(*Client) func(string, string, string, string, bool, string, string, string, int32) (string, error) =
+		func(c *Client) func(string, string, string, string, bool, string, string, string, int32) (string, error) {
+			return c.SendTextReply
+		}
+}
+
+func TestForwardTextEphemeralWrap(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/ft.db")
+	defer c.Close()
+	_, err := c.ForwardText("1@s.whatsapp.net", "hi", 86400)
+	if err == nil {
+		t.Fatal("expected error on unpaired client")
+	}
+}
+
+func TestForwardTextSignatureCompiles(t *testing.T) {
+	var _ func(*Client) func(string, string, int32) (string, error) =
+		func(c *Client) func(string, string, int32) (string, error) {
+			return c.ForwardText
+		}
+}
+
+func TestForwardMediaEphemeralWrap(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/fm.db")
+	defer c.Close()
+	_, err := c.ForwardMedia(
+		"1@s.whatsapp.net",
+		`{"kind":"image","url":"u","direct_path":"p","media_key":"AA==","file_enc_sha256":"AA==","file_sha256":"AA==","file_length":1,"mimetype":"image/jpeg"}`,
+		"caption", "name.jpg",
+		86400)
+	if err == nil {
+		t.Fatal("expected error on unpaired client")
+	}
+}
+
+func TestForwardMediaSignatureCompiles(t *testing.T) {
+	var _ func(*Client) func(string, string, string, string, int32) (string, error) =
+		func(c *Client) func(string, string, string, string, int32) (string, error) {
+			return c.ForwardMedia
+		}
 }
