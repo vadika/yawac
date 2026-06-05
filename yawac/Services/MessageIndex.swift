@@ -69,8 +69,10 @@ final class MessageIndex {
         // fires the live setters) gets non-empty values.
         self.ownPushName = UserDefaults.standard
             .string(forKey: "messageIndexOwnPushName") ?? ""
-        self.ownBareJID = UserDefaults.standard
+        let cachedJID = UserDefaults.standard
             .string(forKey: "messageIndexOwnBareJID") ?? ""
+        self.ownBareJID = cachedJID
+        self.bareJIDMissingAtBoot = cachedJID.isEmpty
     }
 
     private static func defaultStoreURL() -> URL {
@@ -99,16 +101,20 @@ final class MessageIndex {
             sqlite3_exec(db, "PRAGMA journal_mode=WAL;", nil, nil, nil)
             sqlite3_exec(db, "PRAGMA synchronous=NORMAL;", nil, nil, nil)
         }
-        // Schema v1 → v2: added `kind` column. v2 → v3: rebuilt for the
-        // own-push-name fallback. v3 → v4: added `sender_jid` so the
-        // Sender filter is stable across push-name changes. FTS5 can't
-        // ALTER ADD COLUMN; bumps drop and re-create, letting
-        // `bootstrapIfNeeded` repopulate from ZPERSISTEDMESSAGE.
+        // Schema bumps drop + recreate the FTS5 table; `bootstrapIfNeeded`
+        // repopulates from ZPERSISTEDMESSAGE on next launch.
+        //  v1 → v2: added `kind` column.
+        //  v2 → v3: rebuilt for own-push-name fallback.
+        //  v3 → v4: added `sender_jid` so Sender filter is stable across
+        //           push-name changes.
+        //  v4 → v5: repopulate using the cached own bare JID + LID→PN
+        //           canonical form so 1:1 chip sees self and dedupes
+        //           LID / PN siblings of the same contact.
         let schemaKey = "messageIndexSchemaVersion"
         let currentVersion = UserDefaults.standard.integer(forKey: schemaKey)
-        if currentVersion < 4 {
+        if currentVersion < 5 {
             sqlite3_exec(db, "DROP TABLE IF EXISTS MessageFTS;", nil, nil, nil)
-            UserDefaults.standard.set(4, forKey: schemaKey)
+            UserDefaults.standard.set(5, forKey: schemaKey)
         }
         let create = """
             CREATE VIRTUAL TABLE IF NOT EXISTS MessageFTS USING fts5(
@@ -152,21 +158,51 @@ final class MessageIndex {
 
     /// Sender JID we should index for a row. Own outbound rows often
     /// carry no senderJID (or the device-suffixed own JID) — normalise
-    /// to the bare own JID so equality filters work uniformly.
+    /// to the bare own JID. For non-self rows, run the bare value
+    /// through the optional canonicalizer so a contact known under
+    /// `@lid` and `@s.whatsapp.net` siblings collapses to one chip
+    /// entry.
     private func senderJIDForIndex(_ f: MessageFields) -> String {
         if f.fromMe { return ownBareJID }
-        return JIDNormalize.bare(f.senderJID)
+        let bare = JIDNormalize.bare(f.senderJID)
+        if let canon = canonicalizer { return canon(bare) }
+        return bare
+    }
+
+    /// Optional LID→PN resolver. Set on launch (see
+    /// `setCanonicalizer`); used in `senderJIDForIndex` so LID and PN
+    /// siblings of the same contact share a single FTS row id.
+    private var canonicalizer: ((String) -> String)?
+
+    func setCanonicalizer(_ fn: @escaping (String) -> String) {
+        queue.sync { canonicalizer = fn }
     }
 
     /// Bare paired-account JID. Cached so the upsert path doesn't have
     /// to thread a client reference. Set on .connected.
     private var ownBareJID: String = ""
 
+    /// True when `init` found UserDefaults `messageIndexOwnBareJID`
+    /// empty. The first non-empty `setOwnBareJID` then knows the
+    /// bootstrap walk that fired before this session can't have indexed
+    /// own outbound rows correctly — triggers a forceRebootstrap.
+    private var bareJIDMissingAtBoot: Bool = false
+
     func setOwnBareJID(_ jid: String) {
         let bare = JIDNormalize.bare(jid)
         guard !bare.isEmpty else { return }
-        queue.sync { ownBareJID = bare }
+        let wasMissing = queue.sync { () -> Bool in
+            let missing = bareJIDMissingAtBoot
+            ownBareJID = bare
+            bareJIDMissingAtBoot = false
+            return missing
+        }
         UserDefaults.standard.set(bare, forKey: "messageIndexOwnBareJID")
+        if wasMissing {
+            Task.detached(priority: .utility) { [self] in
+                await self.forceRebootstrap()
+            }
+        }
     }
 
     /// Returns the sender string we should index for a row. Own outbound
@@ -369,6 +405,20 @@ final class MessageIndex {
     /// the persisted-message count.
     func bootstrapIfNeeded() async {
         await Task.detached(priority: .utility) { [self] in
+            self.runBootstrap()
+        }.value
+    }
+
+    /// Wipes the FTS5 table and re-walks ZPERSISTEDMESSAGE. Use after
+    /// state that affects `senderJIDForIndex` (own JID, canonicalizer)
+    /// arrives later than the initial bootstrap pass.
+    func forceRebootstrap() async {
+        await Task.detached(priority: .utility) { [self] in
+            self.queue.sync {
+                self.ensureSchemaLocked()
+                sqlite3_exec(self.db, "DELETE FROM MessageFTS;",
+                             nil, nil, nil)
+            }
             self.runBootstrap()
         }.value
     }

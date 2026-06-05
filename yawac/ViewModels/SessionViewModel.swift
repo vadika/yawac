@@ -440,9 +440,14 @@ final class SessionViewModel {
             // the FTS index. Push name fills `sender` for own-outbound
             // rows (whatsmeow never sets senderPushName on fromMe =
             // true); bare JID fills `sender_jid` so the Sender filter
-            // is stable across push-name changes.
+            // is stable across push-name changes. Canonicalizer
+            // collapses LID / PN siblings of the same contact into one
+            // chip entry.
             if let client {
                 MessageIndex.shared.setOwnPushName(client.ownPushName)
+                MessageIndex.shared.setCanonicalizer { jid in
+                    JIDNormalize.canonical(jid, client: client)
+                }
                 MessageIndex.shared.setOwnBareJID(client.ownJID)
             }
             // Publish our own presence as available so whatsmeow honors
