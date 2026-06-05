@@ -24,12 +24,14 @@ final class MessageIndexTests: XCTestCase {
 
     private func field(_ id: String, _ text: String,
                        chat: String = "c@s.whatsapp.net",
-                       ts: Int64 = 0, caption: String = "",
+                       ts: Int64 = 0, kind: String = "text",
+                       caption: String = "",
                        quoted: String = "", sender: String = "")
         -> MessageIndex.MessageFields
     {
         MessageIndex.MessageFields(
             messageID: id, chatJID: chat, timestamp: ts,
+            kind: kind,
             text: text, caption: caption, quoted: quoted, sender: sender)
     }
 
@@ -117,6 +119,7 @@ final class MessageIndexTests: XCTestCase {
         let idx = makeIndex()
         idx.upsert(MessageIndex.MessageFields(
             messageID: "m1", chatJID: "c@s.whatsapp.net", timestamp: 0,
+            kind: "image",
             text: "", caption: "vacation pic",
             quoted: "earlier reply", sender: "Alice"))
         XCTAssertEqual(idx.searchGlobal(query: "vacation", limit: 10).count, 1)
@@ -125,8 +128,8 @@ final class MessageIndexTests: XCTestCase {
     }
 
     private func seedZPersistedMessage(_ url: URL,
-                                       _ rows: [(String, String, Int64, String, String, String, String)]) {
-        // rows: (ZID, ZCHATJID, ZTIMESTAMP, ZTEXT, ZMEDIACAPTION,
+                                       _ rows: [(String, String, Int64, String, String, String, String, String)]) {
+        // rows: (ZID, ZCHATJID, ZTIMESTAMP, ZKIND, ZTEXT, ZMEDIACAPTION,
         //        ZQUOTEDTEXTSNIPPET, ZSENDERPUSHNAME)
         var db: OpaquePointer?
         XCTAssertEqual(sqlite3_open(url.path, &db), SQLITE_OK)
@@ -137,29 +140,31 @@ final class MessageIndexTests: XCTestCase {
                 ZID TEXT,
                 ZCHATJID TEXT,
                 ZTIMESTAMP REAL,
+                ZKIND TEXT,
                 ZTEXT TEXT,
                 ZMEDIACAPTION TEXT,
                 ZQUOTEDTEXTSNIPPET TEXT,
                 ZSENDERPUSHNAME TEXT
             );
         """, nil, nil, nil)
-        for (id, jid, ts, txt, cap, quo, sender) in rows {
+        for (id, jid, ts, kind, txt, cap, quo, sender) in rows {
             var stmt: OpaquePointer?
             sqlite3_prepare_v2(db, """
                 INSERT INTO ZPERSISTEDMESSAGE
-                (ZID, ZCHATJID, ZTIMESTAMP, ZTEXT, ZMEDIACAPTION,
+                (ZID, ZCHATJID, ZTIMESTAMP, ZKIND, ZTEXT, ZMEDIACAPTION,
                  ZQUOTEDTEXTSNIPPET, ZSENDERPUSHNAME)
-                VALUES (?, ?, ?, ?, ?, ?, ?);
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?);
                 """, -1, &stmt, nil)
             let TRANSIENT = unsafeBitCast(OpaquePointer(bitPattern: -1)!,
                                           to: sqlite3_destructor_type.self)
             sqlite3_bind_text(stmt, 1, id, -1, TRANSIENT)
             sqlite3_bind_text(stmt, 2, jid, -1, TRANSIENT)
             sqlite3_bind_double(stmt, 3, Double(ts))
-            sqlite3_bind_text(stmt, 4, txt, -1, TRANSIENT)
-            sqlite3_bind_text(stmt, 5, cap, -1, TRANSIENT)
-            sqlite3_bind_text(stmt, 6, quo, -1, TRANSIENT)
-            sqlite3_bind_text(stmt, 7, sender, -1, TRANSIENT)
+            sqlite3_bind_text(stmt, 4, kind, -1, TRANSIENT)
+            sqlite3_bind_text(stmt, 5, txt, -1, TRANSIENT)
+            sqlite3_bind_text(stmt, 6, cap, -1, TRANSIENT)
+            sqlite3_bind_text(stmt, 7, quo, -1, TRANSIENT)
+            sqlite3_bind_text(stmt, 8, sender, -1, TRANSIENT)
             sqlite3_step(stmt)
             sqlite3_finalize(stmt)
         }
@@ -167,9 +172,9 @@ final class MessageIndexTests: XCTestCase {
 
     func testBootstrapBackfillsFromZPersistedMessage() async {
         seedZPersistedMessage(tmpDB, [
-            ("m1", "A@s.whatsapp.net", 100, "Hello Finland", "", "", "Alice"),
-            ("m2", "A@s.whatsapp.net", 110, "", "Lake photo",  "", "Alice"),
-            ("m3", "B@s.whatsapp.net", 120, "Goodbye", "", "earlier reply", "Bob"),
+            ("m1", "A@s.whatsapp.net", 100, "text",  "Hello Finland", "", "", "Alice"),
+            ("m2", "A@s.whatsapp.net", 110, "image", "", "Lake photo",  "", "Alice"),
+            ("m3", "B@s.whatsapp.net", 120, "text",  "Goodbye", "", "earlier reply", "Bob"),
         ])
         let idx = MessageIndex(storeURL: tmpDB)
         await idx.bootstrapIfNeeded()
@@ -182,7 +187,7 @@ final class MessageIndexTests: XCTestCase {
 
     func testBootstrapIsNoOpWhenAlreadyIndexed() async {
         seedZPersistedMessage(tmpDB, [
-            ("m1", "A@s.whatsapp.net", 100, "Hello", "", "", "Alice"),
+            ("m1", "A@s.whatsapp.net", 100, "text", "Hello", "", "", "Alice"),
         ])
         let idx = MessageIndex(storeURL: tmpDB)
         await idx.bootstrapIfNeeded()

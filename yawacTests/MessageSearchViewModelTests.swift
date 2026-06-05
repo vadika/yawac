@@ -18,10 +18,12 @@ final class MessageSearchViewModelTests: XCTestCase {
         idx = MessageIndex(storeURL: tmpDB)
         idx.ensureSchema()
         idx.upsert(.init(messageID: "m1", chatJID: "A@s.whatsapp.net",
-                         timestamp: 10, text: "Hello Finland", caption: "",
+                         timestamp: 10, kind: "text",
+                         text: "Hello Finland", caption: "",
                          quoted: "", sender: "Alice"))
         idx.upsert(.init(messageID: "m2", chatJID: "B@s.whatsapp.net",
-                         timestamp: 20, text: "Hello world", caption: "",
+                         timestamp: 20, kind: "text",
+                         text: "Hello world", caption: "",
                          quoted: "", sender: "Bob"))
     }
     override func tearDown() async throws {
