@@ -31,6 +31,16 @@ struct Chat: Identifiable, Hashable {
     /// live `ephemeralTimerChanged` / 1:1 `EphemeralSetting` events.
     /// Not persisted — a fresh ListGroups on connect repopulates it.
     var ephemeralExpirationSeconds: Int32 = 0
+    /// Runtime-only: "Only admins can send messages" flag. Mirrors
+    /// `BridgeGroupModel.isAnnounce`. Populated by `mergeGroups` and
+    /// live admin events. Not persisted — a fresh ListGroups on connect
+    /// repopulates it.
+    var isAnnounce: Bool = false
+    /// Runtime-only: "Only admins can edit group info" flag. Mirrors
+    /// `BridgeGroupModel.isLocked`. Populated by `mergeGroups` and live
+    /// admin events. Not persisted — a fresh ListGroups on connect
+    /// repopulates it.
+    var isLocked: Bool = false
     var id: String { jid }
 }
 
