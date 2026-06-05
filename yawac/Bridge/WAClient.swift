@@ -117,7 +117,7 @@ class WAClient: PhoneValidating, LIDResolving {
     /// gomobile silently drops methods whose signatures contain `[]string`,
     /// so the bridge accepts a JSON array string instead. Returns "" for
     /// empty input — the Go side treats "" as "no mentions".
-    private func encodeMentionsJSON(_ mentionedJIDs: [String]) -> String {
+    nonisolated private func encodeMentionsJSON(_ mentionedJIDs: [String]) -> String {
         guard !mentionedJIDs.isEmpty else { return "" }
         // JSONEncoder on [String] cannot fail in practice; on the off-chance,
         // fall through to empty so the bridge takes the no-mentions branch.
@@ -232,11 +232,12 @@ class WAClient: PhoneValidating, LIDResolving {
         try go.setDisappearingTimer(chatJID, seconds: seconds)
     }
 
-    func sendReaction(chatJID: String,
-                      targetMsgID: String,
-                      targetSenderJID: String,
-                      targetFromMe: Bool,
-                      emoji: String) throws -> BridgeSendResult {
+    nonisolated func sendReaction(chatJID: String,
+                                  targetMsgID: String,
+                                  targetSenderJID: String,
+                                  targetFromMe: Bool,
+                                  emoji: String,
+                                  ephemeralSeconds: Int32 = 0) throws -> BridgeSendResult {
         var err: NSError?
         let json = go.sendReaction(
             chatJID,
@@ -244,48 +245,60 @@ class WAClient: PhoneValidating, LIDResolving {
             targetSenderJID: targetSenderJID,
             targetFromMe: targetFromMe,
             emoji: emoji,
+            ephemeralSec: ephemeralSeconds,
             error: &err)
         if let err { throw err }
         return try JSONDecoder().decode(BridgeSendResult.self, from: Data(json.utf8))
     }
 
-    func sendTextReply(_ chatJID: String, _ body: String,
-                       quotedID: String, quotedSenderJID: String,
-                       quotedFromMe: Bool, quotedKind: String,
-                       quotedSnippet: String,
-                       mentionedJIDs: [String] = []) throws -> BridgeSendResult {
+    nonisolated func sendTextReply(_ chatJID: String, _ body: String,
+                                   quotedID: String, quotedSenderJID: String,
+                                   quotedFromMe: Bool, quotedKind: String,
+                                   quotedSnippet: String,
+                                   mentionedJIDs: [String] = [],
+                                   ephemeralSeconds: Int32 = 0) throws -> BridgeSendResult {
         var err: NSError?
         let json = go.sendTextReply(
             chatJID, body: body,
             quotedID: quotedID, quotedSenderJID: quotedSenderJID,
             quotedFromMe: quotedFromMe, quotedKind: quotedKind,
             quotedSnippet: quotedSnippet,
-            mentionedJIDsJSON: encodeMentionsJSON(mentionedJIDs), error: &err)
+            mentionedJIDsJSON: encodeMentionsJSON(mentionedJIDs),
+            ephemeralSec: ephemeralSeconds,
+            error: &err)
         if let err { throw err }
         return try JSONDecoder().decode(BridgeSendResult.self, from: Data(json.utf8))
     }
 
-    func forwardText(_ chatJID: String, text: String) throws -> BridgeSendResult {
+    nonisolated func forwardText(_ chatJID: String, text: String,
+                                 ephemeralSeconds: Int32 = 0) throws -> BridgeSendResult {
         var err: NSError?
-        let json = go.forwardText(chatJID, text: text, error: &err)
+        let json = go.forwardText(chatJID, text: text,
+                                  ephemeralSec: ephemeralSeconds,
+                                  error: &err)
         if let err { throw err }
         return try JSONDecoder().decode(BridgeSendResult.self, from: Data(json.utf8))
     }
 
-    func forwardMedia(_ chatJID: String, refJSON: String,
-                      caption: String, fileName: String) throws -> BridgeSendResult {
+    nonisolated func forwardMedia(_ chatJID: String, refJSON: String,
+                                  caption: String, fileName: String,
+                                  ephemeralSeconds: Int32 = 0) throws -> BridgeSendResult {
         var err: NSError?
         let json = go.forwardMedia(chatJID, refJSON: refJSON,
-                                   caption: caption, fileName: fileName, error: &err)
+                                   caption: caption, fileName: fileName,
+                                   ephemeralSec: ephemeralSeconds,
+                                   error: &err)
         if let err { throw err }
         return try JSONDecoder().decode(BridgeSendResult.self, from: Data(json.utf8))
     }
 
-    func editText(_ chatJID: String, _ msgID: String, _ newBody: String,
-                  mentionedJIDs: [String] = []) throws -> BridgeSendResult {
+    nonisolated func editText(_ chatJID: String, _ msgID: String, _ newBody: String,
+                              mentionedJIDs: [String] = [],
+                              ephemeralSeconds: Int32 = 0) throws -> BridgeSendResult {
         var err: NSError?
         let json = go.editText(chatJID, msgID: msgID, newBody: newBody,
                                mentionedJIDsJSON: encodeMentionsJSON(mentionedJIDs),
+                               ephemeralSec: ephemeralSeconds,
                                error: &err)
         if let err { throw err }
         return try JSONDecoder().decode(BridgeSendResult.self, from: Data(json.utf8))
@@ -426,12 +439,13 @@ class WAClient: PhoneValidating, LIDResolving {
                                         from: Data(json.utf8))
     }
 
-    func sendPollVote(chatJID: String,
-                      pollMsgID: String,
-                      pollSenderJID: String,
-                      pollFromMe: Bool,
-                      optionHashes: [String],
-                      pollOptions: [BridgePollOption]) throws -> BridgeSendResult {
+    nonisolated func sendPollVote(chatJID: String,
+                                  pollMsgID: String,
+                                  pollSenderJID: String,
+                                  pollFromMe: Bool,
+                                  optionHashes: [String],
+                                  pollOptions: [BridgePollOption],
+                                  ephemeralSeconds: Int32 = 0) throws -> BridgeSendResult {
         let hashesJSON = (try? JSONEncoder().encode(optionHashes))
             .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
         let optionsJSON = (try? JSONEncoder().encode(pollOptions))
@@ -444,6 +458,7 @@ class WAClient: PhoneValidating, LIDResolving {
             pollFromMe: pollFromMe,
             selectedHashesJSON: hashesJSON,
             pollOptionsJSON: optionsJSON,
+            ephemeralSec: ephemeralSeconds,
             error: &err)
         if let err { throw err }
         return try JSONDecoder().decode(BridgeSendResult.self, from: Data(json.utf8))
@@ -504,6 +519,18 @@ class WAClient: PhoneValidating, LIDResolving {
             oldestFromMe: oldestFromMe,
             oldestTimestampSec: oldestTimestampSec,
             count: count)
+    }
+
+    nonisolated func requestFullHistorySync(beforeChatJID: String,
+                                            beforeMsgID: String,
+                                            beforeFromMe: Bool,
+                                            beforeTSUnix: Int64,
+                                            count: Int32) throws {
+        try go.requestFullHistorySync(beforeChatJID,
+                                      beforeMsgID: beforeMsgID,
+                                      beforeFromMe: beforeFromMe,
+                                      beforeTSUnix: beforeTSUnix,
+                                      count: count)
     }
 
     /// Sends a `read` receipt for `messageIDs`. `senderJID` is the bare
