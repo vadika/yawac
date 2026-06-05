@@ -24,6 +24,8 @@ type JGroup struct {
 	IsDefaultSubGroup bool           `json:"is_default_sub_group,omitempty"`
 	JoinApprovalMode  bool           `json:"join_approval_mode,omitempty"`
 	EphemeralExpirationSeconds int32 `json:"ephemeral_expiration_seconds,omitempty"`
+	IsAnnounce        bool           `json:"is_announce,omitempty"`
+	IsLocked          bool           `json:"is_locked,omitempty"`
 	Participants      []JParticipant `json:"participants"`
 }
 
@@ -51,6 +53,8 @@ func mapGroupInfo(g *types.GroupInfo) JGroup {
 		JoinApprovalMode:  g.GroupMembershipApprovalMode.IsJoinApprovalRequired,
 	}
 	out.EphemeralExpirationSeconds = int32(g.GroupEphemeral.DisappearingTimer)
+	out.IsAnnounce = g.GroupAnnounce.IsAnnounce
+	out.IsLocked = g.GroupLocked.IsLocked
 	out.Participants = make([]JParticipant, 0, len(g.Participants))
 	for _, p := range g.Participants {
 		out.Participants = append(out.Participants, JParticipant{

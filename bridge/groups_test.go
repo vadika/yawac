@@ -393,3 +393,19 @@ func TestMapGroupInfoCarriesEphemeralExpiration(t *testing.T) {
 		t.Fatalf("want 86400 got %d", got.EphemeralExpirationSeconds)
 	}
 }
+
+func TestMapGroupInfoCarriesAnnounceLocked(t *testing.T) {
+	in := &types.GroupInfo{
+		JID:           types.NewJID("999", "g.us"),
+		GroupName:     types.GroupName{Name: "T"},
+		GroupAnnounce: types.GroupAnnounce{IsAnnounce: true},
+		GroupLocked:   types.GroupLocked{IsLocked: true},
+	}
+	got := mapGroupInfo(in)
+	if !got.IsAnnounce {
+		t.Fatalf("want IsAnnounce true, got %+v", got)
+	}
+	if !got.IsLocked {
+		t.Fatalf("want IsLocked true, got %+v", got)
+	}
+}
