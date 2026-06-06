@@ -67,7 +67,7 @@ struct SettingsRow<Trailing: View>: View {
          sublabel: String? = nil,
          showChevron: Bool = false,
          onTap: (() -> Void)? = nil,
-         @ViewBuilder trailing: () -> Trailing = { EmptyView() }) {
+         @ViewBuilder trailing: () -> Trailing) {
         self.icon = icon
         self.iconTint = iconTint
         self.label = label
@@ -119,6 +119,26 @@ struct SettingsRow<Trailing: View>: View {
         } else {
             row
         }
+    }
+}
+
+extension SettingsRow where Trailing == EmptyView {
+    /// Trailing-less row (chevron / navigation row with no control on the
+    /// right). Hoisted out of the main init so a bare `SettingsRow(label:)`
+    /// call site doesn't trigger Swift's deprecated backward-trailing-closure
+    /// match against the optional `onTap` parameter.
+    init(icon: String? = nil,
+         iconTint: Color = SettingsPalette.textMuted,
+         label: String,
+         sublabel: String? = nil,
+         showChevron: Bool = false,
+         onTap: (() -> Void)? = nil) {
+        self.init(icon: icon,
+                  iconTint: iconTint,
+                  label: label,
+                  sublabel: sublabel,
+                  showChevron: showChevron,
+                  onTap: onTap) { EmptyView() }
     }
 }
 
