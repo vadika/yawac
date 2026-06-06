@@ -151,7 +151,6 @@ rare-use utilities) ships only when the important list is clear.
 
 ## Account / Privacy
 
-- ☐ **Privacy settings** (last seen / about / profile photo).
 - ☐ **Push-name edit** — About + avatar shipped (v0.9.0 / v0.9.1,
   see Shipped). Push name (display name) is the only remaining
   profile field — whatsmeow has no top-level setter, so a
@@ -191,6 +190,12 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **Privacy settings** (v0.9.12) — Settings → Privacy sheet
+  with 5 toggles: Last seen & Online, Profile photo, About, Read
+  receipts, Add me to groups. Three-way Everyone / My contacts /
+  Nobody for all except Read receipts (On / Off — whatsmeow rejects
+  "contacts" for that one). Optimistic flip with revert-on-failure
+  per row. Backed by `GetPrivacySettings` / `SetPrivacySetting`.
 - ✅ **Linked-devices view** (v0.9.11) — Settings → Linked devices
   sheet lists every device paired to the WhatsApp account
   (`GetUserDevices` against own JID). yawac is flagged "THIS
