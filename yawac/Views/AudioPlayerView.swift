@@ -75,7 +75,12 @@ struct AudioPlayerView: View {
             }
         }
         .padding(6)
-        .onAppear { loadPlayer() }
+        // No `.onAppear { loadPlayer() }` — AVPlayer is created lazily
+        // on the first togglePlay tap. Eager-mount caused every visible
+        // voice-note row in the LazyVStack to spin up an AVPlayer +
+        // audio render pipeline + AudioQueue + Bluetooth route, each
+        // generating ~1500 HW interrupts/sec for the player's lifetime.
+        .onAppear { Task { @MainActor in await prefetchDuration() } }
         .onDisappear { teardown() }
     }
 
@@ -84,6 +89,21 @@ struct AudioPlayerView: View {
     private var progressFraction: Double {
         guard duration > 0 else { return 0 }
         return min(1.0, max(0.0, current / duration))
+    }
+
+    /// Loads the asset's duration without instantiating an AVPlayer.
+    /// AVURLAsset alone doesn't spin up the audio session / render
+    /// pipeline / Bluetooth route — it's a lightweight file inspector.
+    /// This lets the duration label render before the user taps play.
+    private func prefetchDuration() async {
+        guard duration == 0 else { return }
+        let asset = AVURLAsset(url: URL(fileURLWithPath: path))
+        do {
+            let dur = try await asset.load(.duration)
+            self.duration = CMTimeGetSeconds(dur)
+        } catch {
+            self.duration = 0
+        }
     }
 
     private func loadPlayer() {
@@ -99,17 +119,19 @@ struct AudioPlayerView: View {
         // HeadTrackerSession that polls the IMU at hundreds of hertz
         // for the lifetime of the player. Voice notes are mono and
         // don't benefit from spatialization — opting out drops the
-        // head-tracker polling that was driving ~500 wakes/sec.
+        // head-tracker polling.
         item.allowedAudioSpatializationFormats = []
         let p = AVPlayer(playerItem: item)
         self.player = p
         audioPlayerDidCreate()
-        Task { @MainActor in
-            do {
-                let dur = try await asset.load(.duration)
-                self.duration = CMTimeGetSeconds(dur)
-            } catch {
-                self.duration = 0
+        if duration == 0 {
+            Task { @MainActor in
+                do {
+                    let dur = try await asset.load(.duration)
+                    self.duration = CMTimeGetSeconds(dur)
+                } catch {
+                    self.duration = 0
+                }
             }
         }
         observer = NotificationCenter.default.addObserver(
@@ -123,17 +145,40 @@ struct AudioPlayerView: View {
         }
     }
 
+    /// Aggressive teardown. The v0.9.27 wake-rate probe showed that
+    /// after the view disappears the AVPlayer instance lingers for
+    /// 60+ seconds — retained by the FigPlayer registry / audio
+    /// session even after the @State release. During that bleed the
+    /// Bluetooth audio chain keeps emitting ~1500 HW interrupts/sec,
+    /// which is what was breaking the kernel wake budget. Calling
+    /// `replaceCurrentItem(with: nil)` on the player explicitly
+    /// detaches the AVPlayerItem from the playback engine, which
+    /// releases the render pipeline, AudioQueue, and AirPlay route
+    /// immediately instead of waiting on lazy cleanup.
     private func teardown() {
-        player?.pause()
         timer?.invalidate()
-        if let observer { NotificationCenter.default.removeObserver(observer) }
-        if player != nil {
+        timer = nil
+        if let observer {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        observer = nil
+        if let p = player {
+            p.pause()
+            p.replaceCurrentItem(with: nil)
             audioPlayerDidTeardown()
         }
         player = nil
+        isPlaying = false
+        current = 0
     }
 
     private func togglePlay() {
+        // Lazy AVPlayer creation: spin up the playback engine only on
+        // the first explicit play tap. Idle voice-note rows scrolling
+        // past in a busy chat no longer leak interrupt wakes.
+        if player == nil {
+            loadPlayer()
+        }
         guard let p = player else { return }
         if isPlaying {
             p.pause()
