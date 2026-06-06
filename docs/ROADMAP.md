@@ -161,10 +161,6 @@ rare-use utilities) ships only when the important list is clear.
 
 ## Messaging gaps (against shipped surface)
 
-- ☐ **Voice-note waveform render (inbound)** — outbound recorder
-  captures + transmits waveform bytes, but the inbound bubble shows
-  a plain `ProgressView` linear bar instead of the WhatsApp-style
-  bar visualization.
 - ☐ **Cross-device-sync own outbound edits / reactions** — edits + own
   reactions made on the phone don't always re-merge into yawac's
   bubble without a fresh history sync.
@@ -196,6 +192,12 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **Voice-note waveform render (inbound)** (v0.9.10) — inbound
+  bubbles now paint a 64-bar WhatsApp-style amplitude view backed
+  by the `AudioMessage.Waveform` proto field. Playhead colors the
+  played portion in `Theme.accent`; unplayed in `Theme.textMuted`.
+  Older messages without waveform bytes fall back to the plain
+  progress bar.
 - ✅ **Group admin polish** (v0.8.2) — `SetGroupAnnounce` /
   `SetGroupLocked` toggles in ChatInfoView; ComposerView hides
   input for non-admins in announce-mode groups. Super-admin badge

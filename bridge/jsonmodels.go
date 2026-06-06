@@ -112,6 +112,8 @@ type JMedia struct {
 	Height    int       `json:"height,omitempty"`
 	Duration  int       `json:"duration,omitempty"` // seconds, audio/video
 	SizeBytes int64     `json:"size_bytes,omitempty"`
+	Waveform  string    `json:"waveform,omitempty"` // base64-encoded raw bytes (audio only — 64 amplitudes 0-100)
+	IsPTT     bool      `json:"is_ptt,omitempty"`   // push-to-talk / voice note (audio only)
 	Ref       *MediaRef `json:"ref,omitempty"`
 }
 

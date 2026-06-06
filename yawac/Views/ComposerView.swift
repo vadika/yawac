@@ -449,7 +449,7 @@ struct ComposerView: View {
         switch m.body {
         case .text(let t):
             return t
-        case .media(_, let caption, let fileName, _):
+        case .media(_, let caption, let fileName, _, _, _):
             if let c = caption, !c.isEmpty { return c }
             if let n = fileName, !n.isEmpty { return n }
             return ""
@@ -466,12 +466,12 @@ struct ComposerView: View {
     }
 
     private func replyMediaKind(for m: UIMessage) -> String? {
-        if case .media(let kind, _, _, _) = m.body { return kind }
+        if case .media(let kind, _, _, _, _, _) = m.body { return kind }
         return nil
     }
 
     private func replyThumbnailPath(for m: UIMessage) -> String? {
-        guard case .media(let kind, _, _, let embedded) = m.body,
+        guard case .media(let kind, _, _, let embedded, _, _) = m.body,
               kind == "image" || kind == "sticker" || kind == "video"
         else { return nil }
         // MessageRow resolves media via vm.localPaths (populated from

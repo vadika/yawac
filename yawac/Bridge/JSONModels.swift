@@ -79,6 +79,12 @@ struct BridgeMedia: Codable {
     let height: Int?
     let duration: Int?
     let sizeBytes: Int64?
+    /// Base64-encoded raw amplitude bytes (audio only — 64 bytes 0-100 for
+    /// WhatsApp voice notes). Decoded to `Data` at render time.
+    let waveform: String?
+    /// Push-to-talk / voice note (audio only). Older payloads default to
+    /// `false` via the decoder fallback.
+    let isPTT: Bool
     let ref: BridgeMediaRef?
 
     enum CodingKeys: String, CodingKey {
@@ -88,7 +94,42 @@ struct BridgeMedia: Codable {
         case filePath = "file_path"
         case width, height, duration
         case sizeBytes = "size_bytes"
+        case waveform
+        case isPTT = "is_ptt"
         case ref
+    }
+
+    init(mimeType: String, caption: String? = nil, fileName: String? = nil,
+         filePath: String? = nil, width: Int? = nil, height: Int? = nil,
+         duration: Int? = nil, sizeBytes: Int64? = nil,
+         waveform: String? = nil, isPTT: Bool = false,
+         ref: BridgeMediaRef? = nil) {
+        self.mimeType = mimeType
+        self.caption = caption
+        self.fileName = fileName
+        self.filePath = filePath
+        self.width = width
+        self.height = height
+        self.duration = duration
+        self.sizeBytes = sizeBytes
+        self.waveform = waveform
+        self.isPTT = isPTT
+        self.ref = ref
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        mimeType = try c.decode(String.self, forKey: .mimeType)
+        caption = try c.decodeIfPresent(String.self, forKey: .caption)
+        fileName = try c.decodeIfPresent(String.self, forKey: .fileName)
+        filePath = try c.decodeIfPresent(String.self, forKey: .filePath)
+        width = try c.decodeIfPresent(Int.self, forKey: .width)
+        height = try c.decodeIfPresent(Int.self, forKey: .height)
+        duration = try c.decodeIfPresent(Int.self, forKey: .duration)
+        sizeBytes = try c.decodeIfPresent(Int64.self, forKey: .sizeBytes)
+        waveform = try c.decodeIfPresent(String.self, forKey: .waveform)
+        isPTT = try c.decodeIfPresent(Bool.self, forKey: .isPTT) ?? false
+        ref = try c.decodeIfPresent(BridgeMediaRef.self, forKey: .ref)
     }
 }
 

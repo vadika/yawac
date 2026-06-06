@@ -68,6 +68,16 @@ final class PersistedMessage {
     /// the server with the same hopeless downloads.
     var mediaExpired: Bool = false
 
+    /// Raw amplitude bytes from `AudioMessage.Waveform` (WhatsApp ships 64
+    /// values 0-100 per voice note). Persisted so the bar view paints on
+    /// cold reopen without a re-decode of the bridge payload. nil for
+    /// non-audio rows or older messages that predate v0.9.10.
+    var audioWaveform: Data? = nil
+    /// Push-to-talk flag from `AudioMessage.PTT`. Drives the
+    /// WaveformBarsView gate in MessageRow — non-PTT audio (a music clip,
+    /// say) keeps the plain progress bar.
+    var isPTT: Bool = false
+
     init(id: String, chatJID: String, senderJID: String, fromMe: Bool,
          timestamp: Date, kind: String, text: String? = nil,
          mediaPath: String? = nil, mediaCaption: String? = nil,
@@ -98,7 +108,9 @@ final class PersistedMessage {
          locallyDeleted: Bool = false,
          starredAt: Date? = nil,
          pinnedAt: Date? = nil,
-         isForwarded: Bool = false) {
+         isForwarded: Bool = false,
+         audioWaveform: Data? = nil,
+         isPTT: Bool = false) {
         self.id = id
         self.chatJID = chatJID
         self.senderJID = senderJID
@@ -136,6 +148,8 @@ final class PersistedMessage {
         self.starredAt = starredAt
         self.pinnedAt = pinnedAt
         self.isForwarded = isForwarded
+        self.audioWaveform = audioWaveform
+        self.isPTT = isPTT
     }
 }
 

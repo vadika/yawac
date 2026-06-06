@@ -201,7 +201,8 @@ final class ConversationViewModel {
             body = .text(p.text ?? "")
         case "image", "video", "audio", "document", "sticker":
             body = .media(kind: p.kind, caption: p.mediaCaption,
-                          fileName: p.mediaFileName, localPath: p.mediaPath)
+                          fileName: p.mediaFileName, localPath: p.mediaPath,
+                          waveform: p.audioWaveform, isPTT: p.isPTT)
         case "poll":
             if let json = p.pollJSON,
                let data = json.data(using: .utf8),
@@ -251,7 +252,7 @@ final class ConversationViewModel {
     private static func quotedKind(of m: UIMessage) -> String {
         switch m.body {
         case .text:                       return "text"
-        case .media(let kind, _, _, _):   return kind
+        case .media(let kind, _, _, _, _, _):   return kind
         case .poll:                       return "poll"
         case .location(_, let isLive, _): return isLive ? "location_live" : "location"
         case .contact:                    return "contact"
@@ -266,7 +267,7 @@ final class ConversationViewModel {
         switch m.body {
         case .text(let t):
             return trunc(t)
-        case .media(let kind, let caption, let fileName, _):
+        case .media(let kind, let caption, let fileName, _, _, _):
             if let c = caption, !c.isEmpty { return trunc(c) }
             if kind == "document", let n = fileName, !n.isEmpty { return trunc(n) }
             return "[\(kind)]"
@@ -316,7 +317,7 @@ final class ConversationViewModel {
         switch m.body {
         case .text:
             return true
-        case .media(_, let caption, _, _):
+        case .media(_, let caption, _, _, _, _):
             if let c = caption, !c.isEmpty { return true }
             return mediaRefJSON(for: m.id) != nil
         case .poll, .location, .contact, .system:
@@ -370,7 +371,7 @@ final class ConversationViewModel {
                     result = try client.forwardText(chatJID, text: body,
                                                     ephemeralSeconds: dstEphemeralSec(chatJID))
                     outText = body
-                case .media(let kind, let caption, let fileName, _):
+                case .media(let kind, let caption, let fileName, _, _, _):
                     if let ref = mediaRefJSON(for: m.id) {
                         let cap = prefix + (caption ?? "")
                         result = try client.forwardMedia(chatJID, refJSON: ref,
@@ -516,7 +517,9 @@ final class ConversationViewModel {
                 case "text":
                     body = .text(p.text ?? "")
                 case "image", "video", "audio", "document", "sticker":
-                    body = .media(kind: p.kind, caption: p.mediaCaption, fileName: p.mediaFileName, localPath: p.mediaPath)
+                    body = .media(kind: p.kind, caption: p.mediaCaption,
+                                  fileName: p.mediaFileName, localPath: p.mediaPath,
+                                  waveform: p.audioWaveform, isPTT: p.isPTT)
                 case "poll":
                     if let json = p.pollJSON,
                        let data = json.data(using: .utf8),
@@ -783,7 +786,9 @@ final class ConversationViewModel {
             case "text":
                 body = .text(p.text ?? "")
             case "image", "video", "audio", "document", "sticker":
-                body = .media(kind: p.kind, caption: p.mediaCaption, fileName: p.mediaFileName, localPath: p.mediaPath)
+                body = .media(kind: p.kind, caption: p.mediaCaption,
+                              fileName: p.mediaFileName, localPath: p.mediaPath,
+                              waveform: p.audioWaveform, isPTT: p.isPTT)
             case "poll":
                 if let json = p.pollJSON,
                    let data = json.data(using: .utf8),
@@ -918,7 +923,7 @@ final class ConversationViewModel {
     }
 
     func retryHandler(for message: UIMessage) -> (() -> Void)? {
-        guard case .media(let kind, _, _, _) = message.body else { return nil }
+        guard case .media(let kind, _, _, _, _, _) = message.body else { return nil }
         guard let context else { return nil }
         let id = message.id
         let descriptor = FetchDescriptor<PersistedMessage>(
@@ -1637,7 +1642,9 @@ final class ConversationViewModel {
             quotedFromMe: m.quoted?.fromMe ?? false,
             quotedTextSnippet: m.quoted?.snippet,
             quotedKind: m.quoted?.kind,
-            isForwarded: m.isForwarded ?? false)
+            isForwarded: m.isForwarded ?? false,
+            audioWaveform: m.media?.waveform.flatMap { Data(base64Encoded: $0) },
+            isPTT: m.media?.isPTT ?? false)
         context.insert(row)
         try? context.save()
         MessageIndex.shared.upsert(row.indexFields)
@@ -1755,7 +1762,7 @@ final class ConversationViewModel {
         // surfacing a "Document" placeholder on reload.
         var caption: String? = nil
         var fileName: String? = nil
-        if case .media(_, let cap, let name, _) = m.body {
+        if case .media(_, let cap, let name, _, _, _) = m.body {
             caption = cap
             fileName = name
         }

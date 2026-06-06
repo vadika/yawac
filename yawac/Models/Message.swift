@@ -45,7 +45,14 @@ struct UIMessage: Identifiable, Hashable {
 
     enum Body: Hashable {
         case text(String)
-        case media(kind: String, caption: String?, fileName: String?, localPath: String?)
+        /// `waveform` carries the raw amplitude bytes (WhatsApp ships 64
+        /// values 0-100) for voice notes — nil for older messages and
+        /// non-audio kinds. `isPTT` flips the audio bubble between the
+        /// vertical-bar waveform view (true) and the plain progress
+        /// bar (false / music clip).
+        case media(kind: String, caption: String?, fileName: String?,
+                   localPath: String?, waveform: Data? = nil,
+                   isPTT: Bool = false)
         case poll(question: String, options: [BridgePollOption], selectableCount: Int)
         case location(LocationPayload, isLive: Bool, sequence: Int64?)
         case contact(ContactPayload)
@@ -76,7 +83,11 @@ extension UIMessage {
             self.body = .media(kind: b.kind,
                                caption: b.media?.caption,
                                fileName: b.media?.fileName,
-                               localPath: b.media?.filePath)
+                               localPath: b.media?.filePath,
+                               waveform: b.media?.waveform.flatMap {
+                                   Data(base64Encoded: $0)
+                               },
+                               isPTT: b.media?.isPTT ?? false)
         case "poll":
             if let p = b.poll {
                 self.body = .poll(question: p.question,

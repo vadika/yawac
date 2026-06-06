@@ -485,8 +485,9 @@ struct MessageRow: View {
         switch message.body {
         case .text(let s):
             translatableText(surfaceID: "\(translationSurfacePrefix):text", raw: s)
-        case .media(let kind, let caption, let fileName, let path):
-            mediaView(kind: kind, caption: caption, fileName: fileName, path: path)
+        case .media(let kind, let caption, let fileName, let path, let waveform, let isPTT):
+            mediaView(kind: kind, caption: caption, fileName: fileName,
+                      path: path, waveform: waveform, isPTT: isPTT)
         case .poll(let q, let options, let selectable):
             pollView(question: q, options: options, selectableCount: selectable)
         case .location(let loc, let isLive, _):
@@ -898,7 +899,8 @@ struct MessageRow: View {
     }
 
     @ViewBuilder
-    private func mediaView(kind: String, caption: String?, fileName: String?, path: String?) -> some View {
+    private func mediaView(kind: String, caption: String?, fileName: String?,
+                           path: String?, waveform: Data?, isPTT: Bool) -> some View {
         let effectivePath = localPath ?? path
         VStack(alignment: .leading, spacing: 4) {
             switch kind {
@@ -909,7 +911,7 @@ struct MessageRow: View {
             case "video":
                 videoBubble(path: effectivePath)
             case "audio":
-                audioBubble(path: effectivePath)
+                audioBubble(path: effectivePath, waveform: waveform, isPTT: isPTT)
             case "document":
                 documentBubble(path: effectivePath, fileName: fileName)
             default:
@@ -967,9 +969,9 @@ struct MessageRow: View {
     }
 
     @ViewBuilder
-    private func audioBubble(path: String?) -> some View {
+    private func audioBubble(path: String?, waveform: Data?, isPTT: Bool) -> some View {
         if let p = path {
-            AudioPlayerView(path: p)
+            AudioPlayerView(path: p, waveform: waveform, isPTT: isPTT)
         } else {
             downloadingPlaceholder("waveform")
         }
