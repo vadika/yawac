@@ -411,6 +411,28 @@ class WAClient: PhoneValidating, LIDResolving {
                                           from: Data(json.utf8))) ?? []
     }
 
+    /// Returns the paired account's current privacy settings. First call
+    /// after connect can block briefly on an IQ round trip while
+    /// whatsmeow's in-memory cache fills; subsequent calls are cached.
+    /// nonisolated so PrivacySettingsSheet can dispatch off the main
+    /// actor.
+    nonisolated func getPrivacySettings() throws -> BridgePrivacySettings {
+        var err: NSError?
+        let json = go.getPrivacySettings(&err)
+        if let err { throw err }
+        return try JSONDecoder().decode(BridgePrivacySettings.self,
+                                        from: Data(json.utf8))
+    }
+
+    /// Updates one privacy knob. `name` is the wire PrivacySettingType
+    /// ("last", "profile", "status", "readreceipts", "groupadd"). `value`
+    /// is "all" / "contacts" / "contact_blacklist" / "none" — but
+    /// readreceipts only accepts "all" / "none" (whatsmeow rejects the
+    /// others server-side, so the UI must not offer them).
+    nonisolated func setPrivacySetting(name: String, value: String) throws {
+        try go.setPrivacySetting(name, value: value)
+    }
+
     /// Returns the subset of `jids` that whatsmeow's local appstate
     /// store currently marks as pinned. Used to reconcile the sidebar
     /// at startup since events.Pin isn't re-emitted on reconnect.
