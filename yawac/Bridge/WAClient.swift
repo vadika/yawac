@@ -1,5 +1,9 @@
 import Foundation
+import os
 import Bridge
+
+private let evtPerfLog = Logger(subsystem: "dev.vadikas.yawac.yawac",
+                                category: "perf")
 
 struct PhoneCheckResult: Decodable, Equatable {
     let jid: String
@@ -806,8 +810,28 @@ class WAClient: PhoneValidating, LIDResolving {
     private func startPump() {
         let stream = bus.stream
         pump = Task { @MainActor [weak self] in
+            // Bridge wake-rate diagnostics. Each Go event hops here and
+            // fans out to every subscriber on the main actor — every
+            // event is a main-thread wake. The kernel flagged yawac at
+            // ~792 wakes/sec; if a kind dominates this counter, that's
+            // the source. Flush once per 5s of wall time.
+            var perKindCount: [String: Int] = [:]
+            var windowStart = CFAbsoluteTimeGetCurrent()
             for await tuple in stream {
                 guard let self else { return }
+                perKindCount[tuple.kind, default: 0] += 1
+                let now = CFAbsoluteTimeGetCurrent()
+                if now - windowStart >= 5.0 {
+                    let total = perKindCount.values.reduce(0, +)
+                    let perSec = Double(total) / (now - windowStart)
+                    let breakdown = perKindCount
+                        .sorted { $0.value > $1.value }
+                        .map { "\($0.key)=\($0.value)" }
+                        .joined(separator: " ")
+                    evtPerfLog.log("eventPump total=\(total, privacy: .public) rate=\(perSec, format: .fixed(precision: 1), privacy: .public)/s [\(breakdown, privacy: .public)]")
+                    perKindCount.removeAll(keepingCapacity: true)
+                    windowStart = now
+                }
                 let evt = WAClient.decode(kind: tuple.kind, payload: tuple.payload)
                 for cont in self.subscribers.values {
                     cont.yield(evt)
