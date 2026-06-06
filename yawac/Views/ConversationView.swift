@@ -2,9 +2,21 @@ import SwiftUI
 import SwiftData
 import UniformTypeIdentifiers
 
-private enum TimelineItem {
+/// Identifiable so `ForEach` can use the case payload as a stable
+/// identity instead of an offset. Stable IDs let LazyVStack reuse row
+/// containers across data mutations — the offset-based identity used
+/// before caused full re-mounts on every change, including initial
+/// chat open, which dominated chat-switch latency.
+private enum TimelineItem: Identifiable {
     case dateHeader(Date)
     case message(UIMessage)
+
+    var id: String {
+        switch self {
+        case .dateHeader(let d): return "h-\(Int(d.timeIntervalSince1970))"
+        case .message(let m):    return "m-\(m.id)"
+        }
+    }
 }
 
 private struct DateSeparator: View {
@@ -401,7 +413,7 @@ struct ConversationView: View {
                                         Spacer()
                                     }
                                 }
-                                ForEach(Array(timeline().enumerated()), id: \.offset) { _, item in
+                                ForEach(timeline()) { item in
                                     switch item {
                                     case .dateHeader(let date):
                                         DateSeparator(date: date)
