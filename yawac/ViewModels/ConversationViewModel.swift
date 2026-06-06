@@ -472,12 +472,17 @@ final class ConversationViewModel {
         guard let context else { return }
         let jid = chatJID
         restoreDraftIfNeeded()
+        let t0 = CFAbsoluteTimeGetCurrent()
         // One-shot migration: earlier builds persisted some rows with raw
         // (device-suffixed / @lid) chatJID via CVM.persist. Scrub anything
         // whose canonical form matches this chat back to canonical so the
-        // primary fetch finds it. Scoped to plausibly-related rows by
-        // matching on the user portion before "@".
-        if let at = jid.firstIndex(of: "@") {
+        // primary fetch finds it. Gated per-chat via UserDefaults so we
+        // pay the substring-scan cost only once per chat ever, not every
+        // open. The whole-account scrub is a v0.6 era cleanup; new
+        // installs and chats already scrubbed effectively bypass.
+        let scrubKey = "yawac.cvm.scrubbedChat.\(jid)"
+        if !UserDefaults.standard.bool(forKey: scrubKey),
+           let at = jid.firstIndex(of: "@") {
             let userPart = String(jid[..<at])
             let scrubDescriptor = FetchDescriptor<PersistedMessage>(
                 predicate: #Predicate { $0.chatJID != jid && $0.chatJID.contains(userPart) })
@@ -495,19 +500,29 @@ final class ConversationViewModel {
                           changed, jid)
                 }
             }
+            UserDefaults.standard.set(true, forKey: scrubKey)
         }
+        let t1 = CFAbsoluteTimeGetCurrent()
         var descriptor = FetchDescriptor<PersistedMessage>(
             predicate: #Predicate { $0.chatJID == jid },
             sortBy: [SortDescriptor(\.timestamp, order: .reverse)])
         descriptor.fetchLimit = Self.historyLoadLimit
         if let recentRows = try? context.fetch(descriptor) {
+            let t2 = CFAbsoluteTimeGetCurrent()
             let rows = recentRows.reversed().map { $0 }
-            // Sweep legacy rows of non-displayable kinds (e.g. reactions persisted
-            // by older builds before the dedicated Reaction event).
-            for p in rows where p.kind == "reaction" || p.kind == "protocol" || p.kind == "system" {
-                context.delete(p)
+            // Sweep legacy rows of non-displayable kinds. Gated per-chat
+            // via UserDefaults — only the first open of each chat after
+            // upgrading runs the loop + save. New chats never trip this.
+            let sweepKey = "yawac.cvm.sweptChat.\(jid)"
+            if !UserDefaults.standard.bool(forKey: sweepKey) {
+                var swept = 0
+                for p in rows where p.kind == "reaction" || p.kind == "protocol" || p.kind == "system" {
+                    context.delete(p)
+                    swept += 1
+                }
+                if swept > 0 { try? context.save() }
+                UserDefaults.standard.set(true, forKey: sweepKey)
             }
-            try? context.save()
             let displayable = rows.filter { p in
                 p.kind != "reaction" && p.kind != "protocol" && p.kind != "system"
             }
@@ -670,6 +685,11 @@ final class ConversationViewModel {
                     self.unreadInboundIDs.insert(m.id)
                 }
             }
+            let t3 = CFAbsoluteTimeGetCurrent()
+            NSLog("[yawac/perf] loadHistory jid=%@ rows=%d scrub=%.0fms fetch=%.0fms map=%.0fms total=%.0fms",
+                  jid, self.messages.count,
+                  (t1 - t0) * 1000, (t2 - t1) * 1000,
+                  (t3 - t2) * 1000, (t3 - t0) * 1000)
         }
     }
 
