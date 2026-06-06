@@ -424,7 +424,12 @@ struct ConversationView: View {
                                             },
                                             mentionResolver: { jid in session.displayName(for: jid) },
                                             onOpenChat: { jid in
-                                                session.requestSelectChat(jid)
+                                                // Drill: sender avatar /
+                                                // name / mention popover /
+                                                // quoted author all push
+                                                // onto the nav stack so
+                                                // back-pop returns here.
+                                                session.drillIntoChat(jid)
                                             },
                                             onReply: { m in vm.startReply(to: m) },
                                             onReplyPrivately: { m in
@@ -439,7 +444,12 @@ struct ConversationView: View {
                                                 // fresh CVM into place
                                                 // before we set the field.
                                                 Task { @MainActor in
-                                                    session.requestSelectChat(m.senderJID)
+                                                    // Drill: group → DM
+                                                    // with sender. Pop
+                                                    // returns to the group
+                                                    // the reply originated
+                                                    // from (spec §3).
+                                                    session.pendingDrillSelection = m.senderJID
                                                     try? await Task.sleep(nanoseconds: 100_000_000)
                                                     session.pendingReplyTarget = m
                                                 }

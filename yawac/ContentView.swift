@@ -6,9 +6,26 @@ struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
     @State private var chatList: ChatListViewModel?
     @State private var chatSearch: ChatSearchViewModel?
-    @State private var selectedChat: Chat.ID?
     /// Last selected chat JID, persisted across launches.
     @AppStorage("yawac.lastSelectedChatJID") private var lastSelectedChatJID: String = ""
+
+    /// Sidebar selection is driven through `session.nav` so the
+    /// navigation stack (BackBar) and the NavigationSplitView detail
+    /// pane share one source of truth. A sidebar tap writes here →
+    /// `openRootChat` → trail resets to depth 0. Reads return the top
+    /// of the stack so the row stays highlighted while drilled in.
+    private var selectedChat: Binding<Chat.ID?> {
+        Binding(
+            get: { session.nav.currentJID },
+            set: { new in
+                guard let new else {
+                    session.nav.clear()
+                    return
+                }
+                session.openRootChat(new)
+            }
+        )
+    }
 
     /// App-wide connection/sync banner state. ContentView only renders
     /// once paired (`state == .ready` — AppRoot owns the pairing screens),
@@ -25,14 +42,14 @@ struct ContentView: View {
     var body: some View {
         NavigationSplitView {
             if let chatList, let chatSearch {
-                ChatListView(selection: $selectedChat)
+                ChatListView(selection: selectedChat)
                     .environment(chatList)
                     .environment(chatSearch)
             } else {
                 ProgressView()
             }
         } detail: {
-            if let id = selectedChat {
+            if let id = session.nav.currentJID {
                 ConversationView(chatJID: id)
             } else {
                 Text("Select a chat")
@@ -56,7 +73,7 @@ struct ContentView: View {
             }
         }
         .animation(.easeOut(duration: 0.2), value: bannerState)
-        .onChange(of: selectedChat) { _, new in
+        .onChange(of: session.nav.currentJID) { _, new in
             guard let new else { return }
             lastSelectedChatJID = new
             // markRead intentionally NOT called here. ConversationView's
@@ -70,17 +87,29 @@ struct ContentView: View {
                let defaultSub = chatList?.chats.first(where: {
                    $0.communityParentJID == parent.jid && $0.isDefaultSubGroup
                }) {
-                selectedChat = defaultSub.jid
+                // Treat the community→default-sub redirect as an openRoot
+                // so the BackBar doesn't pop up over the announcements
+                // pane the user thinks they tapped into directly.
+                session.openRootChat(defaultSub.jid)
             }
         }
         .onChange(of: session.pendingChatSelection) { _, new in
             guard let new else { return }
-            selectedChat = new
+            // openRoot path — search jump, newly-joined / newly-created
+            // chat, Account → self-chat. Resets the trail.
+            session.openRootChat(new)
             session.pendingChatSelection = nil
+        }
+        .onChange(of: session.pendingDrillSelection) { _, new in
+            guard let new else { return }
+            // Drill-in path — reply-privately (group → DM with sender).
+            // Pushes onto the stack so back-pop returns to the group.
+            session.drillIntoChat(new)
+            session.pendingDrillSelection = nil
         }
         .onChange(of: session.deletedChatJID) { _, jid in
             guard let jid else { return }
-            if selectedChat == jid { selectedChat = nil }
+            session.nav.removeChat(jid: jid)
             session.deletedChatJID = nil
         }
         .task {
@@ -91,10 +120,12 @@ struct ContentView: View {
             session.modelContext = modelContext
             self.chatList = vm
             self.chatSearch = ChatSearchViewModel(listVM: vm, validator: client)
-            // Restore last-opened chat if it's in our chats list.
+            // Restore last-opened chat if it's in our chats list. Goes
+            // through openRoot so the trail starts at depth 0 (no stale
+            // BackBar from whatever the previous session was looking at).
             if !lastSelectedChatJID.isEmpty,
                vm.chats.contains(where: { $0.jid == lastSelectedChatJID }) {
-                selectedChat = lastSelectedChatJID
+                session.openRootChat(lastSelectedChatJID)
             }
             let groups = GroupsViewModel(client: client)
             await groups.refresh()
