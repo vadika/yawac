@@ -3,6 +3,36 @@ import AppKit
 import CryptoKit
 import SwiftUI
 
+/// Simple async-await semaphore. Caps how many AVAssetImageGenerator
+/// jobs run at once; the file-scope `generateGate` instance is shared
+/// across all VideoThumbnailView instances.
+private actor AsyncSemaphore {
+    private let limit: Int
+    private var inFlight = 0
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    init(limit: Int) { self.limit = limit }
+
+    func acquire() async {
+        if inFlight < limit {
+            inFlight += 1
+            return
+        }
+        await withCheckedContinuation { c in waiters.append(c) }
+        // slot was transferred to us by release — no in-flight bump
+    }
+
+    func release() {
+        if let next = waiters.first {
+            waiters.removeFirst()
+            next.resume()
+            // slot stays in-flight — taken by resumed waiter
+        } else {
+            inFlight -= 1
+        }
+    }
+}
+
 struct VideoThumbnailView: View {
     let path: String
     @State private var thumb: NSImage?
@@ -76,7 +106,16 @@ struct VideoThumbnailView: View {
         return await generateAndCache(path: path)
     }
 
+    /// Caps how many AVAssetImageGenerator pipelines spin up at once.
+    /// Profile snapshot showed seven parallel spin-ups on a single chat
+    /// switch — each one builds its own VMC2 decompressor + render
+    /// pipeline, which clobbers the main thread. Two-at-a-time keeps
+    /// generation progressing without contention.
+    private static let generateGate: AsyncSemaphore = AsyncSemaphore(limit: 2)
+
     private static func generateAndCache(path: String) async -> NSImage? {
+        await generateGate.acquire()
+        defer { Task { await generateGate.release() } }
         let url = URL(fileURLWithPath: path)
         let asset = AVURLAsset(url: url)
         let generator = AVAssetImageGenerator(asset: asset)

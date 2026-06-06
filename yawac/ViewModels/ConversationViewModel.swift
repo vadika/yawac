@@ -1,7 +1,11 @@
 import Foundation
 import Observation
+import os
 import SwiftData
 import UniformTypeIdentifiers
+
+private let perfLog = Logger(subsystem: "dev.vadikas.yawac.yawac",
+                             category: "perf")
 
 /// A file the user picked but hasn't sent yet — staged in the composer so a
 /// caption can be added and the set edited before sending.
@@ -689,14 +693,15 @@ final class ConversationViewModel {
                 }
             }
             let t3 = CFAbsoluteTimeGetCurrent()
+            let scrubMs = (t1 - t0) * 1000
+            let fetchMs = (t2 - t1) * 1000
+            let mapMs = (t3 - t2) * 1000
             let totalMs = (t3 - t0) * 1000
-            // Always log so we can read the breakdown without filtering
-            // through `private` redaction in Console.app. %{public}s
-            // bypasses the unified-log mask.
-            NSLog("[yawac/perf] loadHistory rows=%d scrub=%.0fms fetch=%.0fms map=%.0fms total=%.0fms",
-                  self.messages.count,
-                  (t1 - t0) * 1000, (t2 - t1) * 1000,
-                  (t3 - t2) * 1000, totalMs)
+            let rowCount = self.messages.count
+            // Logger with .public privacy renders the values in
+            // Console.app — NSLog with format specifiers gets mangled
+            // into <private> by the unified-log redaction.
+            perfLog.log("loadHistory rows=\(rowCount, privacy: .public) scrub=\(scrubMs, format: .fixed(precision: 0), privacy: .public)ms fetch=\(fetchMs, format: .fixed(precision: 0), privacy: .public)ms map=\(mapMs, format: .fixed(precision: 0), privacy: .public)ms total=\(totalMs, format: .fixed(precision: 0), privacy: .public)ms")
         }
     }
 
