@@ -21,6 +21,44 @@ final class ChatListViewModel {
         loadChats()
     }
 
+    /// Per-event chat-row work coalescer. `.message` bursts (history
+    /// sync, offline queue drain, group activity) hit `ingest` dozens
+    /// of times in a single runloop turn — each one used to invoke
+    /// `sortChats()` (O(n log n) on every chat) and `upsertPersisted`
+    /// (SwiftData fetch + write) synchronously. A 77-message burst →
+    /// 154 SwiftData ops + 77 sorts on the main actor in <5s, which
+    /// stalled HID delivery and drove the kernel wake-rate violation.
+    ///
+    /// Now `ingest` marks the chat JID dirty and arms a single 80ms
+    /// debounce task. The flush sorts once and persists the dirty
+    /// rows together. Persisted message rows continue to be written
+    /// per-event so no history is lost on crash.
+    @ObservationIgnored private var dirtyChatJIDs: Set<String> = []
+    @ObservationIgnored private var pendingFlush: Task<Void, Never>?
+
+    private func markChatDirty(_ jid: String) {
+        dirtyChatJIDs.insert(jid)
+        if pendingFlush != nil { return }
+        pendingFlush = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(80))
+            guard let self else { return }
+            self.pendingFlush = nil
+            self.flushDirtyChats()
+        }
+    }
+
+    private func flushDirtyChats() {
+        guard !dirtyChatJIDs.isEmpty else { return }
+        sortChats()
+        let snapshot = dirtyChatJIDs
+        dirtyChatJIDs.removeAll(keepingCapacity: true)
+        for jid in snapshot {
+            if let c = chats.first(where: { $0.jid == jid }) {
+                upsertPersisted(c, preview: c.lastMessage)
+            }
+        }
+    }
+
     private func pushUnreadToSession() {
         let now = Date()
         let total = chats.reduce(0) { acc, c in
@@ -307,7 +345,6 @@ final class ChatListViewModel {
                 c.name = resolved
             }
             chats[idx] = c
-            upsertPersisted(c, preview: c.lastMessage)
         } else {
             let initialName: String
             if chatJID.hasSuffix("@broadcast"),
@@ -323,9 +360,8 @@ final class ChatListViewModel {
                 lastTimestamp: now,
                 unread: (!alreadySeen && !message.fromMe) ? 1 : 0)
             chats.append(c)
-            upsertPersisted(c, preview: preview)
         }
-        sortChats()
+        markChatDirty(chatJID)
 
         if !alreadySeen, !message.fromMe, !NSApp.isActive, !preview.isEmpty {
             let title = chats.first(where: { $0.jid == chatJID })?.name ?? chatJID
