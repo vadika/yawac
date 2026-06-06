@@ -319,7 +319,7 @@ struct ConversationView: View {
     private static func pinSnippet(_ m: UIMessage) -> String {
         switch m.body {
         case .text(let t): return t
-        case .media(let kind, let caption, let fileName, _):
+        case .media(let kind, let caption, let fileName, _, _, _):
             if let c = caption, !c.isEmpty { return c }
             if let n = fileName, !n.isEmpty { return n }
             switch kind {
