@@ -14,22 +14,24 @@ struct ContentView: View {
     /// pane share one source of truth. A sidebar tap writes here →
     /// `openRootChat` → trail resets to depth 0. Reads return the top
     /// of the stack so the row stays highlighted while drilled in.
+    /// Sidebar highlight follows the ROOT of the navigation stack —
+    /// never the drilled-in chat. When the user is at group A and
+    /// drills into member B, the sidebar still shows A highlighted
+    /// (a back-pop returns there); the detail pane separately mounts
+    /// `ConversationView(chatJID: nav.currentJID)` for B and renders
+    /// the BackBar above it.
     private var selectedChat: Binding<Chat.ID?> {
         Binding(
-            get: { session.nav.currentJID },
+            get: { session.nav.stack.first?.id },
             set: { new in
                 guard let new else {
                     session.nav.clear()
                     return
                 }
-                // NavigationSplitView echoes the detail pane's `Chat.ID?`
-                // back through this binding whenever its detail content
-                // changes — including drill-in pushes (group → member).
-                // Treating every echo as an openRoot would reset the
-                // stack and erase the BackBar. Only a *user-initiated*
-                // sidebar tap arrives with a value that doesn't already
-                // equal the current top of stack.
-                if new == session.nav.currentJID { return }
+                // Echo guard: if the sidebar is just re-asserting the
+                // root that's already on the stack, skip openRoot so we
+                // don't truncate a drilled trail.
+                if new == session.nav.stack.first?.id { return }
                 session.openRootChat(new)
             }
         )
