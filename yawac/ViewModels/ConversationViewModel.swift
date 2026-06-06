@@ -1637,7 +1637,9 @@ final class ConversationViewModel {
             quotedFromMe: m.quoted?.fromMe ?? false,
             quotedTextSnippet: m.quoted?.snippet,
             quotedKind: m.quoted?.kind,
-            isForwarded: m.isForwarded ?? false)
+            isForwarded: m.isForwarded ?? false,
+            audioWaveform: m.media?.waveform.flatMap { Data(base64Encoded: $0) },
+            isPTT: m.media?.isPTT ?? false)
         context.insert(row)
         try? context.save()
         MessageIndex.shared.upsert(row.indexFields)
