@@ -146,8 +146,23 @@ rare-use utilities) ships only when the important list is clear.
 
 ## Productivity / macOS
 
-- ☐ **Reply from native notification** (macOS notification action).
-- ☐ **Per-chat mute + notification customization**.
+- ☐ **Reply from native notification** — UNNotificationAction with
+  text-input on incoming banners; send-back via existing
+  `sendText`. Modest plumbing — ~150 LoC.
+- ☐ **Per-chat mute + notification customization** — extend
+  existing mute (8h / 1w / Always) with custom durations + bell /
+  sound toggles per chat. Touches sidebar ctx menu + ChatInfoView.
+- ☐ **Wire cosmetic Settings toggles** (v0.9.13 follow-up) — the
+  General + Display panels render the controls but the storage
+  keys aren't read anywhere yet. Needs real wiring:
+    - `yawac.launchAtLogin` → `SMAppService.mainApp.register()`
+    - `yawac.menuBar.show` → `NSStatusItem` create / hide
+    - `yawac.dock.keep` → `NSApp.setActivationPolicy(.regular | .accessory)`
+    - `yawac.notifications.{enabled,preview,sound}` →
+      `NotificationService` payload customization
+    - `yawac.accentColor` → swap `Theme.accent` at render time
+    - `yawac.translate.auto` → already-existing translation flow
+      consumer.
 
 ## Account / Privacy
 
@@ -200,6 +215,19 @@ surfaces.
   tokens. Blocked list resolves display names + formatted phones,
   never raw JIDs. Privacy + Linked devices modals still reachable
   from the Account panel.
+  Gaps:
+    - ☐ Cosmetic-only toggles (Launch at login, menu bar, dock,
+      notifications, accent color, translate-auto) — UI shipped,
+      behavior wiring pending. See **Wire cosmetic Settings
+      toggles** under Productivity / macOS.
+    - ☐ `hiddenInset` title-bar style (traffic lights overlay rail
+      top 44pt) — needs a `WindowGroup` modifier outside
+      `SettingsView`; cosmetic only.
+    - ☐ `UIScaleStep.compact` no longer reachable from the new
+      Display panel (segmented S/M/L/XL maps to the other four).
+      `from(_:)` rounds to S, so legacy stored values still
+      display sensibly. Either remove `.compact` from the enum or
+      restore a fifth pill.
 - ✅ **Privacy settings** (v0.9.12) — Settings → Privacy sheet
   with 5 toggles: Last seen & Online, Profile photo, About, Read
   receipts, Add me to groups. Three-way Everyone / My contacts /
