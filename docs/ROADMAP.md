@@ -151,7 +151,6 @@ rare-use utilities) ships only when the important list is clear.
 
 ## Account / Privacy
 
-- ☐ **Linked-devices** view + manage.
 - ☐ **Privacy settings** (last seen / about / profile photo).
 - ☐ **Push-name edit** — About + avatar shipped (v0.9.0 / v0.9.1,
   see Shipped). Push name (display name) is the only remaining
@@ -192,6 +191,12 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **Linked-devices view** (v0.9.11) — Settings → Linked devices
+  sheet lists every device paired to the WhatsApp account
+  (`GetUserDevices` against own JID). yawac is flagged "THIS
+  DEVICE". Remote revoke isn't exposed by whatsmeow (phone-only);
+  sheet documents that and offers a self-only "Sign out of this
+  device" action that calls existing `logout`.
 - ✅ **Voice-note waveform render (inbound)** (v0.9.10) — inbound
   bubbles now paint a 64-bar WhatsApp-style amplitude view backed
   by the `AudioMessage.Waveform` proto field. Playhead colors the
