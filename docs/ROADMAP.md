@@ -202,6 +202,15 @@ surfaces.
   DEVICE". Remote revoke isn't exposed by whatsmeow (phone-only);
   sheet documents that and offers a self-only "Sign out of this
   device" action that calls existing `logout`.
+  Gaps:
+    - ☐ **Per-device platform / OS / last-active** — current rows
+      show only the device JID + numeric slot. Server's
+      `<iq xmlns="md"><list></list></iq>` response carries
+      `platform` / `last_active` / `key_index` per `<device>`
+      child, but `whatsmeow`'s `parseDeviceList` drops the extra
+      attrs and `sendIQ` is unexported. Enrichment needs a
+      `vadika/whatsmeow` fork patch (public `SendCustomIQ`
+      wrapper *or* richer parse) + bridge + UI. Deferred to v1.x.
 - ✅ **Voice-note waveform render (inbound)** (v0.9.10) — inbound
   bubbles now paint a 64-bar WhatsApp-style amplitude view backed
   by the `AudioMessage.Waveform` proto field. Playhead colors the
