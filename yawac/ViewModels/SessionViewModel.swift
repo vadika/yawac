@@ -84,7 +84,27 @@ final class SessionViewModel {
     private var connectivity: ConnectivityMonitor?
     /// When non-nil, the chat list / detail pane should focus this JID.
     /// Consumed and cleared by `ContentView` via `.onChange`.
+    /// `requestSelectChat` writes here for the **openRoot** path (search
+    /// jumps, newly-created chat, account self-chat, etc.) — the trail
+    /// resets when ContentView assigns it through.
     var pendingChatSelection: String?
+
+    /// Drill-in counterpart of `pendingChatSelection`. Set by the
+    /// "Reply privately" affordance (group → DM with sender) so the
+    /// destination is layered ON TOP OF the originating chat instead of
+    /// replacing the trail. Consumed and cleared by ContentView via
+    /// `.onChange`.
+    var pendingDrillSelection: String?
+
+    /// Chat navigation stack — backs the BackBar (v0.9.14). The current
+    /// chat is `nav.current`; the "Back to {origin}" label reads
+    /// `nav.origin`. Sidebar / search-hit selection writes here via
+    /// `openRootChat`; in-chat taps (member, participant, reply-privately,
+    /// community sub-group, mention popover, quoted author) push via
+    /// `drillIntoChat`. ChatNavigation is itself `@Observable` so view
+    /// updates propagate naturally; we therefore don't need to mark
+    /// `ObservationIgnored` here.
+    let nav = ChatNavigation()
 
     /// Set together with `pendingChatSelection` to request a scroll-to
     /// inside the freshly-opened chat. ConversationView consumes + clears.
@@ -142,6 +162,38 @@ final class SessionViewModel {
 
     func requestSelectChat(_ jid: String) {
         pendingChatSelection = JIDNormalize.canonical(jid, client: client)
+    }
+
+    /// Build a `ChatRef` for the navigation stack. Resolves the JID to
+    /// its canonical form (LID → PN where possible) and looks up the
+    /// display name through `displayName(for:)` so the BackBar never
+    /// shows a raw JID (spec §6).
+    func chatRef(forJID jid: String) -> ChatRef {
+        let canonical = JIDNormalize.canonical(jid, client: client)
+        let name = displayName(for: canonical)
+        // Treat any `@g.us` or broadcast list as "group-shaped" for the
+        // ChatRef.Kind discriminator. (BackBar uses AvatarView by JID so
+        // the avatar already disambiguates visually — this is just for
+        // any future style branching.)
+        let isGroup = canonical.hasSuffix("@g.us")
+            || canonical.hasSuffix("@broadcast")
+            || canonical == "status@broadcast"
+        return ChatRef(id: canonical, displayName: name,
+                       kind: isGroup ? .group : .direct)
+    }
+
+    /// Sidebar / search-hit / restore — reset the navigation trail to a
+    /// fresh root chat. The BackBar disappears at depth 0.
+    func openRootChat(_ jid: String) {
+        nav.openRoot(chatRef(forJID: jid))
+    }
+
+    /// Drill into `jid` from the current chat (member tap, participant
+    /// row, reply-privately, community sub-group, mention popover,
+    /// quoted-message author). Pushes onto the stack; back-pop returns
+    /// to the originating chat.
+    func drillIntoChat(_ jid: String) {
+        nav.push(chatRef(forJID: jid))
     }
 
     /// Open `chatJID` and scroll to message `messageID` after the
