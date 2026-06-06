@@ -686,10 +686,15 @@ final class ConversationViewModel {
                 }
             }
             let t3 = CFAbsoluteTimeGetCurrent()
-            NSLog("[yawac/perf] loadHistory jid=%@ rows=%d scrub=%.0fms fetch=%.0fms map=%.0fms total=%.0fms",
-                  jid, self.messages.count,
-                  (t1 - t0) * 1000, (t2 - t1) * 1000,
-                  (t3 - t2) * 1000, (t3 - t0) * 1000)
+            let totalMs = (t3 - t0) * 1000
+            // Only log when meaningfully slow — keeps the per-open log
+            // clean in steady state.
+            if totalMs > 200 {
+                NSLog("[yawac/perf] loadHistory jid=%@ rows=%d scrub=%.0fms fetch=%.0fms map=%.0fms total=%.0fms",
+                      jid, self.messages.count,
+                      (t1 - t0) * 1000, (t2 - t1) * 1000,
+                      (t3 - t2) * 1000, totalMs)
+            }
         }
     }
 
