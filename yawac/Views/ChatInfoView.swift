@@ -1479,9 +1479,11 @@ struct ChatInfoView: View {
                                 in group: BridgeGroupModel,
                                 currentUserIsAdmin: Bool) -> some View {
         Button {
+            // Drill: participant row tap pushes the member's 1:1 chat
+            // onto the nav stack so back-pop returns to this group.
             let jid = p.jid
             Task { @MainActor in
-                session.requestSelectChat(jid)
+                session.drillIntoChat(jid)
             }
         } label: {
             HStack(spacing: 10) {
@@ -1599,7 +1601,9 @@ struct ChatInfoView: View {
         .contentShape(Rectangle())
         .onTapGesture {
             guard joined else { return }
-            session.requestSelectChat(sub.jid)
+            // Drill: community sub-group tap pushes the sub onto the
+            // nav stack so back-pop returns to the parent community.
+            session.drillIntoChat(sub.jid)
         }
         .contextMenu {
             Button("Copy JID") {

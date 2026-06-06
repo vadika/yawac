@@ -32,10 +32,16 @@ struct ConversationView: View {
     @State private var lastSeenCount = 0
     @State private var showInfo = false
     @State private var atBottom = true
+    /// Last message id that appeared in the viewport. Captured by the
+    /// per-row `.onAppear` below and snapshotted to `nav.captureAnchor`
+    /// on `.onDisappear` so a back-pop into this chat restores roughly
+    /// the same scroll position rather than snapping to the bottom.
+    @State private var lastVisibleMessageID: String?
     @State private var showForwardPicker = false
     @State private var pendingDelete: Chat?
     @State private var pendingBlock: Chat?
     @State private var contactEditing: Chat?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @ViewBuilder
     private var inspectorPane: some View {
@@ -339,10 +345,26 @@ struct ConversationView: View {
         }
     }
 
+    /// Slim "Back to {origin}" breadcrumb above the chat header.
+    /// Renders only when `nav.depth > 0` (i.e. the user drilled in
+    /// from another chat). Hidden at root chats opened from the
+    /// sidebar — there's nothing to go back to.
+    @ViewBuilder
+    private var backBar: some View {
+        if let origin = session.nav.origin {
+            BackBar(originJID: origin.id,
+                    originName: origin.displayName,
+                    depth: session.nav.depth,
+                    onBack: { session.nav.back() })
+                .transition(.move(edge: .top).combined(with: .opacity))
+        }
+    }
+
     private var coreView: some View {
         Group {
             if let vm {
                 VStack(spacing: 0) {
+                    backBar
                     headerBar
                     if vm.findActive {
                         ConversationFindBar(vm: vm)
@@ -407,7 +429,12 @@ struct ConversationView: View {
                                             },
                                             mentionResolver: { jid in session.displayName(for: jid) },
                                             onOpenChat: { jid in
-                                                session.requestSelectChat(jid)
+                                                // Drill: sender avatar /
+                                                // name / mention popover /
+                                                // quoted author all push
+                                                // onto the nav stack so
+                                                // back-pop returns here.
+                                                session.drillIntoChat(jid)
                                             },
                                             onReply: { m in vm.startReply(to: m) },
                                             onReplyPrivately: { m in
@@ -422,7 +449,12 @@ struct ConversationView: View {
                                                 // fresh CVM into place
                                                 // before we set the field.
                                                 Task { @MainActor in
-                                                    session.requestSelectChat(m.senderJID)
+                                                    // Drill: group → DM
+                                                    // with sender. Pop
+                                                    // returns to the group
+                                                    // the reply originated
+                                                    // from (spec §3).
+                                                    session.pendingDrillSelection = m.senderJID
                                                     try? await Task.sleep(nanoseconds: 100_000_000)
                                                     session.pendingReplyTarget = m
                                                 }
@@ -450,6 +482,7 @@ struct ConversationView: View {
                                             atBottom: $atBottom))
                                         .modifier(ViewportReadModifier(
                                             messageID: msg.id, vm: vm))
+                                        .onAppear { lastVisibleMessageID = msg.id }
                                     }
                                 }
                             }
@@ -485,7 +518,20 @@ struct ConversationView: View {
                             // hasn't scrolled away (we just always follow
                             // for now since we don't track scroll offset).
                             if !didInitialScroll {
-                                let anchor = vm.initialAnchorID ?? vm.messages.last?.id
+                                // Restore order on a fresh chat open:
+                                // 1) cached scroll anchor from a prior
+                                //    visit (back-pop into a previously
+                                //    visited chat) — only used when the
+                                //    referenced message is still loaded;
+                                // 2) initialAnchorID (first-unread);
+                                // 3) the latest message.
+                                let cached = session.nav.anchor(jid: chatJID)
+                                let cachedHit = cached.flatMap { id in
+                                    vm.messages.contains(where: { $0.id == id }) ? id : nil
+                                }
+                                let anchor = cachedHit
+                                    ?? vm.initialAnchorID
+                                    ?? vm.messages.last?.id
                                 guard let anchor else { return }
                                 let position: UnitPoint =
                                     anchor == vm.messages.last?.id ? .bottom : .top
@@ -609,6 +655,11 @@ struct ConversationView: View {
             return true
         }
         .onDisappear {
+            // Snapshot the last-seen anchor before tearing down so the
+            // next back-pop into this chat restores its scroll position.
+            if let anchor = lastVisibleMessageID {
+                session.nav.captureAnchor(jid: chatJID, messageID: anchor)
+            }
             session.currentConversation = nil
         }
         .task(id: chatJID) {
@@ -677,6 +728,28 @@ struct ConversationView: View {
 
     var body: some View {
         coreView
+            // Reduce Motion → instant; otherwise slide+fade per spec §5
+            // (~180ms). Animation key the depth so push/pop both trigger.
+            .animation(reduceMotion ? nil : .easeInOut(duration: 0.18),
+                       value: session.nav.depth)
+            // ⌘[ — standard macOS back. .onKeyPress lives on focused
+            // views; ConversationView's scroll view typically holds
+            // first responder, so attaching here is sufficient.
+            .focusable()
+            .focusEffectDisabled()
+            .onKeyPress(.init("[")) {
+                // .onKeyPress doesn't expose a modifier filter on macOS 14,
+                // so peek at NSEvent flags directly. Cmd+[ → back; bare [
+                // is ignored so the composer / search field still get it.
+                guard NSEvent.modifierFlags.contains(.command) else {
+                    return .ignored
+                }
+                if session.nav.canGoBack {
+                    session.nav.back()
+                    return .handled
+                }
+                return .ignored
+            }
             .confirmationDialog(
                 "Delete chat with \(pendingDelete?.name ?? "")?",
                 isPresented: Binding(get: { pendingDelete != nil },

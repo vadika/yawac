@@ -205,6 +205,22 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **Chat navigation stack + BackBar** (v0.9.14) — drilling into
+  a chat from another chat (member tap, participant row,
+  reply-privately, community sub-group, mention popover,
+  quoted-message author) now pushes onto a `ChatNavigation` stack.
+  A 34pt BackBar above the chat header reads "Back to {origin
+  name}" with the origin's 16pt avatar, shows a "{n} deep" chip
+  when the trail is more than one hop, and surfaces ⌘[. Sidebar
+  selection and search-hit jumps reset the trail (openRoot). The
+  reply-privately drill carries the originating message so the
+  destination DM still pre-fills the reply preview. Origin name
+  resolves via `session.displayName` — never a raw JID. Last-seen
+  message id is captured per chat and used as the initial scroll
+  anchor on back-pop. Reduce Motion suppresses the slide+fade.
+  Spec at
+  `docs/superpowers/specs/2026-06-06-chat-navigation-stack-spec.md`.
+
 - ✅ **Settings redesign** (v0.9.13) — `SettingsView` rewritten as
   a 200pt rail + content pane (`NavigationSplitView`), six panels
   (General, Display, Translation, Privacy, Blocked, Account) per
