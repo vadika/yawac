@@ -205,21 +205,35 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
-- ✅ **Chat navigation stack + BackBar** (v0.9.14) — drilling into
-  a chat from another chat (member tap, participant row,
-  reply-privately, community sub-group, mention popover,
-  quoted-message author) now pushes onto a `ChatNavigation` stack.
-  A 34pt BackBar above the chat header reads "Back to {origin
-  name}" with the origin's 16pt avatar, shows a "{n} deep" chip
-  when the trail is more than one hop, and surfaces ⌘[. Sidebar
-  selection and search-hit jumps reset the trail (openRoot). The
-  reply-privately drill carries the originating message so the
-  destination DM still pre-fills the reply preview. Origin name
-  resolves via `session.displayName` — never a raw JID. Last-seen
-  message id is captured per chat and used as the initial scroll
-  anchor on back-pop. Reduce Motion suppresses the slide+fade.
-  Spec at
+- ✅ **Chat navigation stack + BackBar** (v0.9.14 → v0.9.17) —
+  drilling into a chat from another chat (member tap, participant
+  row, reply-privately, community sub-group, mention popover,
+  quoted-message author) pushes onto a `ChatNavigation` stack. A
+  34pt BackBar reads "Back to {origin name}" with the origin's
+  16pt avatar, shows a "{n} deep" chip when the trail is more
+  than one hop, and surfaces ⌘[. Sidebar selection and search-hit
+  jumps reset the trail (openRoot). Origin name resolves via
+  `session.displayName` — never a raw JID. Last-seen message id is
+  captured per chat and replayed as the initial scroll anchor on
+  back-pop. Reduce Motion suppresses the slide+fade. Spec at
   `docs/superpowers/specs/2026-06-06-chat-navigation-stack-spec.md`.
+
+    **Bring-up saga (v0.9.15 → v0.9.17):**
+    - v0.9.15: bind echo loop — drill swapped `currentJID`,
+      NavigationSplitView wrote the new value back through the
+      sidebar binding → `openRoot` truncated the stack. Added an
+      `if new == currentJID { return }` guard.
+    - v0.9.16: not enough — the guard fired but the sidebar was
+      still pointed at `nav.currentJID`. When drill changed
+      `currentJID`, NavigationSplitView still wrote *something*
+      back. Switched sidebar to `nav.stack.first?.id` so it
+      tracks the root, not the drilled chat.
+    - v0.9.17: layout fix. Stack/observation/render all worked;
+      BackBar was just invisible behind the title-bar lozenge
+      because `.ignoresSafeArea(.container, edges: .top)` parked
+      `headerBar` over the title-bar gutter. Moved BackBar below
+      `headerBar` instead of above. Slight spec deviation from
+      "directly above the chat header" — keeps it visible.
 
 - ✅ **Settings redesign** (v0.9.13) — `SettingsView` rewritten as
   a 200pt rail + content pane (`NavigationSplitView`), six panels
