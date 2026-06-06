@@ -8,6 +8,7 @@ struct SettingsView: View {
     private var targetLang: String = "en"
     @AppStorage(UIScaleStep.storageKey) private var scaleStepRaw = UIScaleStep.default.rawValue
     @State private var showLinkedDevices = false
+    @State private var showPrivacy = false
 
     private static let languages: [(code: String, name: String)] = [
         ("en", "English"), ("de", "German"), ("fi", "Finnish"),
@@ -120,6 +121,23 @@ struct SettingsView: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(session.state != .ready)
+
+                Button {
+                    showPrivacy = true
+                } label: {
+                    HStack {
+                        Image(systemName: "lock.shield")
+                            .foregroundStyle(.secondary)
+                        Text("Privacy…")
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(session.state != .ready)
             }
         }
         .formStyle(.grouped)
@@ -130,6 +148,10 @@ struct SettingsView: View {
         }
         .sheet(isPresented: $showLinkedDevices) {
             LinkedDevicesSheet()
+                .environment(session)
+        }
+        .sheet(isPresented: $showPrivacy) {
+            PrivacySettingsSheet()
                 .environment(session)
         }
     }
