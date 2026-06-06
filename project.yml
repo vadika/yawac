@@ -47,7 +47,7 @@ targets:
         LSMinimumSystemVersion: "14.0"
         CFBundleDisplayName: yawac
         CFBundleShortVersionString: "0.9.29"
-        CFBundleVersion: "43"
+        CFBundleVersion: "44"
         ATSApplicationFontsPath: Fonts
         CFBundleIconName: AppIcon
   yawacTests:

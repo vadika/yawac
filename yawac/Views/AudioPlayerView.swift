@@ -45,18 +45,14 @@ struct AudioPlayerView: View {
     @State private var current: TimeInterval = 0
     @State private var timer: Timer?
     @State private var observer: NSObjectProtocol?
-
-    /// Voice-note bypass: when the message is a PTT (push-to-talk) and
-    /// the file is Ogg-Opus, we decode with libopus and play via
-    /// AVAudioEngine. That avoids the entire FigPlayer / Bluetooth
-    /// spatial mixer / HeadTrackerSession stack that AVPlayer drags in,
-    /// which was responsible for the ~1500 HW interrupts/sec wake leak
-    /// during playback.
-    private var useOpusBypass: Bool {
-        guard isPTT else { return false }
-        let lower = path.lowercased()
-        return lower.hasSuffix(".ogg") || lower.hasSuffix(".opus")
-    }
+    /// True once the magic-byte probe confirms the file starts with
+    /// "OggS". Set by `prefetchDuration` (or lazily inside `togglePlay`
+    /// if the user beats the async prefetch). Extension-based gating —
+    /// used in the first v0.9.29 cut — missed files because WhatsApp's
+    /// media-cache path isn't always `.ogg`, so the AVPlayer wake leak
+    /// reappeared in real chats. Sniffing the container magic instead
+    /// makes the routing robust to whatever filename the cache emits.
+    @State private var bypassReady = false
 
     var body: some View {
         HStack(spacing: 8) {
@@ -101,15 +97,18 @@ struct AudioPlayerView: View {
     }
 
     private func prefetchDuration() async {
-        guard duration == 0 else { return }
-        if useOpusBypass {
-            let url = URL(fileURLWithPath: path)
-            if let d = OggOpusDemuxer.peekDurationSeconds(url: url) {
+        let url = URL(fileURLWithPath: path)
+        if OggOpusDemuxer.isOggFile(url: url) {
+            bypassReady = true
+            audioPlayerPerfLog.log("AudioPlayerView bypass=opus path=\(path, privacy: .public)")
+            if duration == 0,
+               let d = OggOpusDemuxer.peekDurationSeconds(url: url) {
                 self.duration = d
             }
             return
         }
-        let asset = AVURLAsset(url: URL(fileURLWithPath: path))
+        guard duration == 0 else { return }
+        let asset = AVURLAsset(url: url)
         do {
             let dur = try await asset.load(.duration)
             self.duration = CMTimeGetSeconds(dur)
@@ -185,7 +184,17 @@ struct AudioPlayerView: View {
     }
 
     private func togglePlay() {
-        if useOpusBypass {
+        // Race: if the user taps before prefetchDuration's async probe
+        // landed, sniff the magic bytes synchronously here. The read is
+        // ~10 µs so the tap stays interactive. After this, bypassReady
+        // is authoritative for the lifetime of the view.
+        if !bypassReady && player == nil && opusPlayer == nil {
+            if OggOpusDemuxer.isOggFile(url: URL(fileURLWithPath: path)) {
+                bypassReady = true
+                audioPlayerPerfLog.log("AudioPlayerView bypass=opus (late) path=\(path, privacy: .public)")
+            }
+        }
+        if bypassReady {
             togglePlayOpus()
         } else {
             togglePlayAV()

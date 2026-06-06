@@ -70,6 +70,21 @@ struct OggOpusDemuxer {
         }
     }
 
+    /// Magic-byte sniff for the OggS container marker at file offset 0.
+    /// More reliable than extension matching — the on-disk path WhatsApp
+    /// chooses for voice notes isn't always `.ogg` (some media-cache
+    /// branches drop the extension entirely), but the file body is
+    /// always RFC 3533 Ogg. ~10 µs.
+    static func isOggFile(url: URL) -> Bool {
+        guard let h = try? FileHandle(forReadingFrom: url) else { return false }
+        defer { try? h.close() }
+        guard let data = try? h.read(upToCount: 4), data.count == 4 else {
+            return false
+        }
+        return data[0] == 0x4F && data[1] == 0x67
+            && data[2] == 0x67 && data[3] == 0x53
+    }
+
     /// Cheap duration probe that avoids decoding any audio packets.
     /// Maps the file, walks page headers, and reads the granule_position
     /// of the last page — which by spec is the cumulative output sample
