@@ -1,6 +1,34 @@
 import AVFoundation
 import AVKit
+import os
 import SwiftUI
+
+/// Wake-rate hunt instrumentation. Counts live AudioPlayerView
+/// AVPlayer instances. Each row's `.onAppear` eagerly mounts a player;
+/// in a chat with many voice-note bubbles that's many AVPlayers
+/// holding render pipelines / audio-queue resources for the lifetime
+/// of the view. Hypothesis: high live-count correlates with high
+/// kernel wake rate.
+private nonisolated(unsafe) var audioPlayerLiveCount = 0
+private let audioPlayerCountLock = NSLock()
+private let audioPlayerPerfLog = Logger(subsystem: "dev.vadikas.yawac.yawac",
+                                        category: "perf")
+
+private func audioPlayerDidCreate() {
+    audioPlayerCountLock.lock()
+    audioPlayerLiveCount += 1
+    let n = audioPlayerLiveCount
+    audioPlayerCountLock.unlock()
+    audioPlayerPerfLog.log("AudioPlayerView +1 live=\(n, privacy: .public)")
+}
+
+private func audioPlayerDidTeardown() {
+    audioPlayerCountLock.lock()
+    audioPlayerLiveCount -= 1
+    let n = audioPlayerLiveCount
+    audioPlayerCountLock.unlock()
+    audioPlayerPerfLog.log("AudioPlayerView -1 live=\(n, privacy: .public)")
+}
 
 struct AudioPlayerView: View {
     let path: String
@@ -75,6 +103,7 @@ struct AudioPlayerView: View {
         item.allowedAudioSpatializationFormats = []
         let p = AVPlayer(playerItem: item)
         self.player = p
+        audioPlayerDidCreate()
         Task { @MainActor in
             do {
                 let dur = try await asset.load(.duration)
@@ -98,6 +127,10 @@ struct AudioPlayerView: View {
         player?.pause()
         timer?.invalidate()
         if let observer { NotificationCenter.default.removeObserver(observer) }
+        if player != nil {
+            audioPlayerDidTeardown()
+        }
+        player = nil
     }
 
     private func togglePlay() {
