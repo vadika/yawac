@@ -3,6 +3,7 @@ package bridge
 import (
 	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -874,10 +875,16 @@ func mediaFromVideo(m *waE2E.VideoMessage) *JMedia {
 }
 
 func mediaFromAudio(m *waE2E.AudioMessage) *JMedia {
+	waveB64 := ""
+	if w := m.GetWaveform(); len(w) > 0 {
+		waveB64 = base64.StdEncoding.EncodeToString(w)
+	}
 	return &JMedia{
 		MimeType:  m.GetMimetype(),
 		Duration:  int(m.GetSeconds()),
 		SizeBytes: int64(m.GetFileLength()),
+		Waveform:  waveB64,
+		IsPTT:     m.GetPTT(),
 		Ref: &MediaRef{
 			Kind:          "audio",
 			URL:           m.GetURL(),
