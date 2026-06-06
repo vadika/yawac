@@ -364,8 +364,13 @@ struct ConversationView: View {
         Group {
             if let vm {
                 VStack(spacing: 0) {
-                    backBar
+                    // headerBar sits inside the title-bar gutter
+                    // (`.ignoresSafeArea(.container, edges: .top)` on
+                    // the outer Group). BackBar must go BELOW the
+                    // header — placing it above hides it behind the
+                    // traffic-light lozenge.
                     headerBar
+                    backBar
                     if vm.findActive {
                         ConversationFindBar(vm: vm)
                             .transition(.move(edge: .top).combined(with: .opacity))
@@ -429,11 +434,6 @@ struct ConversationView: View {
                                             },
                                             mentionResolver: { jid in session.displayName(for: jid) },
                                             onOpenChat: { jid in
-                                                // Drill: sender avatar /
-                                                // name / mention popover /
-                                                // quoted author all push
-                                                // onto the nav stack so
-                                                // back-pop returns here.
                                                 session.drillIntoChat(jid)
                                             },
                                             onReply: { m in vm.startReply(to: m) },
