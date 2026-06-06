@@ -41,6 +41,11 @@ struct YawacApp: App {
         Task.detached(priority: .utility) {
             await MessageIndex.shared.bootstrapIfNeeded()
         }
+        // Wake-rate hunt instrumentation. Logs per-second platform-idle
+        // and interrupt wake counts under subsystem 'dev.vadikas.yawac.yawac'
+        // category 'perf'. Matches the kernel's wake-attribution counter
+        // — directly tells us when wakes spike and what we were doing.
+        WakeRateProbe.start()
     }
 
     var body: some Scene {
