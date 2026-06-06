@@ -36,6 +36,7 @@ struct ConversationView: View {
     @State private var pendingDelete: Chat?
     @State private var pendingBlock: Chat?
     @State private var contactEditing: Chat?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @ViewBuilder
     private var inspectorPane: some View {
@@ -339,10 +340,26 @@ struct ConversationView: View {
         }
     }
 
+    /// Slim "Back to {origin}" breadcrumb above the chat header.
+    /// Renders only when `nav.depth > 0` (i.e. the user drilled in
+    /// from another chat). Hidden at root chats opened from the
+    /// sidebar — there's nothing to go back to.
+    @ViewBuilder
+    private var backBar: some View {
+        if let origin = session.nav.origin {
+            BackBar(originJID: origin.id,
+                    originName: origin.displayName,
+                    depth: session.nav.depth,
+                    onBack: { session.nav.back() })
+                .transition(.move(edge: .top).combined(with: .opacity))
+        }
+    }
+
     private var coreView: some View {
         Group {
             if let vm {
                 VStack(spacing: 0) {
+                    backBar
                     headerBar
                     if vm.findActive {
                         ConversationFindBar(vm: vm)
@@ -677,6 +694,28 @@ struct ConversationView: View {
 
     var body: some View {
         coreView
+            // Reduce Motion → instant; otherwise slide+fade per spec §5
+            // (~180ms). Animation key the depth so push/pop both trigger.
+            .animation(reduceMotion ? nil : .easeInOut(duration: 0.18),
+                       value: session.nav.depth)
+            // ⌘[ — standard macOS back. .onKeyPress lives on focused
+            // views; ConversationView's scroll view typically holds
+            // first responder, so attaching here is sufficient.
+            .focusable()
+            .focusEffectDisabled()
+            .onKeyPress(.init("[")) {
+                // .onKeyPress doesn't expose a modifier filter on macOS 14,
+                // so peek at NSEvent flags directly. Cmd+[ → back; bare [
+                // is ignored so the composer / search field still get it.
+                guard NSEvent.modifierFlags.contains(.command) else {
+                    return .ignored
+                }
+                if session.nav.canGoBack {
+                    session.nav.back()
+                    return .handled
+                }
+                return .ignored
+            }
             .confirmationDialog(
                 "Delete chat with \(pendingDelete?.name ?? "")?",
                 isPresented: Binding(get: { pendingDelete != nil },
