@@ -32,6 +32,11 @@ struct ConversationView: View {
     @State private var lastSeenCount = 0
     @State private var showInfo = false
     @State private var atBottom = true
+    /// Last message id that appeared in the viewport. Captured by the
+    /// per-row `.onAppear` below and snapshotted to `nav.captureAnchor`
+    /// on `.onDisappear` so a back-pop into this chat restores roughly
+    /// the same scroll position rather than snapping to the bottom.
+    @State private var lastVisibleMessageID: String?
     @State private var showForwardPicker = false
     @State private var pendingDelete: Chat?
     @State private var pendingBlock: Chat?
@@ -477,6 +482,7 @@ struct ConversationView: View {
                                             atBottom: $atBottom))
                                         .modifier(ViewportReadModifier(
                                             messageID: msg.id, vm: vm))
+                                        .onAppear { lastVisibleMessageID = msg.id }
                                     }
                                 }
                             }
@@ -512,7 +518,20 @@ struct ConversationView: View {
                             // hasn't scrolled away (we just always follow
                             // for now since we don't track scroll offset).
                             if !didInitialScroll {
-                                let anchor = vm.initialAnchorID ?? vm.messages.last?.id
+                                // Restore order on a fresh chat open:
+                                // 1) cached scroll anchor from a prior
+                                //    visit (back-pop into a previously
+                                //    visited chat) — only used when the
+                                //    referenced message is still loaded;
+                                // 2) initialAnchorID (first-unread);
+                                // 3) the latest message.
+                                let cached = session.nav.anchor(jid: chatJID)
+                                let cachedHit = cached.flatMap { id in
+                                    vm.messages.contains(where: { $0.id == id }) ? id : nil
+                                }
+                                let anchor = cachedHit
+                                    ?? vm.initialAnchorID
+                                    ?? vm.messages.last?.id
                                 guard let anchor else { return }
                                 let position: UnitPoint =
                                     anchor == vm.messages.last?.id ? .bottom : .top
@@ -636,6 +655,11 @@ struct ConversationView: View {
             return true
         }
         .onDisappear {
+            // Snapshot the last-seen anchor before tearing down so the
+            // next back-pop into this chat restores its scroll position.
+            if let anchor = lastVisibleMessageID {
+                session.nav.captureAnchor(jid: chatJID, messageID: anchor)
+            }
             session.currentConversation = nil
         }
         .task(id: chatJID) {
