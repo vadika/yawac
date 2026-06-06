@@ -22,6 +22,14 @@ struct ContentView: View {
                     session.nav.clear()
                     return
                 }
+                // NavigationSplitView echoes the detail pane's `Chat.ID?`
+                // back through this binding whenever its detail content
+                // changes — including drill-in pushes (group → member).
+                // Treating every echo as an openRoot would reset the
+                // stack and erase the BackBar. Only a *user-initiated*
+                // sidebar tap arrives with a value that doesn't already
+                // equal the current top of stack.
+                if new == session.nav.currentJID { return }
                 session.openRootChat(new)
             }
         )
