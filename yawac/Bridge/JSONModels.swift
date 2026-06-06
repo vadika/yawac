@@ -399,6 +399,26 @@ struct BridgeContactPayload: Codable, Hashable {
     }
 }
 
+/// One device paired to the WhatsApp account. yawac is one row;
+/// the phone is `isPhone == true` (device suffix 0); other companions
+/// are anonymous slot numbers. WhatsApp caps companions at four —
+/// remote revoke isn't exposed by whatsmeow, so this is informative.
+struct BridgeLinkedDevice: Codable, Identifiable, Equatable {
+    let jid: String
+    let deviceID: Int
+    let isSelf: Bool
+    let isPhone: Bool
+
+    var id: String { jid }
+
+    enum CodingKeys: String, CodingKey {
+        case jid
+        case deviceID = "device_id"
+        case isSelf = "is_self"
+        case isPhone = "is_phone"
+    }
+}
+
 struct BridgeJoinRequest: Decodable, Hashable {
     let jid: String
     let requestedAt: Int64

@@ -399,6 +399,18 @@ class WAClient: PhoneValidating, LIDResolving {
         return (try? JSONDecoder().decode([String].self, from: Data(json.utf8))) ?? []
     }
 
+    /// Lists every device paired to the account — phone (`deviceID = 0`)
+    /// plus all companions. Backed by whatsmeow's `GetUserDevices` against
+    /// the bare own JID. nonisolated so the LinkedDevicesSheet can dispatch
+    /// the IQ off the main actor.
+    nonisolated func listLinkedDevices() throws -> [BridgeLinkedDevice] {
+        var err: NSError?
+        let json = go.listLinkedDevices(&err)
+        if let err { throw err }
+        return (try? JSONDecoder().decode([BridgeLinkedDevice].self,
+                                          from: Data(json.utf8))) ?? []
+    }
+
     /// Returns the subset of `jids` that whatsmeow's local appstate
     /// store currently marks as pinned. Used to reconcile the sidebar
     /// at startup since events.Pin isn't re-emitted on reconnect.
