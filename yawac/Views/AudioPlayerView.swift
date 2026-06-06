@@ -4,6 +4,14 @@ import SwiftUI
 
 struct AudioPlayerView: View {
     let path: String
+    /// Raw amplitude bytes from the proto for inbound voice notes. nil
+    /// for music clips, outbound sends, or older messages — those keep
+    /// the plain ProgressView.
+    var waveform: Data? = nil
+    /// Voice-note flag. Together with a non-empty waveform this flips
+    /// the row to the WhatsApp-style amplitude bars.
+    var isPTT: Bool = false
+
     @State private var player: AVPlayer?
     @State private var isPlaying = false
     @State private var duration: TimeInterval = 0
@@ -21,9 +29,18 @@ struct AudioPlayerView: View {
             }
             .buttonStyle(.borderless)
             VStack(alignment: .leading, spacing: 2) {
-                ProgressView(value: current, total: max(duration, 1))
-                    .progressViewStyle(.linear)
-                    .frame(width: 160)
+                if isPTT, let bytes = waveform, !bytes.isEmpty {
+                    WaveformBarsView(
+                        bytes: bytes,
+                        progress: progressFraction,
+                        tintPlayed: Theme.accent,
+                        tintUnplayed: Theme.textMuted)
+                        .frame(width: 160)
+                } else {
+                    ProgressView(value: current, total: max(duration, 1))
+                        .progressViewStyle(.linear)
+                        .frame(width: 160)
+                }
                 Text(formatTime(duration))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -32,6 +49,13 @@ struct AudioPlayerView: View {
         .padding(6)
         .onAppear { loadPlayer() }
         .onDisappear { teardown() }
+    }
+
+    /// Playback fraction in `[0, 1]`. Falls back to 0 while the asset
+    /// duration is still loading.
+    private var progressFraction: Double {
+        guard duration > 0 else { return 0 }
+        return min(1.0, max(0.0, current / duration))
     }
 
     private func loadPlayer() {

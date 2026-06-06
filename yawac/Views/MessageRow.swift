@@ -970,10 +970,8 @@ struct MessageRow: View {
 
     @ViewBuilder
     private func audioBubble(path: String?, waveform: Data?, isPTT: Bool) -> some View {
-        // `waveform` + `isPTT` will drive WaveformBarsView in commit 5;
-        // for now they are accepted but unused so the wiring compiles.
         if let p = path {
-            AudioPlayerView(path: p)
+            AudioPlayerView(path: p, waveform: waveform, isPTT: isPTT)
         } else {
             downloadingPlaceholder("waveform")
         }
