@@ -3,31 +3,29 @@ import AVKit
 import os
 import SwiftUI
 
-/// Wake-rate hunt instrumentation. Counts live AudioPlayerView
-/// AVPlayer instances. Each row's `.onAppear` eagerly mounts a player;
-/// in a chat with many voice-note bubbles that's many AVPlayers
-/// holding render pipelines / audio-queue resources for the lifetime
-/// of the view. Hypothesis: high live-count correlates with high
-/// kernel wake rate.
+/// Wake-rate hunt instrumentation. Counts live AudioPlayerView audio
+/// instances (either AVPlayer or OpusVoicePlayer). v0.9.28 lazy-mount
+/// dropped idle-row wakes; the counter still tracks playback duration
+/// so we can correlate any future regressions to the wake-rate probe.
 private nonisolated(unsafe) var audioPlayerLiveCount = 0
 private let audioPlayerCountLock = NSLock()
 private let audioPlayerPerfLog = Logger(subsystem: "dev.vadikas.yawac.yawac",
                                         category: "perf")
 
-private func audioPlayerDidCreate() {
+private func audioPlayerDidCreate(kind: String) {
     audioPlayerCountLock.lock()
     audioPlayerLiveCount += 1
     let n = audioPlayerLiveCount
     audioPlayerCountLock.unlock()
-    audioPlayerPerfLog.log("AudioPlayerView +1 live=\(n, privacy: .public)")
+    audioPlayerPerfLog.log("AudioPlayerView +1 live=\(n, privacy: .public) kind=\(kind, privacy: .public)")
 }
 
-private func audioPlayerDidTeardown() {
+private func audioPlayerDidTeardown(kind: String) {
     audioPlayerCountLock.lock()
     audioPlayerLiveCount -= 1
     let n = audioPlayerLiveCount
     audioPlayerCountLock.unlock()
-    audioPlayerPerfLog.log("AudioPlayerView -1 live=\(n, privacy: .public)")
+    audioPlayerPerfLog.log("AudioPlayerView -1 live=\(n, privacy: .public) kind=\(kind, privacy: .public)")
 }
 
 struct AudioPlayerView: View {
@@ -41,11 +39,24 @@ struct AudioPlayerView: View {
     var isPTT: Bool = false
 
     @State private var player: AVPlayer?
+    @State private var opusPlayer: OpusVoicePlayer?
     @State private var isPlaying = false
     @State private var duration: TimeInterval = 0
     @State private var current: TimeInterval = 0
     @State private var timer: Timer?
     @State private var observer: NSObjectProtocol?
+
+    /// Voice-note bypass: when the message is a PTT (push-to-talk) and
+    /// the file is Ogg-Opus, we decode with libopus and play via
+    /// AVAudioEngine. That avoids the entire FigPlayer / Bluetooth
+    /// spatial mixer / HeadTrackerSession stack that AVPlayer drags in,
+    /// which was responsible for the ~1500 HW interrupts/sec wake leak
+    /// during playback.
+    private var useOpusBypass: Bool {
+        guard isPTT else { return false }
+        let lower = path.lowercased()
+        return lower.hasSuffix(".ogg") || lower.hasSuffix(".opus")
+    }
 
     var body: some View {
         HStack(spacing: 8) {
@@ -75,28 +86,29 @@ struct AudioPlayerView: View {
             }
         }
         .padding(6)
-        // No `.onAppear { loadPlayer() }` — AVPlayer is created lazily
-        // on the first togglePlay tap. Eager-mount caused every visible
-        // voice-note row in the LazyVStack to spin up an AVPlayer +
-        // audio render pipeline + AudioQueue + Bluetooth route, each
-        // generating ~1500 HW interrupts/sec for the player's lifetime.
+        // No eager mount. The audio engine — AVPlayer or AVAudioEngine —
+        // is created on the first togglePlay tap. prefetchDuration uses
+        // a cheap header parse (Ogg granule for bypass, AVURLAsset for
+        // AVPlayer path) so the duration label renders without waking
+        // the audio stack.
         .onAppear { Task { @MainActor in await prefetchDuration() } }
         .onDisappear { teardown() }
     }
 
-    /// Playback fraction in `[0, 1]`. Falls back to 0 while the asset
-    /// duration is still loading.
     private var progressFraction: Double {
         guard duration > 0 else { return 0 }
         return min(1.0, max(0.0, current / duration))
     }
 
-    /// Loads the asset's duration without instantiating an AVPlayer.
-    /// AVURLAsset alone doesn't spin up the audio session / render
-    /// pipeline / Bluetooth route — it's a lightweight file inspector.
-    /// This lets the duration label render before the user taps play.
     private func prefetchDuration() async {
         guard duration == 0 else { return }
+        if useOpusBypass {
+            let url = URL(fileURLWithPath: path)
+            if let d = OggOpusDemuxer.peekDurationSeconds(url: url) {
+                self.duration = d
+            }
+            return
+        }
         let asset = AVURLAsset(url: URL(fileURLWithPath: path))
         do {
             let dur = try await asset.load(.duration)
@@ -106,24 +118,17 @@ struct AudioPlayerView: View {
         }
     }
 
-    private func loadPlayer() {
+    private func loadAVPlayer() {
         // AVPlayer + AVAsset supports more codecs than AVAudioPlayer —
-        // notably Ogg-Opus (which WhatsApp voice notes use) on macOS
-        // 12+ via the system audio codec. AVAudioPlayer rejects Opus.
+        // notably the m4a/aac that non-PTT clips can use. Voice notes
+        // (Ogg-Opus) take the bypass path above.
         let url = URL(fileURLWithPath: path)
         let asset = AVURLAsset(url: url)
         let item = AVPlayerItem(asset: asset)
-        // AirPods head-tracked spatial audio: by default macOS routes
-        // every AVPlayer through `binh` (binaural head-tracked) when
-        // the route is head-tracked headphones, which spawns a
-        // HeadTrackerSession that polls the IMU at hundreds of hertz
-        // for the lifetime of the player. Voice notes are mono and
-        // don't benefit from spatialization — opting out drops the
-        // head-tracker polling.
         item.allowedAudioSpatializationFormats = []
         let p = AVPlayer(playerItem: item)
         self.player = p
-        audioPlayerDidCreate()
+        audioPlayerDidCreate(kind: "av")
         if duration == 0 {
             Task { @MainActor in
                 do {
@@ -145,16 +150,18 @@ struct AudioPlayerView: View {
         }
     }
 
-    /// Aggressive teardown. The v0.9.27 wake-rate probe showed that
-    /// after the view disappears the AVPlayer instance lingers for
-    /// 60+ seconds — retained by the FigPlayer registry / audio
-    /// session even after the @State release. During that bleed the
-    /// Bluetooth audio chain keeps emitting ~1500 HW interrupts/sec,
-    /// which is what was breaking the kernel wake budget. Calling
-    /// `replaceCurrentItem(with: nil)` on the player explicitly
-    /// detaches the AVPlayerItem from the playback engine, which
-    /// releases the render pipeline, AudioQueue, and AirPlay route
-    /// immediately instead of waiting on lazy cleanup.
+    private func loadOpusPlayer() {
+        let url = URL(fileURLWithPath: path)
+        do {
+            let p = try OpusVoicePlayer(url: url)
+            self.opusPlayer = p
+            if self.duration == 0 { self.duration = p.duration }
+            audioPlayerDidCreate(kind: "opus")
+        } catch {
+            audioPlayerPerfLog.error("OpusVoicePlayer init failed for \(path, privacy: .public): \(String(describing: error), privacy: .public)")
+        }
+    }
+
     private func teardown() {
         timer?.invalidate()
         timer = nil
@@ -165,20 +172,28 @@ struct AudioPlayerView: View {
         if let p = player {
             p.pause()
             p.replaceCurrentItem(with: nil)
-            audioPlayerDidTeardown()
+            audioPlayerDidTeardown(kind: "av")
+        }
+        if let op = opusPlayer {
+            op.teardown()
+            audioPlayerDidTeardown(kind: "opus")
         }
         player = nil
+        opusPlayer = nil
         isPlaying = false
         current = 0
     }
 
     private func togglePlay() {
-        // Lazy AVPlayer creation: spin up the playback engine only on
-        // the first explicit play tap. Idle voice-note rows scrolling
-        // past in a busy chat no longer leak interrupt wakes.
-        if player == nil {
-            loadPlayer()
+        if useOpusBypass {
+            togglePlayOpus()
+        } else {
+            togglePlayAV()
         }
+    }
+
+    private func togglePlayAV() {
+        if player == nil { loadAVPlayer() }
         guard let p = player else { return }
         if isPlaying {
             p.pause()
@@ -191,7 +206,33 @@ struct AudioPlayerView: View {
             timer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { _ in
                 Task { @MainActor in
                     self.current = CMTimeGetSeconds(p.currentTime())
-                    if p.rate == 0, self.isPlaying { /* paused externally */ }
+                }
+            }
+        }
+    }
+
+    private func togglePlayOpus() {
+        if opusPlayer == nil { loadOpusPlayer() }
+        guard let op = opusPlayer else { return }
+        if isPlaying {
+            op.pause()
+            isPlaying = false
+            current = op.currentTime
+            timer?.invalidate()
+        } else {
+            op.play()
+            isPlaying = op.isPlaying
+            guard isPlaying else { return }
+            timer?.invalidate()
+            timer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { _ in
+                Task { @MainActor in
+                    op.tick()
+                    self.current = op.currentTime
+                    if !op.isPlaying, self.isPlaying {
+                        self.isPlaying = false
+                        self.current = 0
+                        self.timer?.invalidate()
+                    }
                 }
             }
         }
