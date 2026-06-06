@@ -460,7 +460,10 @@ final class ConversationViewModel {
     /// Hard cap on initial load — large chats freeze SwiftUI's LazyVStack
     /// prefetcher if we hand it 10k+ rows at once. Newest N kept; older
     /// rows remain in storage and can be paged in later.
-    static let historyLoadLimit = 500
+    /// First-paint cap. Lower than `extendedHistoryLimit` so chat-switch
+    /// stays snappy; older rows page in via `loadMoreHistory` on scroll.
+    static let historyLoadLimit = 150
+    static let extendedHistoryLimit = 500
 
     /// Message id to anchor the initial scroll position to. Set in
     /// `loadHistory` based on the chat's persisted unread count: anchors
@@ -687,14 +690,13 @@ final class ConversationViewModel {
             }
             let t3 = CFAbsoluteTimeGetCurrent()
             let totalMs = (t3 - t0) * 1000
-            // Only log when meaningfully slow — keeps the per-open log
-            // clean in steady state.
-            if totalMs > 200 {
-                NSLog("[yawac/perf] loadHistory jid=%@ rows=%d scrub=%.0fms fetch=%.0fms map=%.0fms total=%.0fms",
-                      jid, self.messages.count,
-                      (t1 - t0) * 1000, (t2 - t1) * 1000,
-                      (t3 - t2) * 1000, totalMs)
-            }
+            // Always log so we can read the breakdown without filtering
+            // through `private` redaction in Console.app. %{public}s
+            // bypasses the unified-log mask.
+            NSLog("[yawac/perf] loadHistory rows=%d scrub=%.0fms fetch=%.0fms map=%.0fms total=%.0fms",
+                  self.messages.count,
+                  (t1 - t0) * 1000, (t2 - t1) * 1000,
+                  (t3 - t2) * 1000, totalMs)
         }
     }
 
