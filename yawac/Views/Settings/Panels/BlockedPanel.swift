@@ -190,16 +190,47 @@ struct BlockedPanel: View {
         } else {
             return "+" + digits
         }
-        // Group rest into chunks of 3 from the left, with the last chunk
-        // possibly shorter. Switch to chunks of 2 if the total tail is ≤6.
-        let chunkSize = rest.count <= 6 ? 2 : 3
-        var groups: [String] = []
-        var idx = rest.startIndex
-        while idx < rest.endIndex {
-            let end = rest.index(idx, offsetBy: chunkSize, limitedBy: rest.endIndex)
-                ?? rest.endIndex
-            groups.append(String(rest[idx..<end]))
-            idx = end
+        // Real phone numbers read best when the last group is 4 digits
+        // (NANP `+1 415 555 2671`, UK `+44 7700 900 123`, etc.). So we
+        // peel the trailing 4 off first, then chunk the remainder into
+        // groups of 3 from the right. For very short tails (≤6 total),
+        // switch to 2-digit groups so we don't end up with a single
+        // dangling digit.
+        let groups: [String]
+        if rest.count <= 6 {
+            // Chunks of 2 from the left.
+            var out: [String] = []
+            var idx = rest.startIndex
+            while idx < rest.endIndex {
+                let end = rest.index(idx, offsetBy: 2, limitedBy: rest.endIndex)
+                    ?? rest.endIndex
+                out.append(String(rest[idx..<end]))
+                idx = end
+            }
+            groups = out
+        } else {
+            // Last 4 digits as the final group; rest split into 3-digit
+            // groups, with the first group possibly shorter (so the right
+            // edge stays aligned the way humans expect).
+            let tail = String(rest.suffix(4))
+            let head = String(rest.dropLast(4))
+            var out: [String] = []
+            // Right-align by computing the first group's length explicitly.
+            let remainder = head.count % 3
+            var idx = head.startIndex
+            if remainder > 0 {
+                let end = head.index(idx, offsetBy: remainder)
+                out.append(String(head[idx..<end]))
+                idx = end
+            }
+            while idx < head.endIndex {
+                let end = head.index(idx, offsetBy: 3, limitedBy: head.endIndex)
+                    ?? head.endIndex
+                out.append(String(head[idx..<end]))
+                idx = end
+            }
+            out.append(tail)
+            groups = out
         }
         return "+\(cc) " + groups.joined(separator: " ")
     }
