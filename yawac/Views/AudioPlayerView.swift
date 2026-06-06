@@ -65,6 +65,14 @@ struct AudioPlayerView: View {
         let url = URL(fileURLWithPath: path)
         let asset = AVURLAsset(url: url)
         let item = AVPlayerItem(asset: asset)
+        // AirPods head-tracked spatial audio: by default macOS routes
+        // every AVPlayer through `binh` (binaural head-tracked) when
+        // the route is head-tracked headphones, which spawns a
+        // HeadTrackerSession that polls the IMU at hundreds of hertz
+        // for the lifetime of the player. Voice notes are mono and
+        // don't benefit from spatialization — opting out drops the
+        // head-tracker polling that was driving ~500 wakes/sec.
+        item.allowedAudioSpatializationFormats = []
         let p = AVPlayer(playerItem: item)
         self.player = p
         Task { @MainActor in
