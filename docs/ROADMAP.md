@@ -190,6 +190,16 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **Settings redesign** (v0.9.13) — `SettingsView` rewritten as
+  a 200pt rail + content pane (`NavigationSplitView`), six panels
+  (General, Display, Translation, Privacy, Blocked, Account) per
+  Claude Design handoff spec
+  (`docs/superpowers/specs/2026-06-06-settings-redesign-spec.md`).
+  Reusable Card / Row / SectionLabel / Select / Segmented / Pill
+  components in `Views/Settings/`. `SettingsPalette` graphite
+  tokens. Blocked list resolves display names + formatted phones,
+  never raw JIDs. Privacy + Linked devices modals still reachable
+  from the Account panel.
 - ✅ **Privacy settings** (v0.9.12) — Settings → Privacy sheet
   with 5 toggles: Last seen & Online, Profile photo, About, Read
   receipts, Add me to groups. Three-way Everyone / My contacts /
