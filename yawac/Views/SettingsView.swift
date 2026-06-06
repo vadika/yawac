@@ -7,6 +7,7 @@ struct SettingsView: View {
     @AppStorage("yawac.translate.targetLang")
     private var targetLang: String = "en"
     @AppStorage(UIScaleStep.storageKey) private var scaleStepRaw = UIScaleStep.default.rawValue
+    @State private var showLinkedDevices = false
 
     private static let languages: [(code: String, name: String)] = [
         ("en", "English"), ("de", "German"), ("fi", "Finnish"),
@@ -101,12 +102,35 @@ struct SettingsView: View {
             Section("Translation model") {
                 modelSection
             }
+
+            Section("Account") {
+                Button {
+                    showLinkedDevices = true
+                } label: {
+                    HStack {
+                        Image(systemName: "laptopcomputer.and.iphone")
+                            .foregroundStyle(.secondary)
+                        Text("Linked devices…")
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(session.state != .ready)
+            }
         }
         .formStyle(.grouped)
         .frame(minWidth: 460, minHeight: 420)
         .onAppear {
             translation.model.refreshState()
             session.loadBlocklist()
+        }
+        .sheet(isPresented: $showLinkedDevices) {
+            LinkedDevicesSheet()
+                .environment(session)
         }
     }
 
