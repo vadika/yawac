@@ -419,6 +419,27 @@ struct BridgeLinkedDevice: Codable, Identifiable, Equatable {
     }
 }
 
+/// Privacy settings surfaced in the v0.9.12 Settings → Privacy sheet.
+/// Five wire-string knobs from whatsmeow's PrivacySettings. Visibility
+/// knobs (lastSeen / profile / status / groupAdd) accept "all" /
+/// "contacts" / "contact_blacklist" / "none"; readReceipts accepts
+/// only "all" / "none".
+struct BridgePrivacySettings: Codable, Equatable {
+    var lastSeen: String
+    var profile: String
+    var status: String
+    var readReceipts: String
+    var groupAdd: String
+
+    enum CodingKeys: String, CodingKey {
+        case lastSeen = "last_seen"
+        case profile
+        case status
+        case readReceipts = "read_receipts"
+        case groupAdd = "group_add"
+    }
+}
+
 struct BridgeJoinRequest: Decodable, Hashable {
     let jid: String
     let requestedAt: Int64
