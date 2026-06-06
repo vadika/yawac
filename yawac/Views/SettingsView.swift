@@ -1,203 +1,172 @@
 import SwiftUI
 
+/// Settings window — v0.9.13 redesign per Claude Design handoff
+/// (`docs/superpowers/specs/2026-06-06-settings-redesign-spec.md`).
+///
+/// Replaces the prior single-scroll `Form` with the macOS System
+/// Settings pattern: a fixed 200pt category rail on the left, a
+/// scrolling content pane on the right that centers its column at
+/// `maxWidth: 620`. The selected category is persisted across launches
+/// in `@AppStorage("yawac.settings.lastCategory")` — reopening Settings
+/// lands on the panel you last touched.
+///
+/// Each panel is its own file under `Views/Settings/Panels/` and pulls
+/// the view-models it actually needs out of `@Environment`; only those
+/// that read `TranslationViewModel` / `SessionViewModel` get them
+/// passed through, so the rail panes (General / Display) stay cheap
+/// to render.
+///
+/// `NavigationSplitView` styling notes:
+/// - `.navigationSplitViewColumnWidth(200)` pins the rail at exactly
+///   200pt; `.frame(minWidth: 880, minHeight: 600)` keeps the content
+///   pane breathable. The window itself isn't `.hiddenInset` (that
+///   would require a `WindowGroup` modifier the app doesn't expose
+///   here) — the standard macOS title bar sits above both columns.
+///   This is the one spec deviation worth flagging.
+/// - `SettingsPalette.bg` is set on the outermost background so the
+///   gap between the two columns (the rare layouts where it shows)
+///   matches the rest of the window instead of system gray.
 struct SettingsView: View {
     @Environment(TranslationViewModel.self) private var translation
     @Environment(SessionViewModel.self) private var session
 
-    @AppStorage("yawac.translate.targetLang")
-    private var targetLang: String = "en"
-    @AppStorage(UIScaleStep.storageKey) private var scaleStepRaw = UIScaleStep.default.rawValue
-    @State private var showLinkedDevices = false
-    @State private var showPrivacy = false
+    @AppStorage("yawac.settings.lastCategory")
+    private var lastCategory: String = SettingsCategory.general.rawValue
 
-    private static let languages: [(code: String, name: String)] = [
-        ("en", "English"), ("de", "German"), ("fi", "Finnish"),
-        ("ru", "Russian"), ("fr", "French"), ("es", "Spanish"),
-        ("it", "Italian"), ("pt", "Portuguese"), ("nl", "Dutch"),
-        ("zh", "Chinese"), ("ja", "Japanese"), ("ko", "Korean"),
-        ("ar", "Arabic"), ("tr", "Turkish"), ("uk", "Ukrainian"),
-        ("pl", "Polish"), ("sv", "Swedish"), ("no", "Norwegian"),
-        ("da", "Danish"), ("el", "Greek"), ("he", "Hebrew"),
-        ("hi", "Hindi"), ("id", "Indonesian"), ("ms", "Malay"),
-        ("ro", "Romanian"), ("cs", "Czech"), ("hu", "Hungarian"),
-        ("bg", "Bulgarian"), ("th", "Thai"), ("vi", "Vietnamese"),
-    ]
+    private var selection: SettingsCategory {
+        SettingsCategory(rawValue: lastCategory) ?? .general
+    }
 
-    var body: some View {
-        Form {
-            Section("Display") {
-                let step = UIScaleStep.from(scaleStepRaw)
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Text("Interface size")
-                        Spacer()
-                        Text(step.label).foregroundStyle(.secondary)
-                    }
-                    Slider(
-                        value: Binding(
-                            get: { Double(scaleStepRaw) },
-                            set: { scaleStepRaw = UIScaleStep.from(Int($0.rounded())).rawValue }
-                        ),
-                        in: 0...Double(UIScaleStep.allCases.count - 1),
-                        step: 1
-                    )
-                    Text("Aa  The quick brown fox")
-                        .scaledUI(14)
-                        .environment(\.uiScaleFactor, step.scaleFactor)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            Section("Translation") {
-                Picker("Target language", selection: $targetLang) {
-                    ForEach(Self.languages, id: \.code) { lang in
-                        Text(lang.name).tag(lang.code)
-                    }
-                }
-            }
-
-            Section("Never translate") {
-                if translation.denylist.isEmpty {
-                    Text("No languages excluded.")
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(Array(translation.denylist).sorted(), id: \.self) { code in
-                        HStack {
-                            Text(Locale.current.localizedString(
-                                forLanguageCode: code) ?? code)
-                            Spacer()
-                            Button("Remove") {
-                                translation.allowLanguage(code)
-                            }
-                        }
-                    }
-                }
-                Menu("Add language") {
-                    ForEach(Self.languages, id: \.code) { lang in
-                        if !translation.denylist.contains(lang.code) {
-                            Button(lang.name) {
-                                translation.denyLanguage(lang.code)
-                            }
-                        }
-                    }
-                }
-            }
-
-            Section("Blocked contacts") {
-                if session.blockedJIDs.isEmpty {
-                    Text("No blocked contacts.")
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(session.blockedJIDs.sorted(), id: \.self) { jid in
-                        HStack {
-                            Text(session.displayName(for: jid))
-                            Spacer()
-                            Button("Unblock") {
-                                session.setBlocked(jid, blocked: false)
-                            }
-                        }
-                    }
-                }
-            }
-
-            Section("Translation model") {
-                modelSection
-            }
-
-            Section("Account") {
-                Button {
-                    showLinkedDevices = true
-                } label: {
-                    HStack {
-                        Image(systemName: "laptopcomputer.and.iphone")
-                            .foregroundStyle(.secondary)
-                        Text("Linked devices…")
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
-                    }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .disabled(session.state != .ready)
-
-                Button {
-                    showPrivacy = true
-                } label: {
-                    HStack {
-                        Image(systemName: "lock.shield")
-                            .foregroundStyle(.secondary)
-                        Text("Privacy…")
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
-                    }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .disabled(session.state != .ready)
+    enum SettingsCategory: String, CaseIterable, Identifiable {
+        case general, display, translation, privacy, blocked, account
+        var id: String { rawValue }
+        var label: String {
+            switch self {
+            case .general:     return "General"
+            case .display:     return "Display"
+            case .translation: return "Translation"
+            case .privacy:     return "Privacy"
+            case .blocked:     return "Blocked"
+            case .account:     return "Account"
             }
         }
-        .formStyle(.grouped)
-        .frame(minWidth: 460, minHeight: 420)
+        var icon: String {
+            switch self {
+            case .general:     return "gearshape"
+            case .display:     return "display"
+            case .translation: return "globe"
+            case .privacy:     return "lock"
+            case .blocked:     return "nosign"
+            case .account:     return "person.crop.circle"
+            }
+        }
+    }
+
+    var body: some View {
+        NavigationSplitView {
+            sidebarColumn
+                .navigationSplitViewColumnWidth(200)
+        } detail: {
+            contentColumn
+        }
+        .background(SettingsPalette.bg)
+        .frame(minWidth: 880, minHeight: 600)
         .onAppear {
             translation.model.refreshState()
             session.loadBlocklist()
         }
-        .sheet(isPresented: $showLinkedDevices) {
-            LinkedDevicesSheet()
-                .environment(session)
+    }
+
+    // MARK: - Sidebar
+
+    private var sidebarColumn: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Settings")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(SettingsPalette.text)
+                .padding(.horizontal, 14)
+                .padding(.top, 18)
+            VStack(spacing: 2) {
+                ForEach(SettingsCategory.allCases) { cat in
+                    sidebarRow(cat)
+                }
+            }
+            .padding(.horizontal, 8)
+            Spacer()
         }
-        .sheet(isPresented: $showPrivacy) {
-            PrivacySettingsSheet()
-                .environment(session)
-        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(SettingsPalette.sidebarBg)
     }
 
     @ViewBuilder
-    private var modelSection: some View {
-        switch translation.model.state {
-        case .absent:
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Model not installed.")
-                    .foregroundStyle(.secondary)
-                Button("Download (≈ 2.3 GB)") {
-                    Task { await translation.model.download() }
+    private func sidebarRow(_ cat: SettingsCategory) -> some View {
+        let active = selection == cat
+        Button {
+            lastCategory = cat.rawValue
+        } label: {
+            HStack(spacing: 9) {
+                Image(systemName: cat.icon)
+                    .font(.system(size: 15))
+                    .foregroundStyle(active ? SettingsPalette.accent
+                                            : SettingsPalette.textMuted)
+                    .frame(width: 18)
+                Text(cat.label)
+                    .font(.system(size: 13.5))
+                    .foregroundStyle(active ? SettingsPalette.accentText
+                                            : SettingsPalette.text)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 9)
+            .padding(.vertical, 7)
+            .background(active ? SettingsPalette.accentSoft : .clear,
+                        in: RoundedRectangle(cornerRadius: 7))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Content column
+
+    private var contentColumn: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text(selection.label)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(SettingsPalette.text)
+                Spacer()
+            }
+            .padding(.horizontal, 28)
+            .padding(.vertical, 12)
+            .frame(height: 44)
+            .background(SettingsPalette.bg)
+            .overlay(alignment: .bottom) {
+                Rectangle()
+                    .fill(SettingsPalette.hairline)
+                    .frame(height: 1)
+            }
+
+            ScrollView {
+                VStack(spacing: 26) {
+                    panelBody
                 }
-                .buttonStyle(.borderedProminent)
+                .frame(maxWidth: 620)
+                .padding(.horizontal, 24)
+                .padding(.vertical, 28)
+                .frame(maxWidth: .infinity)
             }
-        case .downloading(let p):
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Downloading model…")
-                ProgressView(value: p)
-            }
-        case .ready(let url):
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Installed at \(url.lastPathComponent)")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                HStack {
-                    Button("Update") {
-                        Task {
-                            await translation.model.delete()
-                            await translation.model.download()
-                        }
-                    }
-                    Button("Delete") {
-                        Task { await translation.model.delete() }
-                    }
-                    .foregroundStyle(.red)
-                }
-            }
-        case .failed(let msg):
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Error: \(msg)").foregroundStyle(.red)
-                Button("Retry") {
-                    Task { await translation.model.download() }
-                }
-            }
+        }
+        .background(SettingsPalette.bg)
+    }
+
+    @ViewBuilder
+    private var panelBody: some View {
+        switch selection {
+        case .general:     GeneralPanel()
+        case .display:     DisplayPanel()
+        case .translation: TranslationPanel().environment(translation)
+        case .privacy:     PrivacyPanel().environment(session)
+        case .blocked:     BlockedPanel().environment(session)
+        case .account:     AccountPanel().environment(session)
         }
     }
 }
