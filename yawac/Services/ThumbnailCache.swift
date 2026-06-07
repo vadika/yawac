@@ -32,8 +32,14 @@ final class ThumbnailCache {
         c.totalCostLimit = 32 * 1024 * 1024  // ~32 MB of thumb NSImage backing
         return c
     }()
-    private var inflight: Set<String> = []
-    private var videoInflight: Set<String> = []
+    // Must be @ObservationIgnored. The @Observable macro otherwise tracks
+    // every `var` and the inflight insert/remove inside `image(forPath:)` /
+    // `storeXxx` triggers willSet → ObservationCenter.invalidate → body
+    // re-eval → another inflight insert → ... runaway CPU loop (sampled
+    // post-v0.9.35 at 146% CPU with main thread stuck in
+    // ObservationRegistrar.willSet). Only `revision` should be observed.
+    @ObservationIgnored private var inflight: Set<String> = []
+    @ObservationIgnored private var videoInflight: Set<String> = []
     /// Bumped whenever a burst of decoded images settles. Views that read
     /// this participate in observation and will re-render when new images
     /// arrive. Coalesced via `scheduleRevisionBump()` so N near-simultaneous
@@ -159,7 +165,7 @@ final class ThumbnailCache {
         c.totalCostLimit = 16 * 1024 * 1024
         return c
     }()
-    private var avatarInflight: Set<String> = []
+    @ObservationIgnored private var avatarInflight: Set<String> = []
 
     /// Returns the cached avatar `NSImage` for `key` (a canonical JID
     /// cache key — caller's responsibility to canonicalize). On miss,
@@ -239,7 +245,7 @@ final class ThumbnailCache {
         c.totalCostLimit = 32 * 1024 * 1024
         return c
     }()
-    private var mapInflight: Set<String> = []
+    @ObservationIgnored private var mapInflight: Set<String> = []
 
     /// Returns the cached map snapshot `NSImage` for `(lat, lng)`. On
     /// miss, schedules a detached load through `MapSnapshotCache` and
