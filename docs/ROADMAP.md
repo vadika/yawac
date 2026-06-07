@@ -205,6 +205,43 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **Video thumb cache + 4-way preheat (F11+F12)** (v0.9.34) —
+  extended the F10 pattern across every remaining
+  `@State NSImage?` + `.task(id:)` view.
+    - **F11 (video).** `VideoThumbnailView` previously kept a
+      per-instance `@State thumb` and async-loaded inside
+      `.task(id: path)` — even on SHA disk-cache HIT, every
+      bubble flashed a gray placeholder for one frame before the
+      `NSImage` landed. `ThumbnailCache` now owns a second
+      `NSCache<NSString,NSImage>` for video thumbs with
+      `videoImage(forPath:)` (synchronous get) and
+      `preheatVideo(_:)` (snapshot-time warm-up). The cache
+      shares the existing 50 ms-coalesced revision bump.
+      `VideoThumbnailView`'s body is now a pure cache read.
+      `buildHistorySnapshot` ferries the last ~30 video rows'
+      SHA-cached PNG `Data` (5 MB per-file cap);
+      `applyHistorySnapshot` preheats before assigning
+      `self.messages`.
+    - **F12 (avatars, replies, shared-media, maps).** Same
+      pattern existed in `AvatarView` (every chat row + every
+      message row), `ReplyPreview.ReplyThumb` (every replied-to
+      message), `SharedMediaCell` (chat-info media grid), and
+      `MessageRow.MapSnapshotImage` (location bubbles).
+      `ThumbnailCache` gained separate caches for avatars
+      (countLimit 512, 16 MB) and maps (64, 32 MB), plus
+      `avatarImage(forCacheKey:fetcher:)`, `invalidateAvatar`,
+      `mapImage(lat:lng:)`, and `preheatAvatar(_:)`. All four
+      views now read the cache directly; the per-instance
+      `@State` + `.task(id:)` flicker sources are gone.
+      `AvatarView` still subscribes to the existing
+      `.avatarCacheInvalidated` `NotificationCenter` broadcast
+      and routes it through `ThumbnailCache.invalidateAvatar`.
+      `buildHistorySnapshot` additionally collects up to 60
+      distinct sender-avatar disk `Data` blobs (5 MB per-file
+      cap) from the last visible window;
+      `applyHistorySnapshot` preheats them BEFORE the messages
+      assignment.
+
 - ✅ **Thumbnail batched revision + visible-window preheat (F10)**
   (v0.9.33) — `ThumbnailCache` previously bumped `revision &+= 1`
   per decode. A chat with N visible images triggered N row-body
