@@ -205,6 +205,21 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **ThumbnailCache observation-loop hotfix (F14)** (v0.9.36) —
+  v0.9.35 install showed 146% CPU + 1.9 GB RAM under load.
+  `sample` revealed the main thread pinned in a SwiftUI
+  Observation cascade:
+  `GraphHost.flushTransactions → ViewBodyAccessor.updateBody →
+  ObservationRegistrar.willSet → ObservationCenter.invalidate`
+  on repeat. Root cause: `ThumbnailCache` is `@Observable`, but
+  the four `inflight: Set<String>` properties (image, video,
+  avatar, map) were plain `private var`, so the macro auto-tracked
+  them. Every body eval that called `cache.image(forPath:)` etc.
+  inserted into the inflight Set, fired `willSet`, invalidated
+  every observer, re-evaluated the body, inserted again — runaway
+  loop. Marked all four sets `@ObservationIgnored`. Sustained CPU
+  drops from 146% to 0% on the same workload.
+
 - ✅ **Bubble layout fixes (F13)** (v0.9.35) — surfaced during
   F1–F12 smoke. `MessageRow.imageBubble` /  `stickerBubble`
   used `RoundedRectangle.fill().frame(maxWidth: ..., maxHeight: ...)`
