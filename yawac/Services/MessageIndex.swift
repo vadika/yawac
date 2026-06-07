@@ -409,6 +409,39 @@ final class MessageIndex {
         }.value
     }
 
+    /// UserDefaults key holding the fingerprint of the inputs that
+    /// fed the last successful `forceRebootstrap`. `rebootstrapIfFingerprintChanged`
+    /// only rebuilds when the live fingerprint differs from this value.
+    private static let bootstrapFingerprintKey =
+        "yawac.MessageIndex.lastBootstrapFingerprint"
+
+    /// Snapshot of the inputs that affect FTS row contents
+    /// (`canonicalVersion | ownPushName | ownBareJID`). Used to gate
+    /// `forceRebootstrap` on real state change — a `.connected` that
+    /// arrives with the same inputs as the last full bootstrap is a
+    /// no-op for the index.
+    func currentFingerprint() -> String {
+        queue.sync {
+            let pn  = ownPushName
+            let jid = ownBareJID
+            let ver = JIDNormalize.canonicalVersion
+            return "\(ver)|\(pn)|\(jid)"
+        }
+    }
+
+    /// Calls `forceRebootstrap()` only when the current fingerprint
+    /// differs from the value stored at the last successful rebuild.
+    /// The persisted fingerprint is written **after** the rebuild
+    /// completes, so a crash mid-rebuild re-runs on the next launch.
+    func rebootstrapIfFingerprintChanged() async {
+        let fp = currentFingerprint()
+        let last = UserDefaults.standard
+            .string(forKey: Self.bootstrapFingerprintKey)
+        guard fp != last else { return }
+        await forceRebootstrap()
+        UserDefaults.standard.set(fp, forKey: Self.bootstrapFingerprintKey)
+    }
+
     /// Wipes the FTS5 table and re-walks ZPERSISTEDMESSAGE. Use after
     /// state that affects `senderJIDForIndex` (own JID, canonicalizer)
     /// arrives later than the initial bootstrap pass.

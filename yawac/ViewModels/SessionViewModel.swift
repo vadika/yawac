@@ -521,11 +521,16 @@ final class SessionViewModel {
                 // with empty / device-suffixed sender_jid and LID /
                 // PN siblings of the same contact got separate ids.
                 // Rebuild once per session now that the setters are
-                // primed.
+                // primed, but only when the inputs that feed the FTS
+                // row contents (ownJID, ownPushName, canonicalizer
+                // version) have actually changed since the last
+                // bootstrap — otherwise every reconnect would drop +
+                // repopulate the whole table for no reason.
                 if !didRebootstrapMessageIndex {
                     didRebootstrapMessageIndex = true
                     Task.detached(priority: .utility) {
-                        await MessageIndex.shared.forceRebootstrap()
+                        await MessageIndex.shared
+                            .rebootstrapIfFingerprintChanged()
                     }
                 }
             }

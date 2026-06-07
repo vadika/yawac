@@ -42,6 +42,13 @@ protocol LIDResolving: AnyObject {
 /// populated lazily; `same(a, b)` may return false today and true tomorrow
 /// once a relevant group event lands. Plan for that.
 enum JIDNormalize {
+    /// Version stamp for the canonicalizer's behaviour. Bumped whenever
+    /// `canonical` / `key` / `same` change in a way that affects how a
+    /// JID gets indexed (e.g. new LID→PN resolution semantics). Feeds
+    /// `MessageIndex.currentFingerprint()` so a behaviour change forces
+    /// exactly one FTS rebuild on the next `.connected`.
+    static let canonicalVersion = "2026-06-07-v1"
+
     /// Strips a `:<device>` suffix from the user portion of a JID.
     static func bare(_ jid: String) -> String {
         guard let at = jid.firstIndex(of: "@") else { return jid }
