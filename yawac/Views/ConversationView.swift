@@ -358,6 +358,12 @@ struct ConversationView: View {
                     ScrollViewReader { proxy in
                         ScrollView {
                             LazyVStack(spacing: 6) {
+                                // F9: LazyVStack instantiates rows starting
+                                // from the anchor edge. .defaultScrollAnchor(.bottom)
+                                // below makes that the newest message, so the
+                                // top-of-array (oldest) rows don't get laid out
+                                // on first paint and the user doesn't see the
+                                // "oldest-first then jump to bottom" flash.
                                 if !vm.olderUnavailable {
                                     HStack {
                                         Spacer()
@@ -467,6 +473,7 @@ struct ConversationView: View {
                             .padding(.horizontal, 26)
                             .padding(.vertical, 8)
                         }
+                        .defaultScrollAnchor(.bottom)
                         .background(Theme.bg)
                         .overlay(alignment: .bottomTrailing) {
                             if !atBottom, let last = vm.messages.last {

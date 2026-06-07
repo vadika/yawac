@@ -551,7 +551,7 @@ final class ConversationViewModel {
     /// rows remain in storage and can be paged in later.
     /// First-paint cap. Lower than `extendedHistoryLimit` so chat-switch
     /// stays snappy; older rows page in via `loadMoreHistory` on scroll.
-    static let historyLoadLimit = 150
+    static let historyLoadLimit = 60
     static let extendedHistoryLimit = 500
 
     /// Message id to anchor the initial scroll position to. Set in
