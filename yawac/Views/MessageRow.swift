@@ -1093,11 +1093,16 @@ struct MessageRow: View {
 private struct MapSnapshotImage: View {
     let lat: Double
     let lng: Double
-    @State private var image: NSImage?
 
     var body: some View {
+        // Shared in-memory cache + coalesced revision bump avoids the
+        // per-instance @State flip + .task(id:) flicker on every
+        // location bubble on scroll (F12). Underlying snapshot source
+        // is still `MapSnapshotCache`.
+        let cache = ThumbnailCache.shared
+        let _ = cache.revision
         Group {
-            if let img = image {
+            if let img = cache.mapImage(lat: lat, lng: lng) {
                 Image(nsImage: img).resizable().aspectRatio(contentMode: .fill)
             } else {
                 ZStack {
@@ -1105,9 +1110,6 @@ private struct MapSnapshotImage: View {
                     ProgressView().controlSize(.small)
                 }
             }
-        }
-        .task(id: "\(lat),\(lng)") {
-            image = await MapSnapshotCache.shared.snapshot(lat: lat, lng: lng)
         }
     }
 }

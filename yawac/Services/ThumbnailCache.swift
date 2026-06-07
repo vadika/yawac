@@ -20,11 +20,26 @@ final class ThumbnailCache {
         c.totalCostLimit = 64 * 1024 * 1024  // ~64 MB of NSImage backing
         return c
     }()
+    /// Separate NSCache for video bubble thumbnails. Decoded PNGs from
+    /// the SHA disk cache are tiny (480x480 cap) and we want many of
+    /// them resident — a chat with lots of forwarded clips can blow
+    /// past 256 entries quickly. Lower per-image cost lets us pack the
+    /// budget tighter without evicting decoded images bubbles still
+    /// need on screen.
+    private let videoCache: NSCache<NSString, NSImage> = {
+        let c = NSCache<NSString, NSImage>()
+        c.countLimit = 256
+        c.totalCostLimit = 32 * 1024 * 1024  // ~32 MB of thumb NSImage backing
+        return c
+    }()
     private var inflight: Set<String> = []
+    private var videoInflight: Set<String> = []
     /// Bumped whenever a burst of decoded images settles. Views that read
     /// this participate in observation and will re-render when new images
     /// arrive. Coalesced via `scheduleRevisionBump()` so N near-simultaneous
-    /// decodes produce a single re-render instead of N.
+    /// decodes produce a single re-render instead of N. Shared between the
+    /// image and video caches so an image OR a video landing wakes every
+    /// observer at once — same body re-eval covers both bubble kinds.
     private(set) var revision: Int = 0
     /// In-flight 50ms coalescing task. `@ObservationIgnored` keeps it out
     /// of the observation graph — touching it must not invalidate views.
@@ -45,6 +60,28 @@ final class ThumbnailCache {
         return nil
     }
 
+    /// Returns a cached video thumbnail `NSImage` for the source video
+    /// `path` (NOT the SHA disk-cache PNG path — the cache translates
+    /// internally). On miss, schedules a detached load that consults
+    /// the existing SHA disk cache first and falls back to AVAsset
+    /// generation only if no PNG is on disk. Once the load completes
+    /// the cache stores the result and schedules a coalesced `revision`
+    /// bump shared with `image(forPath:)` so observers redraw.
+    func videoImage(forPath path: String) -> NSImage? {
+        if let hit = videoCache.object(forKey: path as NSString) { return hit }
+        if videoInflight.contains(path) { return nil }
+        videoInflight.insert(path)
+        Task.detached(priority: .userInitiated) { [weak self] in
+            // generateThumb chains disk-cache → AVAsset generate, exactly
+            // what the old view's `.task` did — kept off MainActor so the
+            // SHA hash + file read + (worst case) AVAssetImageGenerator
+            // spin-up never block the UI.
+            let img = await VideoThumbnailView.generateThumb(path: path)
+            await self?.storeVideo(path: path, image: img)
+        }
+        return nil
+    }
+
     /// Synchronously decode and store raw file `Data` → `NSImage` entries.
     /// Called by `ConversationViewModel.applyHistorySnapshot` to warm the
     /// cache for the visible bottom window of messages BEFORE the
@@ -60,6 +97,21 @@ final class ThumbnailCache {
         }
     }
 
+    /// Synchronously decode and store SHA-disk-cache PNG `Data` → NSImage
+    /// entries into the video thumbnail cache, keyed by SOURCE video path
+    /// (not the SHA PNG path). Same no-revision-bump contract as
+    /// `preheat(_:)`: called from `applyHistorySnapshot` BEFORE
+    /// `self.messages` lands, so the first body eval of every
+    /// VideoThumbnailView sees the cache already populated.
+    func preheatVideo(_ pairs: [String: Data]) {
+        for (path, data) in pairs {
+            if videoCache.object(forKey: path as NSString) != nil { continue }
+            guard let img = NSImage(data: data) else { continue }
+            let cost = Int(img.size.width * img.size.height * 4)
+            videoCache.setObject(img, forKey: path as NSString, cost: cost)
+        }
+    }
+
     private func store(path: String, image: NSImage?) {
         inflight.remove(path)
         guard let image else { return }
@@ -68,6 +120,14 @@ final class ThumbnailCache {
         // by countLimit in any case.
         let cost = Int(image.size.width * image.size.height * 4)
         cache.setObject(image, forKey: path as NSString, cost: cost)
+        scheduleRevisionBump()
+    }
+
+    private func storeVideo(path: String, image: NSImage?) {
+        videoInflight.remove(path)
+        guard let image else { return }
+        let cost = Int(image.size.width * image.size.height * 4)
+        videoCache.setObject(image, forKey: path as NSString, cost: cost)
         scheduleRevisionBump()
     }
 
@@ -84,5 +144,124 @@ final class ThumbnailCache {
             self.pendingBump = nil
             self.revision &+= 1
         }
+    }
+
+    // MARK: - Avatars
+
+    /// Per-person NSImage cache keyed by the canonical JID cache key.
+    /// `AvatarView` is on every chat row and every message row in a
+    /// group thread — keeping decoded NSImages resident avoids
+    /// redundant disk + decode on every scroll. countLimit 512 covers
+    /// large group threads; the 16 MB byte budget caps memory.
+    private let avatarCache: NSCache<NSString, NSImage> = {
+        let c = NSCache<NSString, NSImage>()
+        c.countLimit = 512
+        c.totalCostLimit = 16 * 1024 * 1024
+        return c
+    }()
+    private var avatarInflight: Set<String> = []
+
+    /// Returns the cached avatar `NSImage` for `key` (a canonical JID
+    /// cache key — caller's responsibility to canonicalize). On miss,
+    /// schedules a detached load: try the on-disk file
+    /// (`AvatarCache.cachedURL`) first; if absent, fall back to the
+    /// supplied `fetcher` closure which is expected to go through
+    /// `AvatarCache.shared.ensure(jid:using:)` (the actor + bridge
+    /// path). Once the decode lands the cache stores the result and
+    /// schedules a coalesced `revision` bump shared with the image and
+    /// video caches.
+    ///
+    /// The closure exists so `ThumbnailCache` doesn't need to know
+    /// about `WAClient` — the view passes its session client in.
+    func avatarImage(forCacheKey key: String,
+                     fetcher: @escaping @Sendable () async -> URL?) -> NSImage? {
+        if let hit = avatarCache.object(forKey: key as NSString) { return hit }
+        if avatarInflight.contains(key) { return nil }
+        avatarInflight.insert(key)
+        Task.detached(priority: .userInitiated) { [weak self] in
+            // Disk fast path: existing AvatarCache.cachedURL is
+            // nonisolated static, safe to call from any thread.
+            let img: NSImage? = await {
+                if let url = AvatarCache.cachedURL(for: key),
+                   FileManager.default.fileExists(atPath: url.path),
+                   let i = NSImage(contentsOf: url) {
+                    return i
+                }
+                guard let url = await fetcher() else { return nil }
+                return NSImage(contentsOf: url)
+            }()
+            await self?.storeAvatar(key: key, image: img)
+        }
+        return nil
+    }
+
+    private func storeAvatar(key: String, image: NSImage?) {
+        avatarInflight.remove(key)
+        guard let image else { return }
+        let cost = Int(image.size.width * image.size.height * 4)
+        avatarCache.setObject(image, forKey: key as NSString, cost: cost)
+        scheduleRevisionBump()
+    }
+
+    /// Drop the cached avatar for `key` so the next body eval misses
+    /// and the load path re-runs (after the on-disk file has been
+    /// removed by `AvatarCache.invalidate(jid:)`).
+    func invalidateAvatar(forCacheKey key: String) {
+        avatarCache.removeObject(forKey: key as NSString)
+        avatarInflight.remove(key)
+        scheduleRevisionBump()
+    }
+
+    /// Synchronously decode + store raw avatar file `Data` → `NSImage`
+    /// entries keyed by canonical JID cache key. Called by
+    /// `applyHistorySnapshot` before `self.messages` lands so every
+    /// `AvatarView`'s first body eval hits the in-memory cache.
+    func preheatAvatar(_ pairs: [String: Data]) {
+        for (key, data) in pairs {
+            if avatarCache.object(forKey: key as NSString) != nil { continue }
+            guard let img = NSImage(data: data) else { continue }
+            let cost = Int(img.size.width * img.size.height * 4)
+            avatarCache.setObject(img, forKey: key as NSString, cost: cost)
+        }
+    }
+
+    // MARK: - Maps
+
+    /// NSImage cache for the location-bubble map snapshot keyed by
+    /// `"lat,lng"`. The underlying `MapSnapshotCache` already has its
+    /// own memory + disk layers, but every location bubble's
+    /// `.task(id:)` re-runs on body recreation and the actor hop +
+    /// hash format alone shows up in scroll profiles. countLimit 64
+    /// covers a busy chat's worth of pins; 32 MB budget caps memory.
+    private let mapCache: NSCache<NSString, NSImage> = {
+        let c = NSCache<NSString, NSImage>()
+        c.countLimit = 64
+        c.totalCostLimit = 32 * 1024 * 1024
+        return c
+    }()
+    private var mapInflight: Set<String> = []
+
+    /// Returns the cached map snapshot `NSImage` for `(lat, lng)`. On
+    /// miss, schedules a detached load through `MapSnapshotCache` and
+    /// returns nil; the coalesced `revision` bump wakes observers once
+    /// the snapshot lands.
+    func mapImage(lat: Double, lng: Double) -> NSImage? {
+        let key = "\(lat),\(lng)"
+        if let hit = mapCache.object(forKey: key as NSString) { return hit }
+        if mapInflight.contains(key) { return nil }
+        mapInflight.insert(key)
+        Task.detached(priority: .userInitiated) { [weak self] in
+            let img = await MapSnapshotCache.shared.snapshot(lat: lat, lng: lng)
+            await self?.storeMap(key: key, image: img)
+        }
+        return nil
+    }
+
+    private func storeMap(key: String, image: NSImage?) {
+        mapInflight.remove(key)
+        guard let image else { return }
+        let cost = Int(image.size.width * image.size.height * 4)
+        mapCache.setObject(image, forKey: key as NSString, cost: cost)
+        scheduleRevisionBump()
     }
 }

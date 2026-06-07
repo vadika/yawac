@@ -20,6 +20,25 @@ struct ConversationHistorySnapshot: Sendable {
     /// builder; using `Data` (not `NSImage`) keeps the snapshot
     /// `Sendable`.
     let preheatThumbs: [String: Data]
+    /// Raw PNG bytes for the last ~30 video rows whose SHA disk cache
+    /// already exists — keyed by the SOURCE video file path (NOT the
+    /// SHA PNG path; the cache key matches what
+    /// `ThumbnailCache.videoImage(forPath:)` is called with at body
+    /// time). Consumed by `ThumbnailCache.preheatVideo(_:)` BEFORE
+    /// `self.messages = ...` so the LazyVStack's first paint of video
+    /// bubbles in the visible window hits the in-memory cache
+    /// synchronously instead of flashing a gray placeholder for one
+    /// frame. Capped at 30 entries / 5 MB per file by the builder.
+    let preheatVideoThumbs: [String: Data]
+    /// Raw avatar JPEG bytes for the distinct senders in the last
+    /// visible message window — keyed by canonical JID cache key. The
+    /// highest-impact preheat since every message row has an
+    /// `AvatarView` and group threads contain many distinct senders.
+    /// Consumed by `ThumbnailCache.preheatAvatar(_:)` BEFORE
+    /// `self.messages = ...` so the first paint hits the in-memory
+    /// cache (F12). Capped at 60 entries / 5 MB per file by the
+    /// builder.
+    let preheatAvatars: [String: Data]
     let initialAnchorID: String?
     let unreadInboundIDs: Set<String>
     /// Messages whose media is still missing and need a download kicked

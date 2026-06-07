@@ -9,7 +9,6 @@ import SwiftUI
 struct SharedMediaCell: View {
     let item: ChatMediaViewModel.MediaItem
     var onTap: ((String, String?) -> Void)? = nil
-    @State private var image: NSImage?
 
     private var badgeText: String {
         switch item.kind {
@@ -22,10 +21,21 @@ struct SharedMediaCell: View {
     var body: some View {
         Button(action: open) {
             GeometryReader { geo in
+                // Shared cache + coalesced revision: media-grid cells
+                // populate without a per-cell @State flip (F12).
+                let cache = ThumbnailCache.shared
+                let _ = cache.revision
+                let img: NSImage? = {
+                    guard let p = item.path, !p.isEmpty,
+                          FileManager.default.fileExists(atPath: p) else { return nil }
+                    return item.kind == "video"
+                        ? cache.videoImage(forPath: p)
+                        : cache.image(forPath: p)
+                }()
                 ZStack {
                     Theme.surfaceAlt
-                    if let image {
-                        Image(nsImage: image)
+                    if let img {
+                        Image(nsImage: img)
                             .resizable()
                             .scaledToFill()
                             .frame(width: geo.size.width, height: geo.size.width)
@@ -35,7 +45,7 @@ struct SharedMediaCell: View {
                             .scaledIcon(18)
                             .foregroundStyle(Theme.textFaint)
                     }
-                    if item.kind == "video", image != nil {
+                    if item.kind == "video", img != nil {
                         Image(systemName: "play.fill")
                             .scaledIcon(18, weight: .bold)
                             .foregroundStyle(.white)
@@ -67,9 +77,6 @@ struct SharedMediaCell: View {
         }
         .buttonStyle(.plain)
         .help(item.timestamp.formatted(date: .abbreviated, time: .shortened))
-        .task(id: "\(item.id)|\(item.path ?? "")") {
-            await load()
-        }
     }
 
     private var placeholderIcon: String {
@@ -77,19 +84,6 @@ struct SharedMediaCell: View {
         case "video":   return "play.rectangle"
         case "sticker": return "face.smiling"
         default:        return "photo"
-        }
-    }
-
-    private func load() async {
-        guard let path = item.path, !path.isEmpty,
-              FileManager.default.fileExists(atPath: path) else {
-            image = nil
-            return
-        }
-        if item.kind == "video" {
-            image = await VideoThumbnailView.generateThumb(path: path)
-        } else {
-            image = NSImage(contentsOfFile: path)
         }
     }
 
