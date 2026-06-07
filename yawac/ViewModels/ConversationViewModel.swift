@@ -604,6 +604,12 @@ final class ConversationViewModel {
         // hits the cache. Placing this AFTER the assignment would defeat
         // the point (F10).
         ThumbnailCache.shared.preheat(snap.preheatThumbs)
+        // Same contract for video bubbles: warm the in-memory cache
+        // from pre-existing SHA disk-cache PNG bytes BEFORE the
+        // LazyVStack lays out, so VideoThumbnailView's first body eval
+        // hits the cache instead of returning nil → gray placeholder →
+        // single-frame flicker once the async load lands (F11).
+        ThumbnailCache.shared.preheatVideo(snap.preheatVideoThumbs)
         let snapIDs = Set(snap.messages.map { $0.id })
         let lateArrivals = self.messages.filter { !snapIDs.contains($0.id) }
         if lateArrivals.isEmpty {
@@ -922,6 +928,31 @@ final class ConversationViewModel {
             preheatThumbs[path] = data
             preheatRemaining -= 1
         }
+        // Same preheat treatment for video bubbles: walk the last ~30
+        // video rows with on-disk media, look up the SHA disk-cache
+        // PNG path, read its bytes if present. Skip rows whose PNG
+        // hasn't been generated yet — the cache's async miss path
+        // will fall through to AVAsset generation on first paint.
+        // Caps mirror the image branch: 30 entries, 5 MB per file.
+        // Keyed by the SOURCE video file path (NOT the SHA PNG path),
+        // since that's what VideoThumbnailView passes to
+        // `videoImage(forPath:)` at body time. The Data values ARE
+        // the PNG bytes — ThumbnailCache decodes via NSImage(data:).
+        var preheatVideoThumbs: [String: Data] = [:]
+        var preheatVideoRemaining = preheatMaxCount
+        for p in displayable.reversed() {
+            if preheatVideoRemaining == 0 { break }
+            guard p.kind == "video" else { continue }
+            guard let sourcePath = localPaths[p.id] else { continue }
+            let pngURL = VideoThumbnailView.cachePath(for: sourcePath)
+            guard FileManager.default.fileExists(atPath: pngURL.path) else { continue }
+            if let size = (try? pngURL.resourceValues(forKeys: [.fileSizeKey]))?.fileSize,
+               size > preheatPerFileCap { continue }
+            guard let data = try? Data(contentsOf: pngURL) else { continue }
+            if data.count > preheatPerFileCap { continue }
+            preheatVideoThumbs[sourcePath] = data
+            preheatVideoRemaining -= 1
+        }
         let t3 = CFAbsoluteTimeGetCurrent()
         return ConversationHistorySnapshot(
             messages: messages,
@@ -930,6 +961,7 @@ final class ConversationViewModel {
             pollVotes: pollVotes,
             localPaths: localPaths,
             preheatThumbs: preheatThumbs,
+            preheatVideoThumbs: preheatVideoThumbs,
             initialAnchorID: initialAnchorID,
             unreadInboundIDs: unreadInboundIDs,
             downloadTargets: downloadTargets,

@@ -35,12 +35,23 @@ private actor AsyncSemaphore {
 
 struct VideoThumbnailView: View {
     let path: String
-    @State private var thumb: NSImage?
 
     var body: some View {
+        // Read `revision` so SwiftUI subscribes to ThumbnailCache via
+        // its @Observable conformance. When a miss completes (either
+        // disk-cache fetch or AVAsset generate), the cache bumps
+        // `revision` and this body re-evals, picking up the now-cached
+        // NSImage. No per-instance @State + .task — that pattern
+        // forced every bubble through a placeholder frame even on
+        // disk-cache HIT (one frame of gray per bubble, landing on
+        // different frames = flicker). The cache call itself kicks the
+        // background load on miss; preheat in applyHistorySnapshot
+        // fills the cache for the visible window before first paint.
+        let cache = ThumbnailCache.shared
+        let _ = cache.revision
         ZStack {
-            if let thumb {
-                Image(nsImage: thumb)
+            if let img = cache.videoImage(forPath: path) {
+                Image(nsImage: img)
                     .resizable()
                     .scaledToFit()
             } else {
@@ -50,21 +61,6 @@ struct VideoThumbnailView: View {
                 .font(.largeTitle)
                 .foregroundStyle(.white)
                 .shadow(radius: 2)
-        }
-        .task(id: path) {
-            if Task.isCancelled { return }
-            // Check disk cache first — avoids the AVAsset spin-up which
-            // hauls in `AVAssetInspectorLoader`, a render pipeline, and
-            // a one-frame decompression session per bubble. On a chat
-            // with N video bubbles this used to fire N times per open.
-            if let cached = await Self.loadFromDisk(path: path) {
-                self.thumb = cached
-                return
-            }
-            if Task.isCancelled { return }
-            let generated = await Self.generateAndCache(path: path)
-            if Task.isCancelled { return }
-            self.thumb = generated
         }
     }
 
@@ -82,7 +78,11 @@ struct VideoThumbnailView: View {
         return dir
     }()
 
-    private static func cachePath(for path: String) -> URL {
+    /// SHA disk-cache PNG path for a video source `path`. Exposed
+    /// `internal static` so `ConversationViewModel.buildHistorySnapshot`
+    /// can probe / read the pre-existing PNG bytes off-MainActor for the
+    /// in-memory `ThumbnailCache.preheatVideo` warm-up.
+    static func cachePath(for path: String) -> URL {
         let digest = SHA256.hash(data: Data(path.utf8))
         let name = digest.map { String(format: "%02x", $0) }.joined() + ".png"
         return cacheDir.appendingPathComponent(name)
