@@ -205,6 +205,23 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **CVM ingest coalesce + Set dedupe (F8)** (v0.9.31) —
+  follow-up to the F1–F7 audit. `ConversationViewModel.ingest`
+  previously ran per-event: O(n) `messages.contains(where:)` +
+  per-event `messages.append` + `invalidateTimeline()`. Bursts
+  during history-sync / reconnect drains painted the open chat
+  one message at a time. Now mirrors the F3 ChatList pattern:
+  50 ms flush window, single batched `messages.append(contentsOf:)`,
+  single `invalidateTimeline()`. Dedupe goes through a
+  `Set<String>` mirror of message ids (O(1) lookup; maintained
+  at all ~21 `messages.append/.insert` sites + rebuilt after
+  wholesale assignments in `applyHistorySnapshot` and
+  `loadEarlier`). Queue-side dedupe uses a separate
+  `pendingIngestIDs: Set<String>` so a 100-event burst stays
+  O(N) overall, not O(N²). `deinit` cancels any pending flush
+  task so a chat-switch mid-window doesn't leave 50 ms of dead
+  sleep around.
+
 - ✅ **Performance audit landings F1–F7** (v0.9.30) — Codex
   (gpt-5.4) audit findings sequenced as plan +
   subagent-driven execution. Plan at
