@@ -205,6 +205,19 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **Thumbnail batched revision + visible-window preheat (F10)**
+  (v0.9.33) — `ThumbnailCache` previously bumped `revision &+= 1`
+  per decode. A chat with N visible images triggered N row-body
+  re-evals over successive frames — visible as image flicker on
+  open. Now `store(path:image:)` schedules a single 50 ms-coalesced
+  revision bump per burst of decodes so sub-window decodes settle
+  into one re-render. Plus: `ConversationViewModel.buildHistorySnapshot`
+  reads raw file `Data` for the last ~30 image/sticker rows whose
+  media is on disk (per-file cap 5 MB). `applyHistorySnapshot`
+  calls `ThumbnailCache.preheat(_:)` BEFORE assigning `self.messages`,
+  so the `LazyVStack`'s first paint of visible image bubbles hits
+  the cache synchronously instead of starting from placeholders.
+
 - ✅ **Bottom-anchored chat scroll + smaller first slice (F9)**
   (v0.9.32) — `ConversationView`'s `LazyVStack` previously laid
   out from the top of the message array (oldest first), then a

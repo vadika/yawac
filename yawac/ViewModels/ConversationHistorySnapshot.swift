@@ -11,6 +11,15 @@ struct ConversationHistorySnapshot: Sendable {
     let reactionsBySender: [String: [String: String]]  // msgID → senderJID → emoji
     let pollVotes: [String: [String: Set<String>]]      // msgID → optionHash → voterJIDs
     let localPaths: [String: String]
+    /// Raw file bytes for the last ~30 image/sticker rows with on-disk
+    /// media — keyed by absolute path. Consumed by
+    /// `ThumbnailCache.preheat(_:)` BEFORE `self.messages = ...` so the
+    /// LazyVStack's first paint of visible image bubbles hits the
+    /// in-memory cache synchronously instead of starting from a
+    /// placeholder. Capped at 30 entries / 5 MB per file by the
+    /// builder; using `Data` (not `NSImage`) keeps the snapshot
+    /// `Sendable`.
+    let preheatThumbs: [String: Data]
     let initialAnchorID: String?
     let unreadInboundIDs: Set<String>
     /// Messages whose media is still missing and need a download kicked

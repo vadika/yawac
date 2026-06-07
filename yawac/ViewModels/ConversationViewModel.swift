@@ -594,6 +594,16 @@ final class ConversationViewModel {
     /// after the snapshot's newest row.
     @MainActor
     private func applyHistorySnapshot(_ snap: ConversationHistorySnapshot) {
+        // Warm the thumbnail cache for the visible bottom window BEFORE
+        // assigning `self.messages` — once messages publish, the
+        // LazyVStack starts laying out and the first body eval of each
+        // image bubble runs `ThumbnailCache.shared.image(forPath:)`. If
+        // the cache is cold that returns nil and the bubble paints a
+        // placeholder; the async decode landings then flicker images in
+        // one by one. Synchronous preheat here means the first body eval
+        // hits the cache. Placing this AFTER the assignment would defeat
+        // the point (F10).
+        ThumbnailCache.shared.preheat(snap.preheatThumbs)
         let snapIDs = Set(snap.messages.map { $0.id })
         let lateArrivals = self.messages.filter { !snapIDs.contains($0.id) }
         if lateArrivals.isEmpty {
@@ -882,6 +892,36 @@ final class ConversationViewModel {
                 unreadInboundIDs.insert(m.id)
             }
         }
+        // Preheat the in-memory thumbnail cache for the visible bottom
+        // window: the last ~30 image/sticker rows with on-disk media.
+        // Reading raw file Data here (off MainActor) lets
+        // `applyHistorySnapshot` populate `ThumbnailCache` synchronously
+        // before assigning `self.messages`, so the LazyVStack's first
+        // paint of visible bubbles hits the cache instead of starting
+        // from placeholders and popping in over successive decode
+        // landings (F10). Caps: 30 files, 5 MB per file — bounds memory
+        // for pathological attachments.
+        var preheatThumbs: [String: Data] = [:]
+        let preheatMaxCount = 30
+        let preheatPerFileCap = 5 * 1024 * 1024
+        var preheatRemaining = preheatMaxCount
+        // Iterate the persisted rows back-to-front: `displayable` is
+        // sorted oldest-first (mirrors `messages`), so the trailing
+        // entries are what `.defaultScrollAnchor(.bottom)` paints first.
+        for p in displayable.reversed() {
+            if preheatRemaining == 0 { break }
+            guard p.kind == "image" || p.kind == "sticker" else { continue }
+            guard let path = localPaths[p.id] else { continue }
+            let url = URL(fileURLWithPath: path)
+            // Skip oversize files: per-file cap protects against a
+            // forgotten 40 MB sticker pack dumping into RAM.
+            if let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize,
+               size > preheatPerFileCap { continue }
+            guard let data = try? Data(contentsOf: url) else { continue }
+            if data.count > preheatPerFileCap { continue }
+            preheatThumbs[path] = data
+            preheatRemaining -= 1
+        }
         let t3 = CFAbsoluteTimeGetCurrent()
         return ConversationHistorySnapshot(
             messages: messages,
@@ -889,6 +929,7 @@ final class ConversationViewModel {
             reactionsBySender: reactionsBySender,
             pollVotes: pollVotes,
             localPaths: localPaths,
+            preheatThumbs: preheatThumbs,
             initialAnchorID: initialAnchorID,
             unreadInboundIDs: unreadInboundIDs,
             downloadTargets: downloadTargets,
