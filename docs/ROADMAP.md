@@ -205,6 +205,22 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **Bubble layout fixes (F13)** (v0.9.35) — surfaced during
+  F1–F12 smoke. `MessageRow.imageBubble` /  `stickerBubble`
+  used `RoundedRectangle.fill().frame(maxWidth: ..., maxHeight: ...)`
+  for the cache-miss placeholder, but the fill has zero intrinsic
+  size so the bubble collapsed to a thin strip with only the
+  timestamp overlay visible. Switched to fixed
+  `.frame(width: 240, height: 180)` (image) and `140 × 140`
+  (sticker). Separately, `translatableText` wrapped each Text in
+  a VStack and rendered the Translate button below; multi-line
+  Text under-measured its wrapped height and SwiftUI laid the
+  Translate label on top of the last visible text line (visible
+  in long Russian-language reply messages). Added
+  `.fixedSize(horizontal: false, vertical: true)` to every
+  `baseStyle` branch so Text reports its real wrapped height;
+  bumped the VStack spacing 2 → 4.
+
 - ✅ **Video thumb cache + 4-way preheat (F11+F12)** (v0.9.34) —
   extended the F10 pattern across every remaining
   `@State NSImage?` + `.task(id:)` view.
