@@ -205,6 +205,18 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **Bottom-anchored chat scroll + smaller first slice (F9)**
+  (v0.9.32) — `ConversationView`'s `LazyVStack` previously laid
+  out from the top of the message array (oldest first), then a
+  `DispatchQueue.main.async` scroll-to-bottom fired one runloop
+  later. Users saw the oldest rows render briefly before the view
+  jumped to the newest. Added `.defaultScrollAnchor(.bottom)` so
+  the `LazyVStack` instantiates rows from the newest edge on
+  first paint. Dropped `ConversationViewModel.historyLoadLimit`
+  150 → 60 so the initial snapshot carries fewer rows for the
+  `LazyVStack` to lay out; older rows page in via the existing
+  `loadEarlier` path on scroll-up.
+
 - ✅ **CVM ingest coalesce + Set dedupe (F8)** (v0.9.31) —
   follow-up to the F1–F7 audit. `ConversationViewModel.ingest`
   previously ran per-event: O(n) `messages.contains(where:)` +
