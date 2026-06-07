@@ -780,23 +780,31 @@ struct MessageRow: View {
             }
             return raw
         }()
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: 4) {
+            // fixedSize(vertical) forces multi-line Text to report its
+            // natural wrapped height. Without it, the Text under-measures
+            // and the parent VStack lays the Translate button on top of
+            // the last text line.
             switch baseStyle {
             case .body:
                 Text(richText(from: displayed))
                     .scaledUI(13)
                     .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
             case .caption:
                 Text(displayed)
                     .scaledUI(12)
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
             case .pollQuestion:
                 Text(displayed)
                     .scaledUI(13, weight: .semibold)
+                    .fixedSize(horizontal: false, vertical: true)
             case .pollOption:
                 Text(displayed)
                     .scaledUI(12.5)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             if offer.offer || entry != nil {
                 Button {
@@ -940,11 +948,13 @@ struct MessageRow: View {
                     NSWorkspace.shared.open(URL(fileURLWithPath: p))
                 }
         } else if path != nil {
-            // Path known, decoding in flight — show a placeholder same size as
-            // the bubble so the layout doesn't jump on arrival.
+            // Path known, decoding in flight — reserve a fixed bubble-sized
+            // placeholder. RoundedRectangle.fill() has zero intrinsic size, so
+            // using maxWidth/maxHeight here would collapse the row to a thin
+            // strip with only the timestamp overlay visible.
             RoundedRectangle(cornerRadius: 8)
                 .fill(Theme.textMuted.opacity(0.15))
-                .frame(maxWidth: 320, maxHeight: 240)
+                .frame(width: 240, height: 180)
         } else {
             downloadingPlaceholder("photo")
         }
@@ -962,7 +972,7 @@ struct MessageRow: View {
         } else if path != nil {
             RoundedRectangle(cornerRadius: 8)
                 .fill(Theme.textMuted.opacity(0.1))
-                .frame(maxWidth: 160, maxHeight: 160)
+                .frame(width: 140, height: 140)
         } else {
             downloadingPlaceholder("face.smiling")
         }
