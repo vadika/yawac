@@ -18,8 +18,31 @@ final class ChatListViewModel {
     init(client: WAClient?, context: ModelContext? = nil) {
         self.client = client
         self.context = context
+        // Background message writer. `client` is a `@MainActor`-isolated
+        // reference, but `JIDNormalize.canonical` only reads the
+        // nonisolated `resolveLIDToPN` / `resolvePNToLID` maps, so the
+        // canonicalize closure is safe to invoke from the writer actor.
+        if let container = context?.container {
+            self.writer = MessageWriter(
+                container: container,
+                canonicalize: { jid in
+                    JIDNormalize.canonical(jid, client: client)
+                })
+        } else {
+            self.writer = nil
+        }
         loadChats()
     }
+
+    // MARK: - Background message writer (F3)
+    //
+    // `ingest()` used to do dedupe-fetch + persistMessage (another fetch
+    // + insert + save + sync MessageIndex.upsert) on MainActor, per
+    // event. The writer moves that work off-main and batches a 50ms
+    // coalesce window into one `context.save()`.
+    @ObservationIgnored private let writer: MessageWriter?
+    @ObservationIgnored private var pendingIngest: [BridgeMessage] = []
+    @ObservationIgnored private var pendingIngestFlush: Task<Void, Never>?
 
     /// Per-event chat-row work coalescer. `.message` bursts (history
     /// sync, offline queue drain, group activity) hit `ingest` dozens
@@ -281,26 +304,48 @@ final class ChatListViewModel {
         // history-sync replay of the cleared conversation — drop it so the chat
         // stays deleted. A newer message means the conversation is alive again,
         // so lift the tombstone and ingest normally (WhatsApp behavior).
+        // Tombstone semantics run synchronously here so a tombstone touched
+        // mid-coalesce window still suppresses replays correctly.
         if suppressedByTombstone(chatJID, messageTS: message.timestamp) { return }
         untombstone(chatJID)
 
-        // Dedupe: if this message id is already persisted, this is a replay
-        // (e.g. HistorySync redelivering on reconnect). Skip unread/preview
-        // bumps so counts don't grow on every restart.
-        let alreadySeen: Bool
-        if let context {
-            let id = message.id
-            let descriptor = FetchDescriptor<PersistedMessage>(
-                predicate: #Predicate { $0.id == id })
-            alreadySeen = (try? context.fetch(descriptor).first) != nil
-        } else {
-            alreadySeen = false
+        // Queue the message for batched background persistence. The 50ms
+        // coalesce window groups history-sync / offline-queue drains into
+        // a single SwiftData save + FTS upsert pass per batch.
+        pendingIngest.append(message)
+        guard pendingIngestFlush == nil else { return }
+        pendingIngestFlush = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(50))
+            guard let self else { return }
+            let batch = self.pendingIngest
+            self.pendingIngest.removeAll(keepingCapacity: true)
+            self.pendingIngestFlush = nil
+            guard !batch.isEmpty, let writer = self.writer else { return }
+            let outcomes = await writer.enqueue(batch)
+            // Re-pair outcomes with their originating BridgeMessage by id so
+            // the apply step has access to the full message payload (preview
+            // text, sender push name, fromMe, etc.).
+            let byID = Dictionary(uniqueKeysWithValues: batch.map { ($0.id, $0) })
+            for outcome in outcomes {
+                guard let original = byID[outcome.id] else { continue }
+                self.applyChatRowUpdate(
+                    message: original,
+                    canonJID: outcome.canonicalChatJID,
+                    alreadySeen: outcome.alreadySeen)
+            }
         }
+    }
 
-        // Persist every incoming message so history is available even when the
-        // conversation view hasn't been opened yet.
-        persistMessage(message)
-
+    /// MainActor commit step after the background writer persists a
+    /// batch. Updates the in-memory `chats` array (preview / unread /
+    /// push-name resolve / broadcast resolve) and fires the inbound
+    /// notification. Iterating in batch order means the last message
+    /// for a given chat wins on preview / lastTimestamp, matching the
+    /// pre-F3 per-event behavior.
+    private func applyChatRowUpdate(message: BridgeMessage,
+                                    canonJID: String,
+                                    alreadySeen: Bool) {
+        let chatJID = canonJID
         let rawPreview: String
         if let text = message.text, !text.isEmpty {
             rawPreview = text
@@ -389,81 +434,6 @@ final class ChatListViewModel {
                     resolveMentions: { [weak session] jid in session?.displayName(for: jid) ?? jid })
             }
         }
-    }
-
-    private func persistMessage(_ m: BridgeMessage) {
-        guard let context else { return }
-        let id = m.id
-
-        // Upsert: history-sync replays sometimes deliver fresher media
-        // refs than what we first persisted — see ConversationViewModel
-        // for the long story. Refresh media fields on an existing row
-        // instead of letting @Attribute(.unique) silently drop the new
-        // arrival.
-        let descriptor = FetchDescriptor<PersistedMessage>(predicate: #Predicate { $0.id == id })
-        if let existing = try? context.fetch(descriptor).first {
-            if let ref = m.media?.ref?.json, ref != existing.mediaRefJSON {
-                existing.mediaRefJSON = ref
-                existing.mediaExpired = false
-            }
-            if let p = m.media?.filePath, !p.isEmpty { existing.mediaPath = p }
-            if let c = m.media?.caption, !c.isEmpty { existing.mediaCaption = c }
-            if let f = m.media?.fileName, !f.isEmpty { existing.mediaFileName = f }
-            // T12 fields: re-merge live-location sequence updates and pick up
-            // view-once / contact metadata that a later replay may carry. The
-            // initial insert path below threads these on first ingest; this
-            // branch keeps them in sync on subsequent updates (e.g.
-            // live-location stream sequence bumps).
-            if let v = m.isViewOnce { existing.isViewOnce = v }
-            if let loc = m.location {
-                existing.locationLat = loc.lat
-                existing.locationLng = loc.lng
-                if !loc.name.isEmpty { existing.locationName = loc.name }
-                if !loc.address.isEmpty { existing.locationAddress = loc.address }
-            }
-            if m.kind == "location_live" {
-                existing.locationIsLive = true
-                if let seq = m.locationSequence { existing.locationSequence = seq }
-            }
-            if let card = m.contact {
-                existing.contactVCard = card.vcard
-                existing.contactDisplayName = card.displayName
-            }
-            try? context.save()
-            return
-        }
-
-        let row = PersistedMessage(
-            id: id,
-            chatJID: JIDNormalize.canonical(m.chatJID, client: client),
-            senderJID: m.senderJID,
-            fromMe: m.fromMe,
-            timestamp: Date(timeIntervalSince1970: TimeInterval(m.timestamp)),
-            kind: m.kind,
-            text: m.text,
-            mediaPath: m.media?.filePath,
-            mediaCaption: m.media?.caption,
-            mediaFileName: m.media?.fileName,
-            mediaRefJSON: m.media?.ref?.json,
-            pollJSON: m.poll?.json,
-            isViewOnce: m.isViewOnce ?? false,
-            viewOnceLocked: false,
-            locationLat: m.location?.lat,
-            locationLng: m.location?.lng,
-            locationName: m.location?.name,
-            locationAddress: m.location?.address,
-            locationIsLive: m.kind == "location_live",
-            locationSequence: m.locationSequence,
-            contactVCard: m.contact?.vcard,
-            contactDisplayName: m.contact?.displayName,
-            quotedMessageID: m.quoted?.messageID,
-            quotedSenderJID: m.quoted?.senderJID,
-            quotedFromMe: m.quoted?.fromMe ?? false,
-            quotedTextSnippet: m.quoted?.snippet,
-            quotedKind: m.quoted?.kind)
-        context.insert(row)
-        try? context.save()
-        MessageIndex.shared.upsert(row.indexFields)
     }
 
     func markRead(_ jid: String) {
