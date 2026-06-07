@@ -5,16 +5,6 @@ struct AvatarView: View {
     let name: String
     let size: CGFloat
     @Environment(SessionViewModel.self) private var session
-    /// Decoded image held as @State so the body branch never re-reads
-    /// from disk. A previous design kept @State imageURL and called
-    /// NSImage(contentsOf:) in body — that raced with bridge write
-    /// flush; NSImage occasionally returned nil right after a cold
-    /// fetch and the view stayed on the placeholder until a fresh
-    /// .task fired (e.g. user navigated away and back).
-    @State private var loadedImage: NSImage?
-    /// Bumped by AvatarCache.invalidate broadcasts so `.task(id:)`
-    /// re-runs and the view picks up the newly-fetched file.
-    @State private var revision: Int = 0
 
     /// JIDs from group participants come back in `@lid` form while the
     /// same person's 1:1 chat may be opened under the canonical PN form
@@ -27,8 +17,22 @@ struct AvatarView: View {
     }
 
     var body: some View {
+        // Read `ThumbnailCache.revision` so the body re-runs when the
+        // shared 50ms-coalesced bump fires — that's how cold avatars
+        // appear without a per-instance `@State` flip + `.task(id:)`
+        // (which flashed the placeholder on every disk hit).
+        let cache = ThumbnailCache.shared
+        let _ = cache.revision
+        let key = cacheKey
+        // Capture the MainActor-isolated client ONCE so the detached
+        // fetcher closure doesn't reach back into session state from a
+        // background thread.
+        let client = session.client
         Group {
-            if let img = loadedImage {
+            if let img = cache.avatarImage(forCacheKey: key, fetcher: {
+                guard let client else { return nil }
+                return await AvatarCache.shared.ensure(jid: key, using: client)
+            }) {
                 Image(nsImage: img)
                     .resizable()
                     .scaledToFill()
@@ -42,48 +46,15 @@ struct AvatarView: View {
         }
         .frame(width: size, height: size)
         .clipShape(.circle)
-        .task(id: "\(cacheKey)#\(revision)") {
-            let key = cacheKey
-            AvatarLog.write("[avatar-view size=\(Int(size))] task jid=\(jid) key=\(key)")
-            // Fast path: skip the actor hop + bridge call when the
-            // avatar is already cached on disk.
-            if let cached = AvatarCache.cachedURL(for: key),
-               FileManager.default.fileExists(atPath: cached.path) {
-                if let img = NSImage(contentsOf: cached) {
-                    AvatarLog.write("[avatar-view size=\(Int(size))] disk hit key=\(key)")
-                    loadedImage = img
-                } else {
-                    AvatarLog.write("[avatar-view size=\(Int(size))] disk file exists but NSImage nil key=\(key)")
-                }
-                return
-            }
-            guard let client = session.client else {
-                AvatarLog.write("[avatar-view size=\(Int(size))] no client key=\(key)")
-                loadedImage = nil
-                return
-            }
-            if let url = await AvatarCache.shared.ensure(jid: key, using: client),
-               let img = NSImage(contentsOf: url) {
-                AvatarLog.write("[avatar-view size=\(Int(size))] ensure ok key=\(key)")
-                loadedImage = img
-            } else {
-                AvatarLog.write("[avatar-view size=\(Int(size))] ensure empty key=\(key)")
-                loadedImage = nil
-            }
-        }
         .onReceive(NotificationCenter.default.publisher(
             for: .avatarCacheInvalidated)) { note in
             guard let invalid = note.userInfo?["jid"] as? String,
                   JIDNormalize.same(invalid, jid, client: session.client)
             else { return }
             AvatarLog.write("[avatar-view size=\(Int(size))] invalidated by \(invalid) → reset jid=\(jid)")
-            // Clear so placeholder shows during the brief re-fetch
-            // window; bumping `revision` re-runs `.task`.
-            loadedImage = nil
-            revision &+= 1
-        }
-        .onChange(of: loadedImage == nil) { _, isNil in
-            AvatarLog.write("[avatar-view size=\(Int(size))] loadedImage=\(isNil ? "nil" : "set") jid=\(jid)")
+            // Drop the in-memory NSImage so the next body eval misses
+            // and the load path re-runs; revision bump wakes observers.
+            ThumbnailCache.shared.invalidateAvatar(forCacheKey: key)
         }
     }
 

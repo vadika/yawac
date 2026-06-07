@@ -30,6 +30,15 @@ struct ConversationHistorySnapshot: Sendable {
     /// synchronously instead of flashing a gray placeholder for one
     /// frame. Capped at 30 entries / 5 MB per file by the builder.
     let preheatVideoThumbs: [String: Data]
+    /// Raw avatar JPEG bytes for the distinct senders in the last
+    /// visible message window — keyed by canonical JID cache key. The
+    /// highest-impact preheat since every message row has an
+    /// `AvatarView` and group threads contain many distinct senders.
+    /// Consumed by `ThumbnailCache.preheatAvatar(_:)` BEFORE
+    /// `self.messages = ...` so the first paint hits the in-memory
+    /// cache (F12). Capped at 60 entries / 5 MB per file by the
+    /// builder.
+    let preheatAvatars: [String: Data]
     let initialAnchorID: String?
     let unreadInboundIDs: Set<String>
     /// Messages whose media is still missing and need a download kicked

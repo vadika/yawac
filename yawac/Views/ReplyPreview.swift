@@ -118,12 +118,19 @@ private struct MediaBadge: View {
 private struct ReplyThumb: View {
     let path: String
     let kind: String
-    @State private var image: NSImage?
 
     var body: some View {
+        // Shared in-memory cache + coalesced revision bump: no
+        // per-instance @State / .task means staged-reply previews don't
+        // flash the placeholder on a disk hit (F12).
+        let cache = ThumbnailCache.shared
+        let _ = cache.revision
+        let img: NSImage? = kind == "video"
+            ? cache.videoImage(forPath: path)
+            : cache.image(forPath: path)
         ZStack {
-            if let image {
-                Image(nsImage: image)
+            if let img {
+                Image(nsImage: img)
                     .resizable()
                     .aspectRatio(contentMode: .fill)
             } else {
@@ -135,17 +142,6 @@ private struct ReplyThumb: View {
                     .foregroundStyle(.white)
                     .shadow(radius: 1)
             }
-        }
-        .task(id: path) {
-            await load()
-        }
-    }
-
-    private func load() async {
-        if kind == "video" {
-            image = await VideoThumbnailView.generateThumb(path: path)
-        } else {
-            image = NSImage(contentsOfFile: path)
         }
     }
 }

@@ -145,4 +145,123 @@ final class ThumbnailCache {
             self.revision &+= 1
         }
     }
+
+    // MARK: - Avatars
+
+    /// Per-person NSImage cache keyed by the canonical JID cache key.
+    /// `AvatarView` is on every chat row and every message row in a
+    /// group thread — keeping decoded NSImages resident avoids
+    /// redundant disk + decode on every scroll. countLimit 512 covers
+    /// large group threads; the 16 MB byte budget caps memory.
+    private let avatarCache: NSCache<NSString, NSImage> = {
+        let c = NSCache<NSString, NSImage>()
+        c.countLimit = 512
+        c.totalCostLimit = 16 * 1024 * 1024
+        return c
+    }()
+    private var avatarInflight: Set<String> = []
+
+    /// Returns the cached avatar `NSImage` for `key` (a canonical JID
+    /// cache key — caller's responsibility to canonicalize). On miss,
+    /// schedules a detached load: try the on-disk file
+    /// (`AvatarCache.cachedURL`) first; if absent, fall back to the
+    /// supplied `fetcher` closure which is expected to go through
+    /// `AvatarCache.shared.ensure(jid:using:)` (the actor + bridge
+    /// path). Once the decode lands the cache stores the result and
+    /// schedules a coalesced `revision` bump shared with the image and
+    /// video caches.
+    ///
+    /// The closure exists so `ThumbnailCache` doesn't need to know
+    /// about `WAClient` — the view passes its session client in.
+    func avatarImage(forCacheKey key: String,
+                     fetcher: @escaping @Sendable () async -> URL?) -> NSImage? {
+        if let hit = avatarCache.object(forKey: key as NSString) { return hit }
+        if avatarInflight.contains(key) { return nil }
+        avatarInflight.insert(key)
+        Task.detached(priority: .userInitiated) { [weak self] in
+            // Disk fast path: existing AvatarCache.cachedURL is
+            // nonisolated static, safe to call from any thread.
+            let img: NSImage? = await {
+                if let url = AvatarCache.cachedURL(for: key),
+                   FileManager.default.fileExists(atPath: url.path),
+                   let i = NSImage(contentsOf: url) {
+                    return i
+                }
+                guard let url = await fetcher() else { return nil }
+                return NSImage(contentsOf: url)
+            }()
+            await self?.storeAvatar(key: key, image: img)
+        }
+        return nil
+    }
+
+    private func storeAvatar(key: String, image: NSImage?) {
+        avatarInflight.remove(key)
+        guard let image else { return }
+        let cost = Int(image.size.width * image.size.height * 4)
+        avatarCache.setObject(image, forKey: key as NSString, cost: cost)
+        scheduleRevisionBump()
+    }
+
+    /// Drop the cached avatar for `key` so the next body eval misses
+    /// and the load path re-runs (after the on-disk file has been
+    /// removed by `AvatarCache.invalidate(jid:)`).
+    func invalidateAvatar(forCacheKey key: String) {
+        avatarCache.removeObject(forKey: key as NSString)
+        avatarInflight.remove(key)
+        scheduleRevisionBump()
+    }
+
+    /// Synchronously decode + store raw avatar file `Data` → `NSImage`
+    /// entries keyed by canonical JID cache key. Called by
+    /// `applyHistorySnapshot` before `self.messages` lands so every
+    /// `AvatarView`'s first body eval hits the in-memory cache.
+    func preheatAvatar(_ pairs: [String: Data]) {
+        for (key, data) in pairs {
+            if avatarCache.object(forKey: key as NSString) != nil { continue }
+            guard let img = NSImage(data: data) else { continue }
+            let cost = Int(img.size.width * img.size.height * 4)
+            avatarCache.setObject(img, forKey: key as NSString, cost: cost)
+        }
+    }
+
+    // MARK: - Maps
+
+    /// NSImage cache for the location-bubble map snapshot keyed by
+    /// `"lat,lng"`. The underlying `MapSnapshotCache` already has its
+    /// own memory + disk layers, but every location bubble's
+    /// `.task(id:)` re-runs on body recreation and the actor hop +
+    /// hash format alone shows up in scroll profiles. countLimit 64
+    /// covers a busy chat's worth of pins; 32 MB budget caps memory.
+    private let mapCache: NSCache<NSString, NSImage> = {
+        let c = NSCache<NSString, NSImage>()
+        c.countLimit = 64
+        c.totalCostLimit = 32 * 1024 * 1024
+        return c
+    }()
+    private var mapInflight: Set<String> = []
+
+    /// Returns the cached map snapshot `NSImage` for `(lat, lng)`. On
+    /// miss, schedules a detached load through `MapSnapshotCache` and
+    /// returns nil; the coalesced `revision` bump wakes observers once
+    /// the snapshot lands.
+    func mapImage(lat: Double, lng: Double) -> NSImage? {
+        let key = "\(lat),\(lng)"
+        if let hit = mapCache.object(forKey: key as NSString) { return hit }
+        if mapInflight.contains(key) { return nil }
+        mapInflight.insert(key)
+        Task.detached(priority: .userInitiated) { [weak self] in
+            let img = await MapSnapshotCache.shared.snapshot(lat: lat, lng: lng)
+            await self?.storeMap(key: key, image: img)
+        }
+        return nil
+    }
+
+    private func storeMap(key: String, image: NSImage?) {
+        mapInflight.remove(key)
+        guard let image else { return }
+        let cost = Int(image.size.width * image.size.height * 4)
+        mapCache.setObject(image, forKey: key as NSString, cost: cost)
+        scheduleRevisionBump()
+    }
 }

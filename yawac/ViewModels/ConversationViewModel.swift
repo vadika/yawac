@@ -610,6 +610,11 @@ final class ConversationViewModel {
         // hits the cache instead of returning nil → gray placeholder →
         // single-frame flicker once the async load lands (F11).
         ThumbnailCache.shared.preheatVideo(snap.preheatVideoThumbs)
+        // Avatar preheat — the highest-impact one. Every message row
+        // has an AvatarView; without this preheat the entire visible
+        // window flashes initials placeholders for one frame before
+        // the in-memory cache fills from disk (F12).
+        ThumbnailCache.shared.preheatAvatar(snap.preheatAvatars)
         let snapIDs = Set(snap.messages.map { $0.id })
         let lateArrivals = self.messages.filter { !snapIDs.contains($0.id) }
         if lateArrivals.isEmpty {
@@ -953,6 +958,30 @@ final class ConversationViewModel {
             preheatVideoThumbs[sourcePath] = data
             preheatVideoRemaining -= 1
         }
+        // Avatar preheat: collect distinct sender canonical-JID cache
+        // keys from the last ~60 visible messages and read their
+        // on-disk avatar bytes. This is the highest-impact preheat
+        // since EVERY message row has an AvatarView (F12). Caps
+        // mirror the image preheat — 60 entries, 5 MB per file —
+        // since most avatars are well under 100 KB anyway.
+        var preheatAvatars: [String: Data] = [:]
+        let avatarPreheatMaxCount = 60
+        var avatarPreheatRemaining = avatarPreheatMaxCount
+        var seenAvatarKeys: Set<String> = []
+        for m in messages.reversed() {
+            if avatarPreheatRemaining == 0 { break }
+            let key = canonicalize(m.senderJID)
+            if !seenAvatarKeys.insert(key).inserted { continue }
+            guard let url = AvatarCache.cachedURL(for: key),
+                  FileManager.default.fileExists(atPath: url.path)
+            else { continue }
+            if let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize,
+               size > preheatPerFileCap { continue }
+            guard let data = try? Data(contentsOf: url) else { continue }
+            if data.count > preheatPerFileCap { continue }
+            preheatAvatars[key] = data
+            avatarPreheatRemaining -= 1
+        }
         let t3 = CFAbsoluteTimeGetCurrent()
         return ConversationHistorySnapshot(
             messages: messages,
@@ -962,6 +991,7 @@ final class ConversationViewModel {
             localPaths: localPaths,
             preheatThumbs: preheatThumbs,
             preheatVideoThumbs: preheatVideoThumbs,
+            preheatAvatars: preheatAvatars,
             initialAnchorID: initialAnchorID,
             unreadInboundIDs: unreadInboundIDs,
             downloadTargets: downloadTargets,
