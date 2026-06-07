@@ -8,6 +8,12 @@ final class ChatListViewModel {
     var chats: [Chat] = [] {
         didSet { pushUnreadToSession() }
     }
+    /// True while the cold-start bootstrap (`runBootstrap`) is in flight.
+    /// Observable so the sidebar can show a `ProgressView` and any
+    /// auto-selection (e.g. `lastSelectedChatJID` restore) can wait until
+    /// `chats` is populated. Flips to `false` once the background snapshot
+    /// has been committed on MainActor.
+    private(set) var bootstrapping: Bool = true
     private let client: WAClient?
     private let context: ModelContext?
     /// Weak link back to the global session so the menubar icon can
@@ -31,7 +37,13 @@ final class ChatListViewModel {
         } else {
             self.writer = nil
         }
-        loadChats()
+        // F5: defer the SwiftData fetch + raw SQLite scan that
+        // `loadChats` performs to a background Task so the cold-start
+        // MainActor is not blocked before the first sidebar paint. The
+        // sidebar renders a ProgressView while `bootstrapping == true`.
+        Task { [weak self] in
+            await self?.runBootstrap()
+        }
     }
 
     // MARK: - Background message writer (F3)
@@ -121,11 +133,53 @@ final class ChatListViewModel {
         return Double(messageTS) <= deletedAt
     }
 
-    private func loadChats() {
-        guard let context else { return }
+    // MARK: - F5: cold-start bootstrap (off MainActor)
+
+    /// Immutable result of `buildBootstrap`. Carries the assembled `Chat`
+    /// rows (with **raw** preview text — mention resolution happens on
+    /// MainActor in `runBootstrap` because `session.displayName` is
+    /// MainActor-isolated) plus the list of `PersistedChat`
+    /// `PersistentIdentifier`s the dedupe pass decided to drop and the
+    /// list of unique-key rebinds (`id` → `newJID`) the dedupe pass
+    /// decided to apply. Both mutations are round-tripped to the main
+    /// context in the apply phase because SwiftData refuses to persist
+    /// unique-key mutations from a background context in our setup
+    /// (see `SQLiteDedupe` rationale).
+    private struct ChatListBootstrap: Sendable {
+        struct Rebind: Sendable {
+            let id: PersistentIdentifier
+            let newJID: String
+        }
+        let chats: [Chat]
+        let deleteIDs: [PersistentIdentifier]
+        let rebinds: [Rebind]
+    }
+
+    /// Off-MainActor bootstrap builder. Owns its own background
+    /// `ModelContext` bound to the same `ModelContainer`. Performs the
+    /// `PersistedChat` fetch, the in-memory LID→PN dedupe, the
+    /// device-suffix dedupe, and the raw-SQLite
+    /// `SQLiteDedupe.latestMessagePerChat()` scan — all of which used
+    /// to block MainActor before the first sidebar paint. Returns a
+    /// value-type snapshot for the apply phase to consume.
+    ///
+    /// The `lidResolver` / `canonicalize` closures are passed in because
+    /// `WAClient` is `@MainActor`-isolated but its
+    /// `resolveLIDToPN` / `resolvePNToLID` methods are nonisolated, so
+    /// the closures themselves are safe to call from any thread (same
+    /// pattern as `MessageWriter`'s canonicalizer).
+    nonisolated private static func buildBootstrap(
+        container: ModelContainer,
+        tombstones: Set<String>,
+        lidResolver: @Sendable (String) -> String,
+        canonicalize: @Sendable (String) -> String
+    ) -> ChatListBootstrap {
+        let context = ModelContext(container)
         let descriptor = FetchDescriptor<PersistedChat>(
             sortBy: [SortDescriptor(\.lastTimestamp, order: .reverse)])
-        guard let rows = try? context.fetch(descriptor) else { return }
+        guard let rows = try? context.fetch(descriptor) else {
+            return ChatListBootstrap(chats: [], deleteIDs: [], rebinds: [])
+        }
 
         // In-memory dedupe only: SwiftData refuses to persist deletions of
         // these unique-key rows in our setup (verified — post-exit WAL is
@@ -140,7 +194,7 @@ final class ChatListViewModel {
         )
         var hiddenLIDs = Set<String>()
         for r in rows where r.jid.hasSuffix("@lid") {
-            let canon = client?.resolveLIDToPN(r.jid) ?? r.jid
+            let canon = lidResolver(r.jid)
             if canon != r.jid, pnJIDs.contains(canon) {
                 hiddenLIDs.insert(r.jid)
             }
@@ -159,7 +213,7 @@ final class ChatListViewModel {
         // canonical form. These become the merge targets for everything
         // else.
         for r in rowsAfter {
-            let bare = JIDNormalize.canonical(r.jid, client: client)
+            let bare = canonicalize(r.jid)
             if r.jid == bare {
                 keepers[bare] = r
             }
@@ -167,9 +221,12 @@ final class ChatListViewModel {
 
         // Pass 2: handle non-canonical (e.g. `@lid` or `:device@server`)
         // rows. Merge into existing canonical anchor if present;
-        // otherwise mutate-in-place to adopt the canonical jid.
+        // otherwise stage a rebind that the MainActor apply phase will
+        // persist (SwiftData refuses to persist unique-key rebinds from
+        // a background context in our setup — see ChatListBootstrap doc).
+        var pendingRebinds: [ChatListBootstrap.Rebind] = []
         for r in rowsAfter {
-            let bare = JIDNormalize.canonical(r.jid, client: client)
+            let bare = canonicalize(r.jid)
             if r.jid == bare { continue }
             if let anchor = keepers[bare] {
                 if r.lastTimestamp > anchor.lastTimestamp {
@@ -180,9 +237,13 @@ final class ChatListViewModel {
                 anchor.unread += r.unread
                 toDelete.append(r)
             } else {
-                // No canonical row yet — rebind this one in place so it
-                // becomes the anchor. Avoids creating a phantom row that
-                // would collide with a yet-to-arrive PN row.
+                // No canonical row yet — stage a rebind so this row's
+                // unique key flips to `bare` on the main context, then
+                // mutate the in-memory background copy so subsequent
+                // passes and the `Chat` materialisation below see the
+                // canonical jid. The background mutation is intentionally
+                // not saved (the apply phase owns persistence).
+                pendingRebinds.append(.init(id: r.persistentModelID, newJID: bare))
                 r.jid = bare
                 keepers[bare] = r
             }
@@ -206,18 +267,24 @@ final class ChatListViewModel {
             }
         }
 
-        let deleteCount = toDelete.count
-        for r in toDelete { context.delete(r) }
-        var saveErr: String = "ok"
-        if !toDelete.isEmpty {
-            do { try context.save() } catch { saveErr = String(describing: error) }
-        }
-        NSLog("[yawac/loadChats] toDelete=%d save=%@", deleteCount, saveErr)
+        // Intentionally NO `context.save()` on the background context:
+        // SwiftData refuses to persist unique-key mutations from a
+        // background context in our setup (verified for deletes; the
+        // same silent-failure risk applies to rebinds). All persistent
+        // mutations — rebinds AND deletes — are round-tripped to the
+        // main context in the apply phase.
+
+        // Collect persistent IDs for the rows to delete. Deletes are
+        // applied on the main context (see ChatListBootstrap doc).
+        let deleteIDs: [PersistentIdentifier] = toDelete.map { $0.persistentModelID }
+
         keepers = seen
 
         // Derive a fresh per-chat (lastTimestamp, lastMessageText) from
         // raw SQLite — going through SwiftData materialises every row
         // and freezes main on chats with thousands of messages.
+        // `latestMessagePerChat` opens its own read-only connection,
+        // safe to call off MainActor.
         var latestByChat: [String: (ts: Date, text: String)] = [:]
         for row in SQLiteDedupe.latestMessagePerChat() {
             // SwiftData stores Date as Apple-epoch seconds; convert.
@@ -247,7 +314,11 @@ final class ChatListViewModel {
             latestByChat[row.chatJID] = (date, preview)
         }
 
-        self.chats = keepers.values
+        // Mention resolution is deferred to the MainActor apply phase
+        // (`session.displayName` is MainActor-isolated). The raw preview
+        // is carried as-is in `Chat.lastMessage` here and resolved in
+        // place before the snapshot is committed.
+        let chats: [Chat] = keepers.values
             .map { row -> Chat in
                 let derived = latestByChat[row.jid]
                 let ts = max(
@@ -260,12 +331,9 @@ final class ChatListViewModel {
                     }
                     return row.lastMessageText ?? ""
                 }()
-                let preview = resolveMentionsText(rawPreview) { [weak session] jid in
-                    session?.displayName(for: jid) ?? jid
-                }
                 return Chat(
                     jid: row.jid, name: row.name,
-                    lastMessage: preview,
+                    lastMessage: rawPreview,
                     lastTimestamp: Int64(ts.isFinite ? ts : 0),
                     unread: row.unread,
                     isCommunityParent: row.isCommunityParent,
@@ -276,8 +344,114 @@ final class ChatListViewModel {
                     mutedUntil: row.mutedUntil,
                     groupDescription: row.groupDescription)
             }
-            .filter { !isTombstoned($0.jid) }
+            .filter { !tombstones.contains($0.jid) }
             .sorted(by: Self.chatOrder)
+
+        return ChatListBootstrap(
+            chats: chats, deleteIDs: deleteIDs, rebinds: pendingRebinds)
+    }
+
+    /// MainActor cold-start driver. Dispatches the background bootstrap
+    /// builder, resolves mentions on the produced rows (uses MainActor-
+    /// isolated `session.displayName`), commits `chats` in one shot, and
+    /// finally rounds-trips the duplicate-row deletes to the main
+    /// `ModelContext`. Sets `bootstrapping = false` once `chats` is
+    /// published so the sidebar's ProgressView dismisses.
+    private func runBootstrap() async {
+        guard let container = context?.container else {
+            bootstrapping = false
+            return
+        }
+        // Snapshot inputs MainActor-side so the detached Task sees
+        // value-typed sendables only.
+        let tombstones = Set(deletedChats.keys)
+        let client = self.client
+        let lidResolver: @Sendable (String) -> String = { jid in
+            client?.resolveLIDToPN(jid) ?? jid
+        }
+        let canonicalize: @Sendable (String) -> String = { jid in
+            JIDNormalize.canonical(jid, client: client)
+        }
+        let snap = await Task.detached(priority: .userInitiated) {
+            ChatListViewModel.buildBootstrap(
+                container: container,
+                tombstones: tombstones,
+                lidResolver: lidResolver,
+                canonicalize: canonicalize)
+        }.value
+
+        // Resolve mentions on MainActor — `session?.displayName(for:)` is
+        // MainActor-isolated. Doing this here also keeps the resolver
+        // current with whatever names arrived during the bootstrap
+        // window.
+        let resolved: [Chat] = snap.chats.map { c in
+            var c = c
+            c.lastMessage = resolveMentionsText(c.lastMessage) { [weak session] jid in
+                session?.displayName(for: jid) ?? jid
+            }
+            return c
+        }
+
+        // Race guard: messages that ingested while the bootstrap was
+        // building (history-sync, offline-queue drain) added rows to
+        // `self.chats` first. Merge by jid — bootstrap wins for chats
+        // not yet seen post-init; ingest-created rows survive.
+        if self.chats.isEmpty {
+            self.chats = resolved
+        } else {
+            let bootstrapByJID = Dictionary(uniqueKeysWithValues: resolved.map { ($0.jid, $0) })
+            let existingJIDs = Set(self.chats.map { $0.jid })
+            let newcomers = resolved.filter { !existingJIDs.contains($0.jid) }
+            // For chats that exist both pre- and post-bootstrap (rare:
+            // the row was created by an in-flight ingest), keep the
+            // ingest version — it's newer.
+            self.chats = self.chats + newcomers
+            // Carry through pinned/archived/muted/group metadata for any
+            // matching ingest-side row that lacked it (ingest creates
+            // bare rows).
+            for i in self.chats.indices {
+                if let bootstrap = bootstrapByJID[self.chats[i].jid],
+                   self.chats[i].lastTimestamp < bootstrap.lastTimestamp {
+                    // Bootstrap strictly newer than the ingest-created row
+                    // → adopt it. At equality the ingest version wins:
+                    // ingest arrived after the bootstrap fetch, so it's
+                    // the more recent state in wall-clock terms even if
+                    // its `lastTimestamp` matches the bootstrap's.
+                    self.chats[i] = bootstrap
+                }
+            }
+            self.chats.sort(by: Self.chatOrder)
+        }
+        bootstrapping = false
+
+        // Round-trip the unique-key mutations (rebinds + deletes) to the
+        // main context. SwiftData's persistence of these mutations is
+        // unreliable from a background context in our setup (verified
+        // for deletes; same silent-failure risk applies to rebinds —
+        // that's why we no longer save the background context). Apply
+        // rebinds first so the delete branch doesn't race a row whose
+        // canonical sibling hasn't materialised yet.
+        if let context = self.context,
+           !(snap.rebinds.isEmpty && snap.deleteIDs.isEmpty) {
+            var rebound = 0
+            for rebind in snap.rebinds {
+                if let row = context.model(for: rebind.id) as? PersistedChat {
+                    row.jid = rebind.newJID
+                    rebound += 1
+                }
+            }
+            var deleted = 0
+            for id in snap.deleteIDs {
+                if let row = context.model(for: id) as? PersistedChat {
+                    context.delete(row)
+                    deleted += 1
+                }
+            }
+            var saveErr: String = "ok"
+            do { try context.save() } catch { saveErr = String(describing: error) }
+            NSLog("[yawac/runBootstrap] rebinds=%d toDelete=%d save=%@",
+                  rebound, deleted, saveErr)
+        }
     }
 
     /// Total ordering for the sidebar. Pinned chats float to the

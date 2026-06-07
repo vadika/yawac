@@ -130,12 +130,21 @@ struct ContentView: View {
             session.modelContext = modelContext
             self.chatList = vm
             self.chatSearch = ChatSearchViewModel(listVM: vm, validator: client)
-            // Restore last-opened chat if it's in our chats list. Goes
-            // through openRoot so the trail starts at depth 0 (no stale
-            // BackBar from whatever the previous session was looking at).
-            if !lastSelectedChatJID.isEmpty,
-               vm.chats.contains(where: { $0.jid == lastSelectedChatJID }) {
-                session.openRootChat(lastSelectedChatJID)
+            // Restore last-opened chat if it's in our chats list. F5:
+            // wait for the off-MainActor bootstrap to land first —
+            // `vm.chats` is empty during init now, so a naive
+            // `contains` check would always miss on cold start.
+            // The `bootstrapping` flag flips inside `runBootstrap`'s
+            // MainActor commit step, so by the time we observe `false`
+            // here `vm.chats` is already populated.
+            if !lastSelectedChatJID.isEmpty {
+                while vm.bootstrapping { await Task.yield() }
+                if vm.chats.contains(where: { $0.jid == lastSelectedChatJID }) {
+                    // Goes through openRoot so the trail starts at depth
+                    // 0 (no stale BackBar from whatever the previous
+                    // session was looking at).
+                    session.openRootChat(lastSelectedChatJID)
+                }
             }
             let groups = GroupsViewModel(client: client)
             await groups.refresh()
