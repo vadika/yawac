@@ -928,7 +928,9 @@ struct MessageRow: View {
 
     @ViewBuilder
     private func imageBubble(path: String?) -> some View {
-        if let p = path, let img = NSImage(contentsOfFile: p) {
+        let cache = ThumbnailCache.shared
+        let _ = cache.revision  // subscribe to cache invalidations
+        if let p = path, let img = cache.image(forPath: p) {
             Image(nsImage: img)
                 .resizable()
                 .scaledToFit()
@@ -937,6 +939,12 @@ struct MessageRow: View {
                 .onTapGesture {
                     NSWorkspace.shared.open(URL(fileURLWithPath: p))
                 }
+        } else if path != nil {
+            // Path known, decoding in flight — show a placeholder same size as
+            // the bubble so the layout doesn't jump on arrival.
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Theme.textMuted.opacity(0.15))
+                .frame(maxWidth: 320, maxHeight: 240)
         } else {
             downloadingPlaceholder("photo")
         }
@@ -944,10 +952,16 @@ struct MessageRow: View {
 
     @ViewBuilder
     private func stickerBubble(path: String?) -> some View {
-        if let p = path, let img = NSImage(contentsOfFile: p) {
+        let cache = ThumbnailCache.shared
+        let _ = cache.revision
+        if let p = path, let img = cache.image(forPath: p) {
             Image(nsImage: img)
                 .resizable()
                 .scaledToFit()
+                .frame(maxWidth: 160, maxHeight: 160)
+        } else if path != nil {
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Theme.textMuted.opacity(0.1))
                 .frame(maxWidth: 160, maxHeight: 160)
         } else {
             downloadingPlaceholder("face.smiling")
