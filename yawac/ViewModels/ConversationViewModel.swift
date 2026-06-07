@@ -20,6 +20,21 @@ struct PendingAttachment: Identifiable, Equatable {
 final class ConversationViewModel {
     let chatJID: String
     var messages: [UIMessage] = []
+    /// O(1) dedupe mirror of `messages.map(\.id)`. Maintained at every
+    /// `messages.append/insert/=` site so `ingest` can short-circuit
+    /// duplicates without walking the array. `@ObservationIgnored` —
+    /// it's a lookup index, not visible state.
+    @ObservationIgnored private var messageIDs: Set<String> = []
+    /// F8: 50ms ingest coalescer. Bursts of inbound BridgeMessage events
+    /// (history-sync, reconnect drain) used to trigger one
+    /// `messages.append` + `invalidateTimeline` per event — a full
+    /// SwiftUI re-render and timeline rebuild per row. We now queue
+    /// arrivals here and flush once per 50ms window: single batch
+    /// append, single `invalidateTimeline`. Mirrors the F3 pattern in
+    /// ChatListViewModel.
+    @ObservationIgnored private var pendingIngest: [BridgeMessage] = []
+    @ObservationIgnored private var pendingIngestIDs: Set<String> = []
+    @ObservationIgnored private var pendingIngestFlush: Task<Void, Never>?
     var draft: String = "" {
         didSet { scheduleDraftSave() }
     }
@@ -298,6 +313,7 @@ final class ConversationViewModel {
         // Insert sorted by timestamp.
         let idx = messages.firstIndex(where: { $0.timestamp > m.timestamp }) ?? messages.count
         messages.insert(m, at: idx)
+        messageIDs.insert(m.id)
         invalidateTimeline()
         pendingScrollToID = id
     }
@@ -470,16 +486,19 @@ final class ConversationViewModel {
                         timestamp: Date(timeIntervalSince1970: TimeInterval(result.timestamp)),
                         body: body)
                     um.isForwarded = true
-                    if !messages.contains(where: { $0.id == um.id }) {
+                    if !messageIDs.contains(um.id) {
                         messages.append(um)
+                        messageIDs.insert(um.id)
                         invalidateTimeline()
                     }
                 }
             } catch {
-                messages.append(UIMessage(
+                let sys = UIMessage(
                     id: UUID().uuidString, chatJID: self.chatJID, senderJID: "system",
                     fromMe: false, timestamp: .now,
-                    body: .system("forward failed: \(error.localizedDescription)")))
+                    body: .system("forward failed: \(error.localizedDescription)"))
+                messages.append(sys)
+                messageIDs.insert(sys.id)
                 invalidateTimeline()
             }
         }
@@ -519,6 +538,12 @@ final class ConversationViewModel {
         self.chatJID = chatJID
         self.client = client
         self.context = context
+    }
+
+    deinit {
+        // Cancel the coalescing flush task so it doesn't sleep 50ms holding
+        // a stale [weak self] reference after the CVM is gone.
+        pendingIngestFlush?.cancel()
     }
 
     /// Hard cap on initial load — large chats freeze SwiftUI's LazyVStack
@@ -576,6 +601,8 @@ final class ConversationViewModel {
         } else {
             self.messages = snap.messages + lateArrivals.sorted { $0.timestamp < $1.timestamp }
         }
+        // Rebuild the dedupe Set after the wholesale assignment.
+        self.messageIDs = Set(self.messages.map(\.id))
         for (id, status) in snap.receiptStatus {
             self.receiptStatus[id] = status
         }
@@ -1038,14 +1065,15 @@ final class ConversationViewModel {
                     self.olderUnavailable = true
                 }
             } catch {
-                self.messages.insert(UIMessage(
+                let sys = UIMessage(
                     id: UUID().uuidString,
                     chatJID: self.chatJID,
                     senderJID: "system",
                     fromMe: false,
                     timestamp: .now,
-                    body: .system("history request failed: \(error.localizedDescription)")
-                ), at: 0)
+                    body: .system("history request failed: \(error.localizedDescription)"))
+                self.messages.insert(sys, at: 0)
+                self.messageIDs.insert(sys.id)
                 self.invalidateTimeline()
             }
         }
@@ -1075,6 +1103,8 @@ final class ConversationViewModel {
         } else {
             self.messages = snapshot.messages + lateArrivals.sorted { $0.timestamp < $1.timestamp }
         }
+        // Rebuild the dedupe Set after the wholesale assignment.
+        self.messageIDs = Set(self.messages.map(\.id))
         invalidateTimeline()
     }
 
@@ -1455,6 +1485,7 @@ final class ConversationViewModel {
                 m.quotedTextSnippet = Self.quotedSnippet(of: q)
             }
             messages.append(m)
+            messageIDs.insert(m.id)
             invalidateTimeline()
             receiptStatus[m.id] = .sent
             persistOutgoing(m, kind: "text", text: body)
@@ -1472,16 +1503,58 @@ final class ConversationViewModel {
         // events for this chat aren't dropped on the floor.
         guard JIDNormalize.canonical(b.chatJID, client: client) == chatJID else { return }
         if b.kind == "protocol" || b.kind == "system" { return }
-        if messages.contains(where: { $0.id == b.id }) { return }
-        messages.append(UIMessage(b))
+        // O(1) dedupe via the Set mirror — both for rows already on
+        // screen and for rows queued earlier in this flush window.
+        if messageIDs.contains(b.id) { return }
+        if pendingIngestIDs.contains(b.id) { return }
+        pendingIngestIDs.insert(b.id)
+        pendingIngest.append(b)
+        guard pendingIngestFlush == nil else { return }
+        pendingIngestFlush = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(50))
+            guard let self else { return }
+            self.flushIngest()
+        }
+    }
+
+    /// Drains `pendingIngest` into `messages` in one batch. Bumps the
+    /// timeline generation once for the whole batch (vs. once per
+    /// event), then runs per-message side effects: SwiftData persist,
+    /// auto-download, unread-receipt bookkeeping.
+    @MainActor
+    private func flushIngest() {
+        let batch = pendingIngest
+        pendingIngest.removeAll(keepingCapacity: true)
+        pendingIngestIDs.removeAll(keepingCapacity: true)
+        pendingIngestFlush = nil
+        if batch.isEmpty { return }
+        // Filter against the current Set — a path other than `ingest`
+        // (e.g. an optimistic send, a forwarded-into-self append) may
+        // have inserted one of these ids since the burst started.
+        var newRows: [UIMessage] = []
+        newRows.reserveCapacity(batch.count)
+        var ingested: [BridgeMessage] = []
+        ingested.reserveCapacity(batch.count)
+        for b in batch {
+            if messageIDs.contains(b.id) { continue }
+            let m = UIMessage(b)
+            newRows.append(m)
+            messageIDs.insert(m.id)
+            ingested.append(b)
+        }
+        if newRows.isEmpty { return }
+        messages.append(contentsOf: newRows)
         invalidateTimeline()
-        persist(b)
-        ensureDownload(for: b)
-        if !b.fromMe {
-            // Don't fire the receipt yet — wait until the row has been
-            // on screen long enough that the user actually saw it.
-            // ViewportReadModifier drives `markVisibleAsRead`.
-            unreadInboundIDs.insert(b.id)
+        for b in ingested {
+            persist(b)
+            ensureDownload(for: b)
+            if !b.fromMe {
+                // Don't fire the receipt yet — wait until the row has
+                // been on screen long enough that the user actually
+                // saw it. ViewportReadModifier drives
+                // `markVisibleAsRead`.
+                unreadInboundIDs.insert(b.id)
+            }
         }
     }
 
@@ -1577,17 +1650,20 @@ final class ConversationViewModel {
                              fileName: nil,
                              localPath: persistent.path))
             messages.append(m)
+            messageIDs.insert(m.id)
             invalidateTimeline()
             receiptStatus[m.id] = .sent
             persistOutgoingMedia(m, kind: "audio", localPath: persistent.path)
         } catch {
-            messages.append(UIMessage(
+            let sys = UIMessage(
                 id: UUID().uuidString,
                 chatJID: chatJID,
                 senderJID: "system",
                 fromMe: false,
                 timestamp: .now,
-                body: .system("voice note failed: \(error.localizedDescription)")))
+                body: .system("voice note failed: \(error.localizedDescription)"))
+            messages.append(sys)
+            messageIDs.insert(sys.id)
             invalidateTimeline()
             try? FileManager.default.removeItem(at: result.url)
         }
@@ -1708,18 +1784,21 @@ final class ConversationViewModel {
                              fileName: kind == "document" ? url.lastPathComponent : nil,
                              localPath: cached))
             messages.append(m)
+            messageIDs.insert(m.id)
             localPaths[res.messageID] = cached
             invalidateTimeline()
             receiptStatus[res.messageID] = .sent
             persistOutgoingMedia(m, kind: kind, localPath: cached)
         } catch {
-            messages.append(UIMessage(
+            let sys = UIMessage(
                 id: UUID().uuidString,
                 chatJID: chatJID,
                 senderJID: "system",
                 fromMe: false,
                 timestamp: .now,
-                body: .system("send failed: \(error.localizedDescription)")))
+                body: .system("send failed: \(error.localizedDescription)"))
+            messages.append(sys)
+            messageIDs.insert(sys.id)
             invalidateTimeline()
         }
     }
@@ -1744,17 +1823,20 @@ final class ConversationViewModel {
                 timestamp: Date(timeIntervalSince1970: TimeInterval(res.timestamp)),
                 body: .location(loc, isLive: false, sequence: nil))
             messages.append(m)
+            messageIDs.insert(m.id)
             invalidateTimeline()
             receiptStatus[res.messageID] = .sent
             persistOutgoingLocation(m, location: loc)
         } catch {
-            messages.append(UIMessage(
+            let sys = UIMessage(
                 id: UUID().uuidString,
                 chatJID: chatJID,
                 senderJID: "system",
                 fromMe: false,
                 timestamp: .now,
-                body: .system("send failed: \(error.localizedDescription)")))
+                body: .system("send failed: \(error.localizedDescription)"))
+            messages.append(sys)
+            messageIDs.insert(sys.id)
             invalidateTimeline()
         }
     }
@@ -1776,17 +1858,20 @@ final class ConversationViewModel {
                 timestamp: Date(timeIntervalSince1970: TimeInterval(res.timestamp)),
                 body: .contact(card))
             messages.append(m)
+            messageIDs.insert(m.id)
             invalidateTimeline()
             receiptStatus[res.messageID] = .sent
             persistOutgoingContact(m, contact: card)
         } catch {
-            messages.append(UIMessage(
+            let sys = UIMessage(
                 id: UUID().uuidString,
                 chatJID: chatJID,
                 senderJID: "system",
                 fromMe: false,
                 timestamp: .now,
-                body: .system("send failed: \(error.localizedDescription)")))
+                body: .system("send failed: \(error.localizedDescription)"))
+            messages.append(sys)
+            messageIDs.insert(sys.id)
             invalidateTimeline()
         }
     }
@@ -1944,6 +2029,7 @@ final class ConversationViewModel {
                             selectableCount: res.poll.selectableCount))
 
             messages.append(m)
+            messageIDs.insert(m.id)
             invalidateTimeline()
             receiptStatus[m.id] = .sent
             persistOutgoingPoll(m, pollJSON: res.poll.json ?? "")
@@ -2327,13 +2413,15 @@ final class ConversationViewModel {
                     }
                 }
             } catch {
-                self.messages.append(UIMessage(
+                let sys = UIMessage(
                     id: UUID().uuidString,
                     chatJID: self.chatJID,
                     senderJID: "system",
                     fromMe: false,
                     timestamp: .now,
-                    body: .system("vote failed: \(error.localizedDescription)")))
+                    body: .system("vote failed: \(error.localizedDescription)"))
+                self.messages.append(sys)
+                self.messageIDs.insert(sys.id)
                 self.invalidateTimeline()
             }
         }
@@ -2393,13 +2481,15 @@ final class ConversationViewModel {
                 self.applyReaction(rx)
                 self.persistReactionLocal(rx)
             } catch {
-                self.messages.append(UIMessage(
+                let sys = UIMessage(
                     id: UUID().uuidString,
                     chatJID: self.chatJID,
                     senderJID: "system",
                     fromMe: false,
                     timestamp: .now,
-                    body: .system("reaction failed: \(error.localizedDescription)")))
+                    body: .system("reaction failed: \(error.localizedDescription)"))
+                self.messages.append(sys)
+                self.messageIDs.insert(sys.id)
                 self.invalidateTimeline()
             }
         }
@@ -2430,13 +2520,15 @@ final class ConversationViewModel {
                 self.applyLocalStar(messageID: msg.id,
                                     starredAt: starred ? when : nil)
             } catch {
-                self.messages.append(UIMessage(
+                let sys = UIMessage(
                     id: UUID().uuidString,
                     chatJID: self.chatJID,
                     senderJID: "system",
                     fromMe: false,
                     timestamp: .now,
-                    body: .system("star failed: \(error.localizedDescription)")))
+                    body: .system("star failed: \(error.localizedDescription)"))
+                self.messages.append(sys)
+                self.messageIDs.insert(sys.id)
                 self.invalidateTimeline()
             }
         }
@@ -2518,13 +2610,15 @@ final class ConversationViewModel {
                 self.applyLocalMessagePin(messageID: msg.id,
                                           pinnedAt: pinned ? when : nil)
             } catch {
-                self.messages.append(UIMessage(
+                let sys = UIMessage(
                     id: UUID().uuidString,
                     chatJID: self.chatJID,
                     senderJID: "system",
                     fromMe: false,
                     timestamp: .now,
-                    body: .system("pin failed: \(error.localizedDescription)")))
+                    body: .system("pin failed: \(error.localizedDescription)"))
+                self.messages.append(sys)
+                self.messageIDs.insert(sys.id)
                 self.invalidateTimeline()
             }
         }
