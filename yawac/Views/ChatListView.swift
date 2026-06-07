@@ -308,6 +308,18 @@ struct ChatListView: View {
 
             // ─── List with sectioned chats. Flat row enum so LazyVStack
             // only diffs one ForEach instead of multiple nested ones.
+            // F5: while the cold-start bootstrap is in flight and we
+            // have nothing to draw, render a ProgressView in place of
+            // the empty list so the sidebar doesn't look "stuck on
+            // blank". The flag flips to `false` the moment the
+            // off-MainActor snapshot lands and `chats` is published.
+            if vm.bootstrapping && vm.chats.isEmpty {
+                Spacer(minLength: 0)
+                ProgressView()
+                    .controlSize(.small)
+                    .frame(maxWidth: .infinity)
+                Spacer(minLength: 0)
+            } else {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 1) {
                     ForEach(displayRows()) { row in
@@ -338,6 +350,7 @@ struct ChatListView: View {
                 .padding(.horizontal, 8)
                 .padding(.bottom, 12)
             }
+            }  // end else (bootstrap branch)
         }
         .background(Theme.sidebarBg)
         .ignoresSafeArea(.container, edges: .top)

@@ -90,6 +90,63 @@ final class ConversationViewModel {
     /// when the chat becomes active.
     weak var chatList: ChatListViewModel?
 
+    // MARK: - Sectioned timeline cache
+    //
+    // ConversationView used to call `timeline()` from within `ForEach`,
+    // walking `messages` and building a fresh `[TimelineItem]` (with
+    // per-day `dateHeader`s) on every body evaluation — O(n) per redraw.
+    // The same view also computed `messageRevisionToken` by reducing
+    // every UIMessage to count `starredAt != nil`, another O(n) pass.
+    //
+    // We now cache the sectioned array and invalidate it lazily via a
+    // generation counter that is bumped only when the timeline's inputs
+    // (`messages`, `localPaths`, or `starredAt`) actually change. The
+    // cache-hit path is O(1) (Int compare).
+    //
+    // `timelineGeneration` is observable so views can react to
+    // invalidations (ChatInfoView reads it as `messageRevision`); the
+    // backing array + last-seen generation are
+    // `@ObservationIgnored` so reading/writing the cache itself does
+    // *not* trigger a view re-eval.
+    @ObservationIgnored private var cachedTimeline: [TimelineItem] = []
+    @ObservationIgnored private var cachedTimelineGen: Int = -1
+    private(set) var timelineGeneration: Int = 0
+
+    /// Returns the sectioned (date-headers + messages) timeline, served
+    /// from cache when the generation hasn't moved. Rebuilds only when
+    /// `invalidateTimeline()` has been called since the last build.
+    func timeline() -> [TimelineItem] {
+        if cachedTimelineGen == timelineGeneration {
+            return cachedTimeline
+        }
+        let cal = Calendar.current
+        var out: [TimelineItem] = []
+        out.reserveCapacity(messages.count + 8)
+        var lastDay: DateComponents?
+        for m in messages {
+            let day = cal.dateComponents([.year, .month, .day], from: m.timestamp)
+            if day != lastDay {
+                if let header = cal.date(from: day) {
+                    out.append(.dateHeader(header))
+                }
+                lastDay = day
+            }
+            out.append(.message(m))
+        }
+        cachedTimeline = out
+        cachedTimelineGen = timelineGeneration
+        return out
+    }
+
+    /// Bumps the timeline generation counter. Call after every mutation
+    /// to `messages`, `localPaths`, or any per-message field that
+    /// influences the displayed timeline (e.g. `starredAt`,
+    /// `locallyDeleted`, `revokedAt`, `editedAt`, `pinnedAt`,
+    /// `viewOnceLocked`).
+    private func invalidateTimeline() {
+        timelineGeneration &+= 1
+    }
+
     // MARK: - In-chat find bar
     var messageIndex: MessageIndex = .shared
     var findActive: Bool = false {
@@ -241,6 +298,7 @@ final class ConversationViewModel {
         // Insert sorted by timestamp.
         let idx = messages.firstIndex(where: { $0.timestamp > m.timestamp }) ?? messages.count
         messages.insert(m, at: idx)
+        invalidateTimeline()
         pendingScrollToID = id
     }
 
@@ -414,6 +472,7 @@ final class ConversationViewModel {
                     um.isForwarded = true
                     if !messages.contains(where: { $0.id == um.id }) {
                         messages.append(um)
+                        invalidateTimeline()
                     }
                 }
             } catch {
@@ -421,6 +480,7 @@ final class ConversationViewModel {
                     id: UUID().uuidString, chatJID: self.chatJID, senderJID: "system",
                     fromMe: false, timestamp: .now,
                     body: .system("forward failed: \(error.localizedDescription)")))
+                invalidateTimeline()
             }
         }
         // Refresh the destination's sidebar preview/timestamp from the
@@ -476,9 +536,111 @@ final class ConversationViewModel {
     private(set) var initialAnchorID: String?
 
     func loadHistory() {
-        guard let context else { return }
+        guard let container = context?.container else { return }
         let jid = chatJID
+        let limit = Self.historyLoadLimit
+        let client = self.client
+        // Closure captures the @MainActor-isolated WAClient instance.
+        // `resolveLIDToPN` / `resolvePNToLID` are nonisolated, so the
+        // canonicalize call is safe from any thread.
+        let canonicalize: @Sendable (String) -> String = { jid in
+            JIDNormalize.canonical(jid, client: client)
+        }
         restoreDraftIfNeeded()
+        Task.detached(priority: .userInitiated) { [weak self] in
+            let snapshot = Self.buildHistorySnapshot(
+                chatJID: jid,
+                container: container,
+                canonicalize: canonicalize,
+                limit: limit)
+            await self?.applyHistorySnapshot(snapshot)
+        }
+    }
+
+    /// MainActor commit of a snapshot produced by
+    /// `buildHistorySnapshot`. One assignment per published collection.
+    ///
+    /// Race guard: messages that arrived via `ingest()` / the event pump
+    /// while the background snapshot was building (~100ms+ on large
+    /// chats) get appended to `self.messages` first; an unconditional
+    /// replace would wipe them. Preserve any rows whose id is not in
+    /// the snapshot and append them in timestamp order — by definition
+    /// they are newer than the snapshot's fetch time, so they sort
+    /// after the snapshot's newest row.
+    @MainActor
+    private func applyHistorySnapshot(_ snap: ConversationHistorySnapshot) {
+        let snapIDs = Set(snap.messages.map { $0.id })
+        let lateArrivals = self.messages.filter { !snapIDs.contains($0.id) }
+        if lateArrivals.isEmpty {
+            self.messages = snap.messages
+        } else {
+            self.messages = snap.messages + lateArrivals.sorted { $0.timestamp < $1.timestamp }
+        }
+        for (id, status) in snap.receiptStatus {
+            self.receiptStatus[id] = status
+        }
+        for (id, byHash) in snap.reactionsBySender {
+            self.reactionsBySender[id] = byHash
+        }
+        for (id, byHash) in snap.pollVotes {
+            self.pollVotes[id] = byHash
+        }
+        for (id, path) in snap.localPaths {
+            self.localPaths[id] = path
+        }
+        for (id, err) in snap.downloadErrors {
+            self.downloadErrors[id] = err
+        }
+        self.initialAnchorID = snap.initialAnchorID
+        for id in snap.unreadInboundIDs {
+            self.unreadInboundIDs.insert(id)
+        }
+        // Kick downloads now that we're on MainActor (downloadTasks lives here).
+        for target in snap.downloadTargets {
+            if self.downloadTasks[target.id] != nil { continue }
+            if self.localPaths[target.id] != nil { continue }
+            ensureDownloadFromHistory(
+                id: target.id, kind: target.kind, refJSON: target.refJSON)
+        }
+        // Whole-list replace + path / star hydration above invalidates
+        // the sectioned-timeline cache exactly once for the apply pass.
+        invalidateTimeline()
+        // Auto-refetch expired (once per chat per session). The snapshot
+        // carries only the candidate ids + timestamps; we look up the
+        // anchor PersistedMessage on the main context for the existing
+        // helper's signature.
+        if !didAutoRefetchExpired,
+           let oldest = snap.expiredOnLoad.min(by: { $0.timestamp < $1.timestamp }) {
+            didAutoRefetchExpired = true
+            let anchorID = oldest.id
+            if let context,
+               let row = try? context.fetch(
+                FetchDescriptor<PersistedMessage>(
+                    predicate: #Predicate { $0.id == anchorID })).first {
+                let ids = snap.expiredOnLoad.map { $0.id }
+                autoRefetchExpiredBatch(anchor: row, allIDs: ids)
+            }
+        }
+        let t = snap.timings
+        // Logger with .public privacy renders the values in
+        // Console.app — NSLog with format specifiers gets mangled
+        // into <private> by the unified-log redaction.
+        perfLog.log("loadHistory rows=\(t.rowCount, privacy: .public) scrub=\(t.scrubMs, format: .fixed(precision: 0), privacy: .public)ms fetch=\(t.fetchMs, format: .fixed(precision: 0), privacy: .public)ms map=\(t.mapMs, format: .fixed(precision: 0), privacy: .public)ms total=\(t.totalMs, format: .fixed(precision: 0), privacy: .public)ms")
+    }
+
+    /// Builds the chat-history snapshot off MainActor against a fresh
+    /// background `ModelContext` bound to the shared container. All
+    /// SwiftData reads, scrubs, sweeps, reaction + poll hydration, and
+    /// per-row `fileExists` probes happen here; the produced value-type
+    /// snapshot is then committed in one shot by
+    /// `applyHistorySnapshot`.
+    nonisolated static func buildHistorySnapshot(
+        chatJID jid: String,
+        container: ModelContainer,
+        canonicalize: @Sendable (String) -> String,
+        limit: Int
+    ) -> ConversationHistorySnapshot {
+        let context = ModelContext(container)
         let t0 = CFAbsoluteTimeGetCurrent()
         // One-shot migration: earlier builds persisted some rows with raw
         // (device-suffixed / @lid) chatJID via CVM.persist. Scrub anything
@@ -496,7 +658,7 @@ final class ConversationViewModel {
             if let scrubRows = try? context.fetch(scrubDescriptor) {
                 var changed = 0
                 for r in scrubRows {
-                    if JIDNormalize.canonical(r.chatJID, client: client) == jid {
+                    if canonicalize(r.chatJID) == jid {
                         r.chatJID = jid
                         changed += 1
                     }
@@ -513,196 +675,287 @@ final class ConversationViewModel {
         var descriptor = FetchDescriptor<PersistedMessage>(
             predicate: #Predicate { $0.chatJID == jid },
             sortBy: [SortDescriptor(\.timestamp, order: .reverse)])
-        descriptor.fetchLimit = Self.historyLoadLimit
-        if let recentRows = try? context.fetch(descriptor) {
-            let t2 = CFAbsoluteTimeGetCurrent()
-            let rows = recentRows.reversed().map { $0 }
-            // Sweep legacy rows of non-displayable kinds. Gated per-chat
-            // via UserDefaults — only the first open of each chat after
-            // upgrading runs the loop + save. New chats never trip this.
-            let sweepKey = "yawac.cvm.sweptChat.\(jid)"
-            if !UserDefaults.standard.bool(forKey: sweepKey) {
-                var swept = 0
-                for p in rows where p.kind == "reaction" || p.kind == "protocol" || p.kind == "system" {
-                    context.delete(p)
-                    swept += 1
-                }
-                if swept > 0 { try? context.save() }
-                UserDefaults.standard.set(true, forKey: sweepKey)
+        descriptor.fetchLimit = limit
+        let recentRows = (try? context.fetch(descriptor)) ?? []
+        let t2 = CFAbsoluteTimeGetCurrent()
+        let rows = recentRows.reversed().map { $0 }
+        // Sweep legacy rows of non-displayable kinds. Gated per-chat
+        // via UserDefaults — only the first open of each chat after
+        // upgrading runs the loop + save. New chats never trip this.
+        let sweepKey = "yawac.cvm.sweptChat.\(jid)"
+        if !UserDefaults.standard.bool(forKey: sweepKey) {
+            var swept = 0
+            for p in rows where p.kind == "reaction" || p.kind == "protocol" || p.kind == "system" {
+                context.delete(p)
+                swept += 1
             }
-            let displayable = rows.filter { p in
-                p.kind != "reaction" && p.kind != "protocol" && p.kind != "system"
-            }
-            self.messages = displayable.map { p in
-                let body: UIMessage.Body
-                switch p.kind {
-                case "text":
-                    body = .text(p.text ?? "")
-                case "image", "video", "audio", "document", "sticker":
-                    body = .media(kind: p.kind, caption: p.mediaCaption,
-                                  fileName: p.mediaFileName, localPath: p.mediaPath,
-                                  waveform: p.audioWaveform, isPTT: p.isPTT)
-                case "poll":
-                    if let json = p.pollJSON,
-                       let data = json.data(using: .utf8),
-                       let poll = try? JSONDecoder().decode(BridgePoll.self, from: data) {
-                        body = .poll(question: poll.question,
-                                     options: poll.options,
-                                     selectableCount: poll.selectableCount)
-                    } else {
-                        body = .system(p.kind)
-                    }
-                default:
+            if swept > 0 { try? context.save() }
+            UserDefaults.standard.set(true, forKey: sweepKey)
+        }
+        let displayable = rows.filter { p in
+            p.kind != "reaction" && p.kind != "protocol" && p.kind != "system"
+        }
+        let messages: [UIMessage] = displayable.map { p in
+            let body: UIMessage.Body
+            switch p.kind {
+            case "text":
+                body = .text(p.text ?? "")
+            case "image", "video", "audio", "document", "sticker":
+                body = .media(kind: p.kind, caption: p.mediaCaption,
+                              fileName: p.mediaFileName, localPath: p.mediaPath,
+                              waveform: p.audioWaveform, isPTT: p.isPTT)
+            case "poll":
+                if let json = p.pollJSON,
+                   let data = json.data(using: .utf8),
+                   let poll = try? JSONDecoder().decode(BridgePoll.self, from: data) {
+                    body = .poll(question: poll.question,
+                                 options: poll.options,
+                                 selectableCount: poll.selectableCount)
+                } else {
                     body = .system(p.kind)
                 }
-                var m = UIMessage(
-                    id: p.id,
-                    chatJID: p.chatJID,
-                    senderJID: p.senderJID,
-                    fromMe: p.fromMe,
-                    timestamp: p.timestamp,
-                    body: body)
-                m.editedAt = p.editedAt
-                m.revokedAt = p.revokedAt
-                m.revokedBy = p.revokedBy
-                m.locallyDeleted = p.locallyDeleted
-                m.starredAt = p.starredAt
-        m.pinnedAt = p.pinnedAt
-        m.isForwarded = p.isForwarded
-        m.isViewOnce = p.isViewOnce
-        m.viewOnceLocked = p.viewOnceLocked
-                m.quotedMessageID = p.quotedMessageID
-                m.quotedSenderJID = p.quotedSenderJID
-                m.quotedFromMe = p.quotedFromMe
-                m.quotedTextSnippet = p.quotedTextSnippet
-                m.quotedKind = p.quotedKind
-                return m
+            default:
+                body = .system(p.kind)
             }
-            // Hydrate persisted delivery status (fromMe only — receipts for
-            // inbound messages aren't shown).
-            for p in displayable where p.fromMe {
-                switch p.deliveryStatus {
-                case "delivered": receiptStatus[p.id] = .delivered
-                case "played":    receiptStatus[p.id] = .played
-                case "read":      receiptStatus[p.id] = .read
-                default:          receiptStatus[p.id] = .sent
-                }
-            }
-
-            // Hydrate reactions for the loaded messages from PersistedReaction.
-            let ids = Set(displayable.map { $0.id })
-            let rxDescriptor = FetchDescriptor<PersistedReaction>(
-                predicate: #Predicate { ids.contains($0.targetMessageID) })
-            if let rxRows = try? context.fetch(rxDescriptor) {
-                for r in rxRows {
-                    var byHash = reactionsBySender[r.targetMessageID] ?? [:]
-                    byHash[r.senderJID] = r.emoji
-                    reactionsBySender[r.targetMessageID] = byHash
-                }
-            }
-
-            // Hydrate poll vote tallies. Only seed entries for polls in the
-            // current window — older polls re-hydrate when scrolled back in.
-            let pollIDs = Set(displayable.filter { $0.kind == "poll" }.map { $0.id })
-            if !pollIDs.isEmpty {
-                let pvDescriptor = FetchDescriptor<PersistedPollVote>(
-                    predicate: #Predicate { pollIDs.contains($0.pollMessageID) })
-                if let pvRows = try? context.fetch(pvDescriptor) {
-                    for v in pvRows {
-                        guard let data = v.optionHashesJSON.data(using: .utf8),
-                              let hashes = try? JSONDecoder().decode([String].self, from: data)
-                        else { continue }
-                        var byHash = pollVotes[v.pollMessageID] ?? [:]
-                        for h in hashes {
-                            var set = byHash[h] ?? []
-                            set.insert(v.voterJID)
-                            byHash[h] = set
-                        }
-                        pollVotes[v.pollMessageID] = byHash
-                    }
-                }
-            }
-
-            // Seed localPaths from any persisted media files, then kick off
-            // downloads for media (images/stickers) that we don't have on disk yet.
-            var expiredOnLoad: [PersistedMessage] = []
-            for p in rows {
-                if let path = p.mediaPath, FileManager.default.fileExists(atPath: path) {
-                    localPaths[p.id] = path
-                    continue
-                }
-                let downloadable: Set<String> = ["image", "sticker", "video", "audio", "document"]
-                guard downloadable.contains(p.kind) else { continue }
-                if downloadTasks[p.id] != nil { continue }
-
-                // Fast path: probe the deterministic cache path before
-                // queueing a Task. Most chats reopen with everything
-                // already cached — avoids spawning hundreds of no-op
-                // download tasks that flood the actor.
-                if let cached = cachedFilePath(for: p) {
-                    localPaths[p.id] = cached
-                    continue
-                }
-                if p.mediaExpired {
-                    // Server has aged this media out — bytes are gone.
-                    // Skip re-attempts on every chat reload.
-                    downloadErrors[p.id] = "media expired"
-                    expiredOnLoad.append(p)
-                    continue
-                }
-
-                guard let refJSON = p.mediaRefJSON else {
-                    // Persisted before mediaRefJSON column existed — no way to
-                    // fetch. Surface so user isn't stuck on infinite spinner.
-                    downloadErrors[p.id] = "no download info (re-pair to refresh)"
-                    continue
-                }
-                ensureDownloadFromHistory(id: p.id, kind: p.kind, refJSON: refJSON)
-            }
-
-            // Auto-refetch: once per chat per session, ask the primary
-            // device to re-upload the window that covers our oldest
-            // expired media. One backfill batch may bring fresh refs for
-            // many messages at once.
-            if !didAutoRefetchExpired, let oldest = expiredOnLoad.min(by: { $0.timestamp < $1.timestamp }) {
-                didAutoRefetchExpired = true
-                let ids = expiredOnLoad.map { $0.id }
-                autoRefetchExpiredBatch(anchor: oldest, allIDs: ids)
-            }
-
-            // Pick initial scroll anchor: if there are unread inbound
-            // messages, jump to the first one (so the user starts reading
-            // where they left off). Otherwise stick to the latest.
-            let pcDescriptor = FetchDescriptor<PersistedChat>(
-                predicate: #Predicate { $0.jid == jid })
-            let unread = (try? context.fetch(pcDescriptor))?.first?.unread ?? 0
-            if unread > 0 && unread <= self.messages.count {
-                let firstUnreadIdx = self.messages.count - unread
-                self.initialAnchorID = self.messages[firstUnreadIdx].id
-            } else {
-                self.initialAnchorID = self.messages.last?.id
-            }
-            // Seed the dwell-tracked unread set. We don't know exactly
-            // which message ids were unread on the phone, so we take
-            // the trailing `unread` inbound rows as the best guess —
-            // matches the first-unread scroll anchor above.
-            if unread > 0 {
-                let inbound = self.messages.filter { !$0.fromMe }
-                for m in inbound.suffix(unread) {
-                    self.unreadInboundIDs.insert(m.id)
-                }
-            }
-            let t3 = CFAbsoluteTimeGetCurrent()
-            let scrubMs = (t1 - t0) * 1000
-            let fetchMs = (t2 - t1) * 1000
-            let mapMs = (t3 - t2) * 1000
-            let totalMs = (t3 - t0) * 1000
-            let rowCount = self.messages.count
-            // Logger with .public privacy renders the values in
-            // Console.app — NSLog with format specifiers gets mangled
-            // into <private> by the unified-log redaction.
-            perfLog.log("loadHistory rows=\(rowCount, privacy: .public) scrub=\(scrubMs, format: .fixed(precision: 0), privacy: .public)ms fetch=\(fetchMs, format: .fixed(precision: 0), privacy: .public)ms map=\(mapMs, format: .fixed(precision: 0), privacy: .public)ms total=\(totalMs, format: .fixed(precision: 0), privacy: .public)ms")
+            var m = UIMessage(
+                id: p.id,
+                chatJID: p.chatJID,
+                senderJID: p.senderJID,
+                fromMe: p.fromMe,
+                timestamp: p.timestamp,
+                body: body)
+            m.editedAt = p.editedAt
+            m.revokedAt = p.revokedAt
+            m.revokedBy = p.revokedBy
+            m.locallyDeleted = p.locallyDeleted
+            m.starredAt = p.starredAt
+            m.pinnedAt = p.pinnedAt
+            m.isForwarded = p.isForwarded
+            m.isViewOnce = p.isViewOnce
+            m.viewOnceLocked = p.viewOnceLocked
+            m.quotedMessageID = p.quotedMessageID
+            m.quotedSenderJID = p.quotedSenderJID
+            m.quotedFromMe = p.quotedFromMe
+            m.quotedTextSnippet = p.quotedTextSnippet
+            m.quotedKind = p.quotedKind
+            return m
         }
+        // Hydrate persisted delivery status (fromMe only — receipts for
+        // inbound messages aren't shown).
+        var receiptStatus: [String: UIMessage.Status] = [:]
+        for p in displayable where p.fromMe {
+            switch p.deliveryStatus {
+            case "delivered": receiptStatus[p.id] = .delivered
+            case "played":    receiptStatus[p.id] = .played
+            case "read":      receiptStatus[p.id] = .read
+            default:          receiptStatus[p.id] = .sent
+            }
+        }
+
+        // Hydrate reactions for the loaded messages from PersistedReaction.
+        let ids = Set(displayable.map { $0.id })
+        let rxDescriptor = FetchDescriptor<PersistedReaction>(
+            predicate: #Predicate { ids.contains($0.targetMessageID) })
+        var reactionsBySender: [String: [String: String]] = [:]
+        if let rxRows = try? context.fetch(rxDescriptor) {
+            for r in rxRows {
+                var byHash = reactionsBySender[r.targetMessageID] ?? [:]
+                byHash[r.senderJID] = r.emoji
+                reactionsBySender[r.targetMessageID] = byHash
+            }
+        }
+
+        // Hydrate poll vote tallies. Only seed entries for polls in the
+        // current window — older polls re-hydrate when scrolled back in.
+        var pollVotes: [String: [String: Set<String>]] = [:]
+        let pollIDs = Set(displayable.filter { $0.kind == "poll" }.map { $0.id })
+        if !pollIDs.isEmpty {
+            let pvDescriptor = FetchDescriptor<PersistedPollVote>(
+                predicate: #Predicate { pollIDs.contains($0.pollMessageID) })
+            if let pvRows = try? context.fetch(pvDescriptor) {
+                for v in pvRows {
+                    guard let data = v.optionHashesJSON.data(using: .utf8),
+                          let hashes = try? JSONDecoder().decode([String].self, from: data)
+                    else { continue }
+                    var byHash = pollVotes[v.pollMessageID] ?? [:]
+                    for h in hashes {
+                        var set = byHash[h] ?? []
+                        set.insert(v.voterJID)
+                        byHash[h] = set
+                    }
+                    pollVotes[v.pollMessageID] = byHash
+                }
+            }
+        }
+
+        // Seed localPaths from any persisted media files; collect rows
+        // that need a download Task kicked once on MainActor. We don't
+        // touch `downloadTasks` here — it's MainActor-only — so the
+        // apply step re-checks before scheduling.
+        var localPaths: [String: String] = [:]
+        var downloadErrors: [String: String] = [:]
+        var downloadTargets: [ConversationHistorySnapshot.DownloadTarget] = []
+        var expiredOnLoad: [ConversationHistorySnapshot.ExpiredEntry] = []
+        let downloadable: Set<String> = ["image", "sticker", "video", "audio", "document"]
+        for p in rows {
+            if let path = p.mediaPath, FileManager.default.fileExists(atPath: path) {
+                localPaths[p.id] = path
+                continue
+            }
+            guard downloadable.contains(p.kind) else { continue }
+
+            // Fast path: probe the deterministic cache path before
+            // queueing a Task. Most chats reopen with everything
+            // already cached — avoids spawning hundreds of no-op
+            // download tasks that flood the actor.
+            if let cached = Self.cachedFilePath(
+                id: p.id, kind: p.kind, mediaFileName: p.mediaFileName) {
+                localPaths[p.id] = cached
+                continue
+            }
+            if p.mediaExpired {
+                // Server has aged this media out — bytes are gone.
+                // Skip re-attempts on every chat reload.
+                downloadErrors[p.id] = "media expired"
+                expiredOnLoad.append(.init(id: p.id, timestamp: p.timestamp))
+                continue
+            }
+
+            guard let refJSON = p.mediaRefJSON else {
+                // Persisted before mediaRefJSON column existed — no way to
+                // fetch. Surface so user isn't stuck on infinite spinner.
+                downloadErrors[p.id] = "no download info (re-pair to refresh)"
+                continue
+            }
+            downloadTargets.append(
+                .init(id: p.id, kind: p.kind, refJSON: refJSON))
+        }
+
+        // Pick initial scroll anchor: if there are unread inbound
+        // messages, jump to the first one (so the user starts reading
+        // where they left off). Otherwise stick to the latest.
+        let pcDescriptor = FetchDescriptor<PersistedChat>(
+            predicate: #Predicate { $0.jid == jid })
+        let unread = (try? context.fetch(pcDescriptor))?.first?.unread ?? 0
+        var initialAnchorID: String?
+        var unreadInboundIDs: Set<String> = []
+        if unread > 0 && unread <= messages.count {
+            let firstUnreadIdx = messages.count - unread
+            initialAnchorID = messages[firstUnreadIdx].id
+        } else {
+            initialAnchorID = messages.last?.id
+        }
+        // Seed the dwell-tracked unread set. We don't know exactly
+        // which message ids were unread on the phone, so we take
+        // the trailing `unread` inbound rows as the best guess —
+        // matches the first-unread scroll anchor above.
+        if unread > 0 {
+            let inbound = messages.filter { !$0.fromMe }
+            for m in inbound.suffix(unread) {
+                unreadInboundIDs.insert(m.id)
+            }
+        }
+        let t3 = CFAbsoluteTimeGetCurrent()
+        return ConversationHistorySnapshot(
+            messages: messages,
+            receiptStatus: receiptStatus,
+            reactionsBySender: reactionsBySender,
+            pollVotes: pollVotes,
+            localPaths: localPaths,
+            initialAnchorID: initialAnchorID,
+            unreadInboundIDs: unreadInboundIDs,
+            downloadTargets: downloadTargets,
+            downloadErrors: downloadErrors,
+            expiredOnLoad: expiredOnLoad,
+            timings: .init(
+                scrubMs: (t1 - t0) * 1000,
+                fetchMs: (t2 - t1) * 1000,
+                mapMs: (t3 - t2) * 1000,
+                totalMs: (t3 - t0) * 1000,
+                rowCount: messages.count))
+    }
+
+    /// Builds the paged-older snapshot off MainActor — like
+    /// `buildHistorySnapshot` but without reaction / poll-vote
+    /// hydration (those are already live on the main thread) and
+    /// without the scrub / sweep migrations (those ran on first open).
+    nonisolated static func buildEarlierSnapshot(
+        chatJID jid: String,
+        container: ModelContainer,
+        limit: Int
+    ) -> ConversationEarlierSnapshot {
+        let context = ModelContext(container)
+        var descriptor = FetchDescriptor<PersistedMessage>(
+            predicate: #Predicate { $0.chatJID == jid },
+            sortBy: [SortDescriptor(\.timestamp, order: .reverse)])
+        descriptor.fetchLimit = limit
+        guard let recentRows = try? context.fetch(descriptor) else {
+            return .init(messages: [])
+        }
+        let rows = recentRows.reversed().map { $0 }
+        let displayable = rows.filter { p in
+            p.kind != "reaction" && p.kind != "protocol" && p.kind != "system"
+        }
+        let messages: [UIMessage] = displayable.map { p in
+            let body: UIMessage.Body
+            switch p.kind {
+            case "text":
+                body = .text(p.text ?? "")
+            case "image", "video", "audio", "document", "sticker":
+                body = .media(kind: p.kind, caption: p.mediaCaption,
+                              fileName: p.mediaFileName, localPath: p.mediaPath,
+                              waveform: p.audioWaveform, isPTT: p.isPTT)
+            case "poll":
+                if let json = p.pollJSON,
+                   let data = json.data(using: .utf8),
+                   let poll = try? JSONDecoder().decode(BridgePoll.self, from: data) {
+                    body = .poll(question: poll.question,
+                                 options: poll.options,
+                                 selectableCount: poll.selectableCount)
+                } else {
+                    body = .system(p.kind)
+                }
+            default:
+                body = .system(p.kind)
+            }
+            return UIMessage(
+                id: p.id, chatJID: p.chatJID, senderJID: p.senderJID,
+                fromMe: p.fromMe, timestamp: p.timestamp, body: body)
+        }
+        return .init(messages: messages)
+    }
+
+    /// Probes the deterministic MediaCache path for a row without
+    /// touching MainActor state — used by the snapshot builder to skip
+    /// download Task spawning when the file is already on disk.
+    nonisolated static func cachedFilePath(
+        id: String, kind: String, mediaFileName: String?
+    ) -> String? {
+        let fm = FileManager.default
+        let base: URL
+        do {
+            let caches = try fm.url(for: .cachesDirectory, in: .userDomainMask,
+                                    appropriateFor: nil, create: false)
+            base = caches.appendingPathComponent("yawac-media", isDirectory: true)
+        } catch { return nil }
+        var candidates: [String] = []
+        if kind == "document", let fn = mediaFileName {
+            let e = (fn as NSString).pathExtension.lowercased()
+            if !e.isEmpty { candidates.append(e) }
+        }
+        switch kind {
+        case "image":    candidates.append(contentsOf: ["jpg", "png", "webp", "gif"])
+        case "video":    candidates.append(contentsOf: ["mp4", "mov", "webm"])
+        case "audio":    candidates.append(contentsOf: ["ogg", "mp3", "m4a", "opus", "wav"])
+        case "sticker":  candidates.append("webp")
+        case "document": candidates.append(contentsOf: ["pdf", "bin"])
+        default:         candidates.append("bin")
+        }
+        for ext in candidates {
+            let path = base.appendingPathComponent("\(id).\(ext)").path
+            if fm.fileExists(atPath: path) { return path }
+        }
+        return nil
     }
 
     /// Re-requests the recent slice of this chat from the primary phone so
@@ -780,7 +1033,7 @@ final class ConversationViewModel {
                 // user isn't given an indefinite "Loading…" UI.
                 try? await Task.sleep(for: .seconds(5))
                 let beforeCount = self.messages.count
-                self.loadEarlier(by: 200)
+                await self.loadEarlier(by: 200)
                 if self.messages.count == beforeCount {
                     self.olderUnavailable = true
                 }
@@ -793,51 +1046,36 @@ final class ConversationViewModel {
                     timestamp: .now,
                     body: .system("history request failed: \(error.localizedDescription)")
                 ), at: 0)
+                self.invalidateTimeline()
             }
         }
     }
 
     /// Re-runs the loadHistory query but with a larger fetchLimit so newly-
-    /// arrived older rows become visible.
-    private func loadEarlier(by additional: Int) {
+    /// arrived older rows become visible. SwiftData fetch + mapping run
+    /// off MainActor; the assignment is committed back on MainActor.
+    ///
+    /// Race guard: the earlier-snapshot is a superset of the current
+    /// window (larger fetchLimit, same chat), so ids in `self.messages`
+    /// should be present. A brand-new message arriving between fetch
+    /// and apply would not be in the snapshot — preserve those rows so
+    /// they aren't wiped.
+    private func loadEarlier(by additional: Int) async {
         let newLimit = max(messages.count + additional, Self.historyLoadLimit)
         let jid = chatJID
-        guard let context else { return }
-        var descriptor = FetchDescriptor<PersistedMessage>(
-            predicate: #Predicate { $0.chatJID == jid },
-            sortBy: [SortDescriptor(\.timestamp, order: .reverse)])
-        descriptor.fetchLimit = newLimit
-        guard let recentRows = try? context.fetch(descriptor) else { return }
-        let rows = recentRows.reversed().map { $0 }
-        let displayable = rows.filter { p in
-            p.kind != "reaction" && p.kind != "protocol" && p.kind != "system"
+        guard let container = context?.container else { return }
+        let snapshot = await Task.detached(priority: .userInitiated) {
+            Self.buildEarlierSnapshot(
+                chatJID: jid, container: container, limit: newLimit)
+        }.value
+        let snapIDs = Set(snapshot.messages.map { $0.id })
+        let lateArrivals = self.messages.filter { !snapIDs.contains($0.id) }
+        if lateArrivals.isEmpty {
+            self.messages = snapshot.messages
+        } else {
+            self.messages = snapshot.messages + lateArrivals.sorted { $0.timestamp < $1.timestamp }
         }
-        self.messages = displayable.map { p in
-            let body: UIMessage.Body
-            switch p.kind {
-            case "text":
-                body = .text(p.text ?? "")
-            case "image", "video", "audio", "document", "sticker":
-                body = .media(kind: p.kind, caption: p.mediaCaption,
-                              fileName: p.mediaFileName, localPath: p.mediaPath,
-                              waveform: p.audioWaveform, isPTT: p.isPTT)
-            case "poll":
-                if let json = p.pollJSON,
-                   let data = json.data(using: .utf8),
-                   let poll = try? JSONDecoder().decode(BridgePoll.self, from: data) {
-                    body = .poll(question: poll.question,
-                                 options: poll.options,
-                                 selectableCount: poll.selectableCount)
-                } else {
-                    body = .system(p.kind)
-                }
-            default:
-                body = .system(p.kind)
-            }
-            return UIMessage(
-                id: p.id, chatJID: p.chatJID, senderJID: p.senderJID,
-                fromMe: p.fromMe, timestamp: p.timestamp, body: body)
-        }
+        invalidateTimeline()
     }
 
     func retryDownload(messageID: String, kind: String, refJSON: String) {
@@ -996,38 +1234,6 @@ final class ConversationViewModel {
         ensureDownloadFromHistory(id: message.id, kind: kind, refJSON: refJSON)
     }
 
-    /// Returns the cached MediaCache file path if the file is already on
-    /// disk, otherwise nil. Used as a fast path to skip download Task
-    /// spawning on chat re-open when everything is already cached.
-    private func cachedFilePath(for p: PersistedMessage) -> String? {
-        let fm = FileManager.default
-        let base: URL
-        do {
-            let caches = try fm.url(for: .cachesDirectory, in: .userDomainMask,
-                                    appropriateFor: nil, create: false)
-            base = caches.appendingPathComponent("yawac-media", isDirectory: true)
-        } catch { return nil }
-        // Try the document's stored filename extension first.
-        var candidates: [String] = []
-        if p.kind == "document", let fn = p.mediaFileName {
-            let e = (fn as NSString).pathExtension.lowercased()
-            if !e.isEmpty { candidates.append(e) }
-        }
-        switch p.kind {
-        case "image":    candidates.append(contentsOf: ["jpg", "png", "webp", "gif"])
-        case "video":    candidates.append(contentsOf: ["mp4", "mov", "webm"])
-        case "audio":    candidates.append(contentsOf: ["ogg", "mp3", "m4a", "opus", "wav"])
-        case "sticker":  candidates.append("webp")
-        case "document": candidates.append(contentsOf: ["pdf", "bin"])
-        default:         candidates.append("bin")
-        }
-        for ext in candidates {
-            let path = base.appendingPathComponent("\(p.id).\(ext)").path
-            if fm.fileExists(atPath: path) { return path }
-        }
-        return nil
-    }
-
     /// Picks a sensible on-disk extension so macOS opens the file with the
     /// correct app. Documents use the original filename's extension when
     /// available, falling back to a mime-derived one or `.bin`.
@@ -1098,6 +1304,7 @@ final class ConversationViewModel {
                 switch result {
                 case .file(let url):
                     self.localPaths[id] = url.path
+                    self.invalidateTimeline()
                     self.downloadErrors[id] = nil
                 case .failed(let reason):
                     self.downloadErrors[id] = reason
@@ -1248,6 +1455,7 @@ final class ConversationViewModel {
                 m.quotedTextSnippet = Self.quotedSnippet(of: q)
             }
             messages.append(m)
+            invalidateTimeline()
             receiptStatus[m.id] = .sent
             persistOutgoing(m, kind: "text", text: body)
         } catch {
@@ -1266,6 +1474,7 @@ final class ConversationViewModel {
         if b.kind == "protocol" || b.kind == "system" { return }
         if messages.contains(where: { $0.id == b.id }) { return }
         messages.append(UIMessage(b))
+        invalidateTimeline()
         persist(b)
         ensureDownload(for: b)
         if !b.fromMe {
@@ -1368,6 +1577,7 @@ final class ConversationViewModel {
                              fileName: nil,
                              localPath: persistent.path))
             messages.append(m)
+            invalidateTimeline()
             receiptStatus[m.id] = .sent
             persistOutgoingMedia(m, kind: "audio", localPath: persistent.path)
         } catch {
@@ -1378,6 +1588,7 @@ final class ConversationViewModel {
                 fromMe: false,
                 timestamp: .now,
                 body: .system("voice note failed: \(error.localizedDescription)")))
+            invalidateTimeline()
             try? FileManager.default.removeItem(at: result.url)
         }
     }
@@ -1498,6 +1709,7 @@ final class ConversationViewModel {
                              localPath: cached))
             messages.append(m)
             localPaths[res.messageID] = cached
+            invalidateTimeline()
             receiptStatus[res.messageID] = .sent
             persistOutgoingMedia(m, kind: kind, localPath: cached)
         } catch {
@@ -1508,6 +1720,7 @@ final class ConversationViewModel {
                 fromMe: false,
                 timestamp: .now,
                 body: .system("send failed: \(error.localizedDescription)")))
+            invalidateTimeline()
         }
     }
 
@@ -1531,6 +1744,7 @@ final class ConversationViewModel {
                 timestamp: Date(timeIntervalSince1970: TimeInterval(res.timestamp)),
                 body: .location(loc, isLive: false, sequence: nil))
             messages.append(m)
+            invalidateTimeline()
             receiptStatus[res.messageID] = .sent
             persistOutgoingLocation(m, location: loc)
         } catch {
@@ -1541,6 +1755,7 @@ final class ConversationViewModel {
                 fromMe: false,
                 timestamp: .now,
                 body: .system("send failed: \(error.localizedDescription)")))
+            invalidateTimeline()
         }
     }
 
@@ -1561,6 +1776,7 @@ final class ConversationViewModel {
                 timestamp: Date(timeIntervalSince1970: TimeInterval(res.timestamp)),
                 body: .contact(card))
             messages.append(m)
+            invalidateTimeline()
             receiptStatus[res.messageID] = .sent
             persistOutgoingContact(m, contact: card)
         } catch {
@@ -1571,6 +1787,7 @@ final class ConversationViewModel {
                 fromMe: false,
                 timestamp: .now,
                 body: .system("send failed: \(error.localizedDescription)")))
+            invalidateTimeline()
         }
     }
 
@@ -1727,6 +1944,7 @@ final class ConversationViewModel {
                             selectableCount: res.poll.selectableCount))
 
             messages.append(m)
+            invalidateTimeline()
             receiptStatus[m.id] = .sent
             persistOutgoingPoll(m, pollJSON: res.poll.json ?? "")
         } catch {
@@ -1854,6 +2072,7 @@ final class ConversationViewModel {
     func deleteForMe(_ msg: UIMessage) {
         if let idx = messages.firstIndex(where: { $0.id == msg.id }) {
             messages[idx].locallyDeleted = true
+            invalidateTimeline()
         }
         persistLocallyDeleted(messageID: msg.id, value: true)
         chatList?.refreshPreview(chatJID: chatJID)
@@ -1890,6 +2109,7 @@ final class ConversationViewModel {
         guard JIDNormalize.canonical(chatJID, client: client) == self.chatJID else { return }
         if let idx = messages.firstIndex(where: { $0.id == messageID }) {
             messages[idx].locallyDeleted = true
+            invalidateTimeline()
         }
         persistLocallyDeleted(messageID: messageID, value: true)
         chatList?.refreshPreview(chatJID: self.chatJID)
@@ -1929,6 +2149,7 @@ final class ConversationViewModel {
             r.locallyDeleted = old.locallyDeleted
             r.editedAt = at
             messages[idx] = r
+            invalidateTimeline()
         }
         persistEdit(messageID: messageID, newText: newText, editedAt: at)
         chatList?.refreshPreview(chatJID: chatJID)
@@ -1939,6 +2160,7 @@ final class ConversationViewModel {
             messages[idx].revokedAt = at
             messages[idx].revokedBy = jid
             // Bubble rendering uses revokedAt as the gate; body stays as-is.
+            invalidateTimeline()
         }
         persistRevoke(messageID: messageID, revokedBy: jid, revokedAt: at)
         chatList?.refreshPreview(chatJID: chatJID)
@@ -2112,6 +2334,7 @@ final class ConversationViewModel {
                     fromMe: false,
                     timestamp: .now,
                     body: .system("vote failed: \(error.localizedDescription)")))
+                self.invalidateTimeline()
             }
         }
     }
@@ -2177,6 +2400,7 @@ final class ConversationViewModel {
                     fromMe: false,
                     timestamp: .now,
                     body: .system("reaction failed: \(error.localizedDescription)")))
+                self.invalidateTimeline()
             }
         }
     }
@@ -2213,6 +2437,7 @@ final class ConversationViewModel {
                     fromMe: false,
                     timestamp: .now,
                     body: .system("star failed: \(error.localizedDescription)")))
+                self.invalidateTimeline()
             }
         }
     }
@@ -2227,6 +2452,7 @@ final class ConversationViewModel {
     private func applyLocalStar(messageID: String, starredAt: Date?) {
         if let idx = messages.firstIndex(where: { $0.id == messageID }) {
             messages[idx].starredAt = starredAt
+            invalidateTimeline()
         }
         persistStar(messageID: messageID, starredAt: starredAt)
     }
@@ -2259,6 +2485,7 @@ final class ConversationViewModel {
         if let idx = messages.firstIndex(where: { $0.id == messageID }) {
             messages[idx].viewOnceLocked = true
         }
+        invalidateTimeline()
     }
 
     /// The newest currently-pinned message in this chat, or nil. The
@@ -2298,6 +2525,7 @@ final class ConversationViewModel {
                     fromMe: false,
                     timestamp: .now,
                     body: .system("pin failed: \(error.localizedDescription)")))
+                self.invalidateTimeline()
             }
         }
     }
@@ -2312,6 +2540,7 @@ final class ConversationViewModel {
     private func applyLocalMessagePin(messageID: String, pinnedAt: Date?) {
         if let idx = messages.firstIndex(where: { $0.id == messageID }) {
             messages[idx].pinnedAt = pinnedAt
+            invalidateTimeline()
         }
         persistMessagePin(messageID: messageID, pinnedAt: pinnedAt)
     }

@@ -90,8 +90,28 @@ class WAClient: PhoneValidating, LIDResolving {
     // pinning the UI.
     nonisolated(unsafe) private let go: BridgeClient
     private let bus = WAEventBus()
-    private var subscribers: [UUID: AsyncStream<Event>.Continuation] = [:]
-    private var pump: Task<Void, Never>?
+
+    // MARK: - Event pump (off-main)
+    //
+    // Subscribers are read+written from the detached pump Task as well as
+    // from `eventStream()` / continuation termination callbacks (which may
+    // be on any actor). Protected by `subscribersQueue`;
+    // AsyncStream.Continuation.yield is safe to call from any thread.
+    private let subscribersQueue = DispatchQueue(
+        label: "yawac.WAClient.subscribers")
+    nonisolated(unsafe) private var _subscribers: [UUID: AsyncStream<Event>.Continuation] = [:]
+    // pump Task is write-once in startPump (from MainActor init) and never
+    // read back — nothing observes it for cancellation or deinit cleanup.
+    // nonisolated(unsafe) is justified by that invariant.
+    nonisolated(unsafe) private var pump: Task<Void, Never>?
+
+    nonisolated private func withSubscribers<R>(_ body: ([UUID: AsyncStream<Event>.Continuation]) -> R) -> R {
+        subscribersQueue.sync { body(_subscribers) }
+    }
+
+    nonisolated private func mutateSubscribers<R>(_ body: (inout [UUID: AsyncStream<Event>.Continuation]) -> R) -> R {
+        subscribersQueue.sync { body(&_subscribers) }
+    }
 
     init(dbPath: String) throws {
         var err: NSError?
@@ -103,13 +123,15 @@ class WAClient: PhoneValidating, LIDResolving {
         startPump()
     }
 
-    func eventStream() -> AsyncStream<Event> {
+    nonisolated func eventStream() -> AsyncStream<Event> {
         let id = UUID()
         return AsyncStream { continuation in
-            self.subscribers[id] = continuation
+            self.mutateSubscribers { subs in
+                subs[id] = continuation
+            }
             continuation.onTermination = { [weak self] _ in
-                Task { @MainActor [weak self] in
-                    self?.subscribers.removeValue(forKey: id)
+                self?.mutateSubscribers { subs in
+                    subs.removeValue(forKey: id)
                 }
             }
         }
@@ -807,14 +829,15 @@ class WAClient: PhoneValidating, LIDResolving {
         go.isConnected()
     }
 
-    private func startPump() {
+    nonisolated private func startPump() {
         let stream = bus.stream
-        pump = Task { @MainActor [weak self] in
-            // Bridge wake-rate diagnostics. Each Go event hops here and
-            // fans out to every subscriber on the main actor — every
-            // event is a main-thread wake. The kernel flagged yawac at
-            // ~792 wakes/sec; if a kind dominates this counter, that's
-            // the source. Flush once per 5s of wall time.
+        // Detached, off main actor. Each Go event decodes here and yields
+        // to subscriber continuations on a background thread. Subscribers
+        // hop to whatever actor they need inside their own `for await`.
+        // Eliminates per-event main-thread wakes that the original pump
+        // (Task { @MainActor }) generated during history-sync / message
+        // bursts (kernel flagged yawac at ~792 wakes/sec).
+        pump = Task.detached(priority: .userInitiated) { [weak self] in
             var perKindCount: [String: Int] = [:]
             var windowStart = CFAbsoluteTimeGetCurrent()
             for await tuple in stream {
@@ -833,14 +856,27 @@ class WAClient: PhoneValidating, LIDResolving {
                     windowStart = now
                 }
                 let evt = WAClient.decode(kind: tuple.kind, payload: tuple.payload)
-                for cont in self.subscribers.values {
-                    cont.yield(evt)
+                // Snapshot continuations under the lock; yield outside it.
+                // `cont.yield` itself is non-blocking, but a previously
+                // finished continuation's `onTermination` callback fires
+                // synchronously and re-enters `subscribersQueue.sync` via
+                // `mutateSubscribers` — yielding while holding the lock
+                // would deadlock that path.
+                let snapshot: [AsyncStream<Event>.Continuation] = self.withSubscribers { subs in
+                    Array(subs.values)
                 }
+                for cont in snapshot { cont.yield(evt) }
             }
-            // stream ended (deinit case)
+            // stream ended (deinit case). Drain + clear under the lock,
+            // finish the continuations outside it for the same reentrancy
+            // reason as the per-event fan-out above.
             guard let self else { return }
-            for cont in self.subscribers.values { cont.finish() }
-            self.subscribers.removeAll()
+            let toFinish: [AsyncStream<Event>.Continuation] = self.mutateSubscribers { subs in
+                let conts = Array(subs.values)
+                subs.removeAll()
+                return conts
+            }
+            for cont in toFinish { cont.finish() }
         }
     }
 

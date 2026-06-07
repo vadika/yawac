@@ -1,13 +1,13 @@
 import Foundation
 
-struct LocationPayload: Hashable {
+struct LocationPayload: Hashable, Sendable {
     let lat: Double
     let lng: Double
     let name: String
     let address: String
 }
 
-struct ContactPayload: Hashable {
+struct ContactPayload: Hashable, Sendable {
     let jid: String
     let displayName: String
     let phone: String
@@ -16,7 +16,7 @@ struct ContactPayload: Hashable {
     let vcard: String
 }
 
-struct UIMessage: Identifiable, Hashable {
+struct UIMessage: Identifiable, Hashable, Sendable {
     let id: String
     let chatJID: String
     let senderJID: String
@@ -43,7 +43,7 @@ struct UIMessage: Identifiable, Hashable {
     /// ViewOnceReveal.reveal(_:) flips it.
     var viewOnceLocked: Bool = false
 
-    enum Body: Hashable {
+    enum Body: Hashable, Sendable {
         case text(String)
         /// `waveform` carries the raw amplitude bytes (WhatsApp ships 64
         /// values 0-100) for voice notes — nil for older messages and
@@ -61,7 +61,7 @@ struct UIMessage: Identifiable, Hashable {
 }
 
 extension UIMessage {
-    enum Status: Hashable {
+    enum Status: Hashable, Sendable {
         case sent
         case delivered
         case read
