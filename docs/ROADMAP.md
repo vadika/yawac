@@ -205,6 +205,54 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **Performance audit landings F1–F7** (v0.9.30) — Codex
+  (gpt-5.4) audit findings sequenced as plan +
+  subagent-driven execution. Plan at
+  `docs/superpowers/plans/2026-06-07-perf-audit-fixes.md`.
+    - **F1 (critical)** — `WAClient` event pump moved off
+      `MainActor`. Detached background `Task` decodes + fans out;
+      `subscribers` dict guarded by serial `DispatchQueue` with
+      snapshot-and-yield to avoid `onTermination` re-entry.
+      Sustained wake rate dropped from ~792/s to ~70-100/s in
+      live smoke.
+    - **F2 (high)** — `ConversationViewModel.loadHistory` /
+      `loadEarlier` build a `Sendable`
+      `ConversationHistorySnapshot` on a detached `Task` with a
+      fresh background `ModelContext`. `applyHistorySnapshot`
+      commits on `MainActor` and merges late arrivals (id-set
+      union) so `ingest()` rows during the build window aren't
+      clobbered.
+    - **F3 (high)** — New `actor MessageWriter` owns a background
+      `ModelContext`. `ingest` coalesces a 50 ms window; one
+      `context.save()` per batch instead of per row. Save errors
+      now logged (no longer silent).
+    - **F4 (high)** — `ThumbnailCache` (`NSCache<NSString,
+      NSImage>`, 256 entries / 64 MB) replaces inline
+      `NSImage(contentsOfFile:)` in `MessageRow.imageBubble` /
+      `stickerBubble`. Body reads cache; misses kick a detached
+      decode + observable `revision` bump.
+    - **F5 (high)** — `ChatListViewModel.init` defers the cold-
+      start sweep. `buildBootstrap` runs `SQLiteDedupe` +
+      `FetchDescriptor<PersistedChat>` on a detached `Task`;
+      sidebar shows a `ProgressView` while
+      `bootstrapping == true && chats.isEmpty`. Unique-key
+      rebinds round-tripped through the main context to avoid
+      SwiftData's silent-drop-on-background quirk.
+    - **F6 (medium)** — `MessageIndex.forceRebootstrap` gated on
+      a `{canonicalVersion, ownPushName, ownBareJID}` fingerprint
+      persisted in `UserDefaults`. Skips the full FTS wipe on
+      every `.connected` when inputs are unchanged.
+    - **F7 (medium)** — `ConversationView` reads
+      `vm.timeline()` from a cached `[TimelineItem]` keyed by an
+      observable `timelineGeneration` counter. ~28
+      `invalidateTimeline()` call sites cover every observable
+      mutation. `messageRevisionToken` is now an O(1) Int read.
+    - Codex audit blocker fix: `OpusVoicePlayer.swift` /
+      `OggOpusDemuxer.swift` were created in v0.9.29 but never
+      regenerated into `yawac.xcodeproj` because pbxproj is
+      gitignored and `xcodegen generate` was never re-run. Fixed
+      by re-running XcodeGen as part of the perf branch build.
+
 - ✅ **Chat navigation stack + BackBar** (v0.9.14 → v0.9.17) —
   drilling into a chat from another chat (member tap, participant
   row, reply-privately, community sub-group, mention popover,
