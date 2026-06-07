@@ -90,6 +90,63 @@ final class ConversationViewModel {
     /// when the chat becomes active.
     weak var chatList: ChatListViewModel?
 
+    // MARK: - Sectioned timeline cache
+    //
+    // ConversationView used to call `timeline()` from within `ForEach`,
+    // walking `messages` and building a fresh `[TimelineItem]` (with
+    // per-day `dateHeader`s) on every body evaluation — O(n) per redraw.
+    // The same view also computed `messageRevisionToken` by reducing
+    // every UIMessage to count `starredAt != nil`, another O(n) pass.
+    //
+    // We now cache the sectioned array and invalidate it lazily via a
+    // generation counter that is bumped only when the timeline's inputs
+    // (`messages`, `localPaths`, or `starredAt`) actually change. The
+    // cache-hit path is O(1) (Int compare).
+    //
+    // `timelineGeneration` is observable so views can react to
+    // invalidations (ChatInfoView reads it as `messageRevision`); the
+    // backing array + last-seen generation are
+    // `@ObservationIgnored` so reading/writing the cache itself does
+    // *not* trigger a view re-eval.
+    @ObservationIgnored private var cachedTimeline: [TimelineItem] = []
+    @ObservationIgnored private var cachedTimelineGen: Int = -1
+    private(set) var timelineGeneration: Int = 0
+
+    /// Returns the sectioned (date-headers + messages) timeline, served
+    /// from cache when the generation hasn't moved. Rebuilds only when
+    /// `invalidateTimeline()` has been called since the last build.
+    func timeline() -> [TimelineItem] {
+        if cachedTimelineGen == timelineGeneration {
+            return cachedTimeline
+        }
+        let cal = Calendar.current
+        var out: [TimelineItem] = []
+        out.reserveCapacity(messages.count + 8)
+        var lastDay: DateComponents?
+        for m in messages {
+            let day = cal.dateComponents([.year, .month, .day], from: m.timestamp)
+            if day != lastDay {
+                if let header = cal.date(from: day) {
+                    out.append(.dateHeader(header))
+                }
+                lastDay = day
+            }
+            out.append(.message(m))
+        }
+        cachedTimeline = out
+        cachedTimelineGen = timelineGeneration
+        return out
+    }
+
+    /// Bumps the timeline generation counter. Call after every mutation
+    /// to `messages`, `localPaths`, or any per-message field that
+    /// influences the displayed timeline (e.g. `starredAt`,
+    /// `locallyDeleted`, `revokedAt`, `editedAt`, `pinnedAt`,
+    /// `viewOnceLocked`).
+    private func invalidateTimeline() {
+        timelineGeneration &+= 1
+    }
+
     // MARK: - In-chat find bar
     var messageIndex: MessageIndex = .shared
     var findActive: Bool = false {
@@ -241,6 +298,7 @@ final class ConversationViewModel {
         // Insert sorted by timestamp.
         let idx = messages.firstIndex(where: { $0.timestamp > m.timestamp }) ?? messages.count
         messages.insert(m, at: idx)
+        invalidateTimeline()
         pendingScrollToID = id
     }
 
@@ -414,6 +472,7 @@ final class ConversationViewModel {
                     um.isForwarded = true
                     if !messages.contains(where: { $0.id == um.id }) {
                         messages.append(um)
+                        invalidateTimeline()
                     }
                 }
             } catch {
@@ -421,6 +480,7 @@ final class ConversationViewModel {
                     id: UUID().uuidString, chatJID: self.chatJID, senderJID: "system",
                     fromMe: false, timestamp: .now,
                     body: .system("forward failed: \(error.localizedDescription)")))
+                invalidateTimeline()
             }
         }
         // Refresh the destination's sidebar preview/timestamp from the
@@ -542,6 +602,9 @@ final class ConversationViewModel {
             ensureDownloadFromHistory(
                 id: target.id, kind: target.kind, refJSON: target.refJSON)
         }
+        // Whole-list replace + path / star hydration above invalidates
+        // the sectioned-timeline cache exactly once for the apply pass.
+        invalidateTimeline()
         // Auto-refetch expired (once per chat per session). The snapshot
         // carries only the candidate ids + timestamps; we look up the
         // anchor PersistedMessage on the main context for the existing
@@ -983,6 +1046,7 @@ final class ConversationViewModel {
                     timestamp: .now,
                     body: .system("history request failed: \(error.localizedDescription)")
                 ), at: 0)
+                self.invalidateTimeline()
             }
         }
     }
@@ -1011,6 +1075,7 @@ final class ConversationViewModel {
         } else {
             self.messages = snapshot.messages + lateArrivals.sorted { $0.timestamp < $1.timestamp }
         }
+        invalidateTimeline()
     }
 
     func retryDownload(messageID: String, kind: String, refJSON: String) {
@@ -1239,6 +1304,7 @@ final class ConversationViewModel {
                 switch result {
                 case .file(let url):
                     self.localPaths[id] = url.path
+                    self.invalidateTimeline()
                     self.downloadErrors[id] = nil
                 case .failed(let reason):
                     self.downloadErrors[id] = reason
@@ -1389,6 +1455,7 @@ final class ConversationViewModel {
                 m.quotedTextSnippet = Self.quotedSnippet(of: q)
             }
             messages.append(m)
+            invalidateTimeline()
             receiptStatus[m.id] = .sent
             persistOutgoing(m, kind: "text", text: body)
         } catch {
@@ -1407,6 +1474,7 @@ final class ConversationViewModel {
         if b.kind == "protocol" || b.kind == "system" { return }
         if messages.contains(where: { $0.id == b.id }) { return }
         messages.append(UIMessage(b))
+        invalidateTimeline()
         persist(b)
         ensureDownload(for: b)
         if !b.fromMe {
@@ -1509,6 +1577,7 @@ final class ConversationViewModel {
                              fileName: nil,
                              localPath: persistent.path))
             messages.append(m)
+            invalidateTimeline()
             receiptStatus[m.id] = .sent
             persistOutgoingMedia(m, kind: "audio", localPath: persistent.path)
         } catch {
@@ -1519,6 +1588,7 @@ final class ConversationViewModel {
                 fromMe: false,
                 timestamp: .now,
                 body: .system("voice note failed: \(error.localizedDescription)")))
+            invalidateTimeline()
             try? FileManager.default.removeItem(at: result.url)
         }
     }
@@ -1639,6 +1709,7 @@ final class ConversationViewModel {
                              localPath: cached))
             messages.append(m)
             localPaths[res.messageID] = cached
+            invalidateTimeline()
             receiptStatus[res.messageID] = .sent
             persistOutgoingMedia(m, kind: kind, localPath: cached)
         } catch {
@@ -1649,6 +1720,7 @@ final class ConversationViewModel {
                 fromMe: false,
                 timestamp: .now,
                 body: .system("send failed: \(error.localizedDescription)")))
+            invalidateTimeline()
         }
     }
 
@@ -1672,6 +1744,7 @@ final class ConversationViewModel {
                 timestamp: Date(timeIntervalSince1970: TimeInterval(res.timestamp)),
                 body: .location(loc, isLive: false, sequence: nil))
             messages.append(m)
+            invalidateTimeline()
             receiptStatus[res.messageID] = .sent
             persistOutgoingLocation(m, location: loc)
         } catch {
@@ -1682,6 +1755,7 @@ final class ConversationViewModel {
                 fromMe: false,
                 timestamp: .now,
                 body: .system("send failed: \(error.localizedDescription)")))
+            invalidateTimeline()
         }
     }
 
@@ -1702,6 +1776,7 @@ final class ConversationViewModel {
                 timestamp: Date(timeIntervalSince1970: TimeInterval(res.timestamp)),
                 body: .contact(card))
             messages.append(m)
+            invalidateTimeline()
             receiptStatus[res.messageID] = .sent
             persistOutgoingContact(m, contact: card)
         } catch {
@@ -1712,6 +1787,7 @@ final class ConversationViewModel {
                 fromMe: false,
                 timestamp: .now,
                 body: .system("send failed: \(error.localizedDescription)")))
+            invalidateTimeline()
         }
     }
 
@@ -1868,6 +1944,7 @@ final class ConversationViewModel {
                             selectableCount: res.poll.selectableCount))
 
             messages.append(m)
+            invalidateTimeline()
             receiptStatus[m.id] = .sent
             persistOutgoingPoll(m, pollJSON: res.poll.json ?? "")
         } catch {
@@ -1995,6 +2072,7 @@ final class ConversationViewModel {
     func deleteForMe(_ msg: UIMessage) {
         if let idx = messages.firstIndex(where: { $0.id == msg.id }) {
             messages[idx].locallyDeleted = true
+            invalidateTimeline()
         }
         persistLocallyDeleted(messageID: msg.id, value: true)
         chatList?.refreshPreview(chatJID: chatJID)
@@ -2031,6 +2109,7 @@ final class ConversationViewModel {
         guard JIDNormalize.canonical(chatJID, client: client) == self.chatJID else { return }
         if let idx = messages.firstIndex(where: { $0.id == messageID }) {
             messages[idx].locallyDeleted = true
+            invalidateTimeline()
         }
         persistLocallyDeleted(messageID: messageID, value: true)
         chatList?.refreshPreview(chatJID: self.chatJID)
@@ -2070,6 +2149,7 @@ final class ConversationViewModel {
             r.locallyDeleted = old.locallyDeleted
             r.editedAt = at
             messages[idx] = r
+            invalidateTimeline()
         }
         persistEdit(messageID: messageID, newText: newText, editedAt: at)
         chatList?.refreshPreview(chatJID: chatJID)
@@ -2080,6 +2160,7 @@ final class ConversationViewModel {
             messages[idx].revokedAt = at
             messages[idx].revokedBy = jid
             // Bubble rendering uses revokedAt as the gate; body stays as-is.
+            invalidateTimeline()
         }
         persistRevoke(messageID: messageID, revokedBy: jid, revokedAt: at)
         chatList?.refreshPreview(chatJID: chatJID)
@@ -2253,6 +2334,7 @@ final class ConversationViewModel {
                     fromMe: false,
                     timestamp: .now,
                     body: .system("vote failed: \(error.localizedDescription)")))
+                self.invalidateTimeline()
             }
         }
     }
@@ -2318,6 +2400,7 @@ final class ConversationViewModel {
                     fromMe: false,
                     timestamp: .now,
                     body: .system("reaction failed: \(error.localizedDescription)")))
+                self.invalidateTimeline()
             }
         }
     }
@@ -2354,6 +2437,7 @@ final class ConversationViewModel {
                     fromMe: false,
                     timestamp: .now,
                     body: .system("star failed: \(error.localizedDescription)")))
+                self.invalidateTimeline()
             }
         }
     }
@@ -2368,6 +2452,7 @@ final class ConversationViewModel {
     private func applyLocalStar(messageID: String, starredAt: Date?) {
         if let idx = messages.firstIndex(where: { $0.id == messageID }) {
             messages[idx].starredAt = starredAt
+            invalidateTimeline()
         }
         persistStar(messageID: messageID, starredAt: starredAt)
     }
@@ -2400,6 +2485,7 @@ final class ConversationViewModel {
         if let idx = messages.firstIndex(where: { $0.id == messageID }) {
             messages[idx].viewOnceLocked = true
         }
+        invalidateTimeline()
     }
 
     /// The newest currently-pinned message in this chat, or nil. The
@@ -2439,6 +2525,7 @@ final class ConversationViewModel {
                     fromMe: false,
                     timestamp: .now,
                     body: .system("pin failed: \(error.localizedDescription)")))
+                self.invalidateTimeline()
             }
         }
     }
@@ -2453,6 +2540,7 @@ final class ConversationViewModel {
     private func applyLocalMessagePin(messageID: String, pinnedAt: Date?) {
         if let idx = messages.firstIndex(where: { $0.id == messageID }) {
             messages[idx].pinnedAt = pinnedAt
+            invalidateTimeline()
         }
         persistMessagePin(messageID: messageID, pinnedAt: pinnedAt)
     }

@@ -2,22 +2,9 @@ import SwiftUI
 import SwiftData
 import UniformTypeIdentifiers
 
-/// Identifiable so `ForEach` can use the case payload as a stable
-/// identity instead of an offset. Stable IDs let LazyVStack reuse row
-/// containers across data mutations — the offset-based identity used
-/// before caused full re-mounts on every change, including initial
-/// chat open, which dominated chat-switch latency.
-private enum TimelineItem: Identifiable {
-    case dateHeader(Date)
-    case message(UIMessage)
-
-    var id: String {
-        switch self {
-        case .dateHeader(let d): return "h-\(Int(d.timeIntervalSince1970))"
-        case .message(let m):    return "m-\(m.id)"
-        }
-    }
-}
+// `TimelineItem` lives in ViewModels/TimelineItem.swift so
+// `ConversationViewModel` can cache and return a `[TimelineItem]`
+// directly — see `ConversationViewModel.timeline()`.
 
 private struct DateSeparator: View {
     let date: Date
@@ -68,12 +55,11 @@ struct ConversationView: View {
 
     /// Cheap change-token that bumps when the message list, downloaded paths,
     /// or starred set changes — drives the inspector's media/files refresh.
-    /// Extracted from the call site so the Swift type-checker doesn't choke on
-    /// the chained-optional arithmetic (Release-config compile timeout).
+    /// Backed by `ConversationViewModel.timelineGeneration` so reading it is
+    /// O(1) and doesn't recompute on every body eval (the previous reduce
+    /// over `vm.messages` ran on every redraw).
     private var messageRevisionToken: Int {
-        guard let vm else { return 0 }
-        let starred = vm.messages.reduce(0) { $0 + ($1.starredAt != nil ? 1 : 0) }
-        return vm.messages.count + vm.localPaths.count + starred
+        vm?.timelineGeneration ?? 0
     }
 
     private func resolveMediaPath(_ id: String) -> String? {
@@ -82,26 +68,6 @@ struct ConversationView: View {
 
     private func jumpToMessage(_ id: String) {
         vm?.jumpToQuoted(id: id)
-    }
-
-    /// Walks messages in chronological order, prepending a `.dateHeader`
-    /// whenever the day changes.
-    private func timeline() -> [TimelineItem] {
-        guard let vm else { return [] }
-        let cal = Calendar.current
-        var out: [TimelineItem] = []
-        var lastDay: DateComponents?
-        for m in vm.messages {
-            let day = cal.dateComponents([.year, .month, .day], from: m.timestamp)
-            if day != lastDay {
-                if let header = cal.date(from: day) {
-                    out.append(.dateHeader(header))
-                }
-                lastDay = day
-            }
-            out.append(.message(m))
-        }
-        return out
     }
 
     /// Returns the optional dot color + label for the status segment of
@@ -413,7 +379,7 @@ struct ConversationView: View {
                                         Spacer()
                                     }
                                 }
-                                ForEach(timeline()) { item in
+                                ForEach(vm.timeline()) { item in
                                     switch item {
                                     case .dateHeader(let date):
                                         DateSeparator(date: date)
