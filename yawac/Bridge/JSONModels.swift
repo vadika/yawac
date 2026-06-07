@@ -59,7 +59,7 @@ struct BridgePoll: Codable, Hashable {
     }
 }
 
-struct BridgePollOption: Codable, Hashable {
+struct BridgePollOption: Codable, Hashable, Sendable {
     let name: String
     let hash: String
 }
