@@ -184,4 +184,64 @@ actor MessageWriter {
         }
     }
 
+    /// Field-update mutations that the global event stream applies to
+    /// existing `PersistedMessage` rows (peer-device edit / revoke /
+    /// local-delete / star / message-pin). Sendable so callers can
+    /// accumulate a batch on MainActor and hand it off to the writer
+    /// actor in one shot — see F21.
+    enum MessageMutation: Sendable {
+        case localDelete(id: String, chatJID: String)
+        case revoke(id: String, chatJID: String, by: String, at: Date)
+        case messagePin(id: String, chatJID: String, pinned: Bool, at: Date)
+        case star(id: String, chatJID: String, starred: Bool, at: Date)
+        case edit(id: String, chatJID: String, newText: String, at: Date)
+    }
+
+    /// Apply a batch of `MessageMutation` rows off-main. One fetch per id
+    /// (SwiftData's `id == ?` predicate already hits the @Attribute(.unique)
+    /// index) and one `context.save()` per batch.
+    func enqueueMutations(_ batch: [MessageMutation]) {
+        for m in batch {
+            switch m {
+            case .localDelete(let id, _):
+                let descriptor = FetchDescriptor<PersistedMessage>(
+                    predicate: #Predicate { $0.id == id })
+                if let row = try? context.fetch(descriptor).first {
+                    row.locallyDeleted = true
+                }
+            case .revoke(let id, _, let by, let at):
+                let descriptor = FetchDescriptor<PersistedMessage>(
+                    predicate: #Predicate { $0.id == id })
+                if let row = try? context.fetch(descriptor).first {
+                    row.revokedAt = at
+                    row.revokedBy = by
+                }
+            case .messagePin(let id, _, let pinned, let at):
+                let descriptor = FetchDescriptor<PersistedMessage>(
+                    predicate: #Predicate { $0.id == id })
+                if let row = try? context.fetch(descriptor).first {
+                    row.pinnedAt = pinned ? at : nil
+                }
+            case .star(let id, _, let starred, let at):
+                let descriptor = FetchDescriptor<PersistedMessage>(
+                    predicate: #Predicate { $0.id == id })
+                if let row = try? context.fetch(descriptor).first {
+                    row.starredAt = starred ? at : nil
+                }
+            case .edit(let id, _, let newText, let at):
+                let descriptor = FetchDescriptor<PersistedMessage>(
+                    predicate: #Predicate { $0.id == id })
+                if let row = try? context.fetch(descriptor).first {
+                    row.text = newText
+                    row.editedAt = at
+                }
+            }
+        }
+        do {
+            try context.save()
+        } catch {
+            NSLog("[yawac/MessageWriter] mutation save failed for batch of %d: %@",
+                  batch.count, String(describing: error))
+        }
+    }
 }
