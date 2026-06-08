@@ -205,6 +205,59 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **2026-06-08 audit follow-up (F17–F22)** (v0.9.39) — six
+  findings from the second Codex (gpt-5.4) pass after v0.9.38
+  shipped. Plan at
+  `docs/superpowers/plans/2026-06-08-perf-audit-followup.md`.
+    - **F17 (high)** — `MessageIndex` is `@Observable` and the
+      `db: OpaquePointer?`, `canonicalizer`, `ownBareJID`,
+      `bareJIDMissingAtBoot`, and `ownPushName` properties were
+      auto-tracked. `distinctSendersInChat` /
+      `distinctSendersGlobal` call `ensureSchemaLocked()` —
+      which lazily assigns `db` on first call — during SwiftUI
+      body evaluation (`ConversationFindBar` Sender chip,
+      `ChatListView` Sender chip). Same trap as F14. Marked all
+      five `@ObservationIgnored`; `progress` stays observable
+      for the bootstrap UI.
+    - **F18 (high + medium)** — `ThumbnailCache.mapImage` and
+      `MapSnapshotCache.snapshot` both re-ran
+      `MKMapSnapshotter` on every body eval when the previous
+      attempt returned nil. Same shape as F15. Added
+      `mapNegative: Set<String>` to ThumbnailCache and
+      `negative: Set<String>` to MapSnapshotCache; both
+      short-circuit on a previous failure.
+    - **F19 (high)** — every `.historySync` event ran
+      `client.listContacts()` (CGo bridge) + `resolveNames` +
+      `mergeContacts` + `ingestContacts` + three reconcile
+      passes + `loadBlocklist` inline on the MainActor
+      event-stream consumer. Initial sync delivers a burst.
+      Coalesce into a 250 ms-debounced flush owned by
+      `SessionViewModel`; move `listContacts` to
+      `Task.detached` so the CGo marshal/unmarshal stays off
+      MainActor. Made `WAClient.listContacts` `nonisolated` to
+      enable the detached call.
+    - **F20 (medium)** — `persistReaction` did a SwiftData
+      fetch + save per reaction event on MainActor. Routed
+      through `MessageWriter.enqueueReactions` with a 50 ms
+      coalesce; one save per batch. Notification gating stays
+      per-event on MainActor.
+    - **F21 (medium)** — `applyIncomingEdit / Revoke /
+      LocalDelete / Star / MessagePin` each did a fetch + save
+      per event on MainActor. Cross-device sync trickles
+      dozens. Added a `MessageMutation` Sendable enum and
+      `MessageWriter.enqueueMutations(_:)`; the 5 methods now
+      queue + flush. `currentConversation?.applyIncoming*`
+      stays on MainActor for live UI updates; sidebar preview
+      refresh is batched.
+    - **F22 (medium)** — `applyMediaRetry` fetched a
+      `PersistedMessage`, JSON-patched the media ref, saved,
+      and re-armed download logic inline on MainActor.
+      SwiftData side moved to `Task.detached` with a fresh
+      `ModelContext`; MainActor handles only the VM state
+      update (`downloadErrors`, `downloadTasks`,
+      `ensureDownloadFromHistory`) after the background save
+      commits.
+
 - ✅ **Downsample-decode at cache load (F16)** (v0.9.38) — group
   chats with three+ large photos visible at once still blinked
   after F15. Two related issues: (1) `NSImage(contentsOfFile:)`
