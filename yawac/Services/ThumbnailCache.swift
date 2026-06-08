@@ -1,5 +1,62 @@
 import AppKit
+import CoreGraphics
+import ImageIO
 import Observation
+
+/// Downsample-decode an image at `path` to at most `maxPixel` on the
+/// long edge into a fully-rasterised NSImage that CoreAnimation can draw
+/// in one step.
+///
+/// Two problems this solves:
+/// 1. `NSImage(contentsOfFile:)` returns a lazy NSImage whose JPEG bytes
+///    decompress on `CA::Transaction::commit` — visible as a blink when
+///    LazyVStack instantiates a row during scroll.
+/// 2. Full-resolution decode of a 12 MP phone JPEG is ~48 MB of RGBA
+///    pixels. With `cache.totalCostLimit = 64 MB`, NSCache holds 1-2
+///    full-res images and evicts aggressively — the three on-screen
+///    image bubbles compete for slots, missing each other's cache
+///    entries on every redraw and forcing repeated re-decodes (~750
+///    wake/s on a group chat with 3 large pics in view).
+///
+/// `CGImageSourceCreateThumbnailAtIndex` does the decode and the
+/// downsample in a single ImageIO pass. The resulting CGImage is
+/// bitmap-backed (no lazy JPEG provider) so CoreAnimation blits
+/// straight to the IOSurface without re-decoding.
+private func decodedImage(fromFile path: String, maxPixel: Int) -> NSImage? {
+    let url = URL(fileURLWithPath: path) as CFURL
+    guard let src = CGImageSourceCreateWithURL(url, nil) else { return nil }
+    let opts: [CFString: Any] = [
+        kCGImageSourceCreateThumbnailFromImageAlways: true,
+        kCGImageSourceShouldCacheImmediately: true,
+        kCGImageSourceCreateThumbnailWithTransform: true,
+        kCGImageSourceThumbnailMaxPixelSize: maxPixel,
+    ]
+    guard let cg = CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary)
+    else { return nil }
+    return NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
+}
+
+/// Same downsample-decode path for in-memory Data blobs (snapshot preheat).
+private func decodedImage(fromData data: Data, maxPixel: Int) -> NSImage? {
+    guard let src = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+    let opts: [CFString: Any] = [
+        kCGImageSourceCreateThumbnailFromImageAlways: true,
+        kCGImageSourceShouldCacheImmediately: true,
+        kCGImageSourceCreateThumbnailWithTransform: true,
+        kCGImageSourceThumbnailMaxPixelSize: maxPixel,
+    ]
+    guard let cg = CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary)
+    else { return nil }
+    return NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
+}
+
+// Target pixel sizes per surface. Display points × 2 covers retina; one
+// extra factor of headroom keeps small upscales sharp without paying for
+// 4x area on every cache entry.
+private let imageBubbleMaxPixel = 720      // 320pt bubble → ~2.25x
+private let stickerBubbleMaxPixel = 360    // 160pt bubble
+private let avatarMaxPixel = 200           // 80pt max avatar
+private let videoThumbMaxPixel = 720
 
 /// In-memory thumbnail cache for image and sticker bubbles.
 ///
@@ -60,7 +117,7 @@ final class ThumbnailCache {
         if inflight.contains(path) { return nil }
         inflight.insert(path)
         Task.detached(priority: .userInitiated) { [weak self] in
-            let img = NSImage(contentsOfFile: path)
+            let img = decodedImage(fromFile: path, maxPixel: imageBubbleMaxPixel)
             await self?.store(path: path, image: img)
         }
         return nil
@@ -97,7 +154,8 @@ final class ThumbnailCache {
     func preheat(_ pairs: [String: Data]) {
         for (path, data) in pairs {
             if cache.object(forKey: path as NSString) != nil { continue }
-            guard let img = NSImage(data: data) else { continue }
+            guard let img = decodedImage(fromData: data, maxPixel: imageBubbleMaxPixel)
+            else { continue }
             let cost = Int(img.size.width * img.size.height * 4)
             cache.setObject(img, forKey: path as NSString, cost: cost)
         }
@@ -112,7 +170,8 @@ final class ThumbnailCache {
     func preheatVideo(_ pairs: [String: Data]) {
         for (path, data) in pairs {
             if videoCache.object(forKey: path as NSString) != nil { continue }
-            guard let img = NSImage(data: data) else { continue }
+            guard let img = decodedImage(fromData: data, maxPixel: videoThumbMaxPixel)
+            else { continue }
             let cost = Int(img.size.width * img.size.height * 4)
             videoCache.setObject(img, forKey: path as NSString, cost: cost)
         }
@@ -196,14 +255,17 @@ final class ThumbnailCache {
         Task.detached(priority: .userInitiated) { [weak self] in
             // Disk fast path: existing AvatarCache.cachedURL is
             // nonisolated static, safe to call from any thread.
+            // decodedImage(fromFile:) forces the JPEG decode here so the
+            // cached NSImage hands a pre-rasterised CGImage to CA on the
+            // first draw — eliminates the per-row scroll blink.
             let img: NSImage? = await {
                 if let url = AvatarCache.cachedURL(for: key),
                    FileManager.default.fileExists(atPath: url.path),
-                   let i = NSImage(contentsOf: url) {
+                   let i = decodedImage(fromFile: url.path, maxPixel: avatarMaxPixel) {
                     return i
                 }
                 guard let url = await fetcher() else { return nil }
-                return NSImage(contentsOf: url)
+                return decodedImage(fromFile: url.path, maxPixel: avatarMaxPixel)
             }()
             await self?.storeAvatar(key: key, image: img)
         }
@@ -241,7 +303,8 @@ final class ThumbnailCache {
     func preheatAvatar(_ pairs: [String: Data]) {
         for (key, data) in pairs {
             if avatarCache.object(forKey: key as NSString) != nil { continue }
-            guard let img = NSImage(data: data) else { continue }
+            guard let img = decodedImage(fromData: data, maxPixel: avatarMaxPixel)
+            else { continue }
             let cost = Int(img.size.width * img.size.height * 4)
             avatarCache.setObject(img, forKey: key as NSString, cost: cost)
         }
