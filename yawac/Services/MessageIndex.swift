@@ -59,7 +59,16 @@ final class MessageIndex {
 
     private let storeURL: URL
     private let queue = DispatchQueue(label: "yawac.MessageIndex")
-    private var db: OpaquePointer?
+    // Must be @ObservationIgnored. Same trap as F14: MessageIndex is
+    // @Observable, so plain `var` properties are tracked by the macro.
+    // `ensureSchemaLocked()` lazily assigns `db` on first call — and
+    // `distinctSendersInChat` / `distinctSendersGlobal` are called from
+    // SwiftUI body evaluation (ConversationFindBar Sender chip,
+    // ChatListView Sender chip). Without this annotation, the first body
+    // eval that hits an unopened db triggers willSet → invalidate →
+    // re-body → mutate → loop. `progress` stays observed — it drives the
+    // bootstrap progress UI.
+    @ObservationIgnored private var db: OpaquePointer?
     var progress: BootstrapProgress = .idle
 
     init(storeURL: URL) {
@@ -172,7 +181,7 @@ final class MessageIndex {
     /// Optional LID→PN resolver. Set on launch (see
     /// `setCanonicalizer`); used in `senderJIDForIndex` so LID and PN
     /// siblings of the same contact share a single FTS row id.
-    private var canonicalizer: ((String) -> String)?
+    @ObservationIgnored private var canonicalizer: ((String) -> String)?
 
     func setCanonicalizer(_ fn: @escaping (String) -> String) {
         queue.sync { canonicalizer = fn }
@@ -180,13 +189,13 @@ final class MessageIndex {
 
     /// Bare paired-account JID. Cached so the upsert path doesn't have
     /// to thread a client reference. Set on .connected.
-    private var ownBareJID: String = ""
+    @ObservationIgnored private var ownBareJID: String = ""
 
     /// True when `init` found UserDefaults `messageIndexOwnBareJID`
     /// empty. The first non-empty `setOwnBareJID` then knows the
     /// bootstrap walk that fired before this session can't have indexed
     /// own outbound rows correctly — triggers a forceRebootstrap.
-    private var bareJIDMissingAtBoot: Bool = false
+    @ObservationIgnored private var bareJIDMissingAtBoot: Bool = false
 
     func setOwnBareJID(_ jid: String) {
         let bare = JIDNormalize.bare(jid)
@@ -220,7 +229,7 @@ final class MessageIndex {
     /// time when a fromMe row has no `senderPushName` of its own.
     /// Set once on launch (see `setOwnPushName(_:)`); changes between
     /// launches trigger a re-bootstrap via schema-version bump.
-    private var ownPushName: String = ""
+    @ObservationIgnored private var ownPushName: String = ""
 
     /// Update the cached own push name. Safe to call repeatedly — only
     /// non-empty values overwrite (the bridge may return "" before
