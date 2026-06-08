@@ -5,13 +5,15 @@ import SwiftUI
 /// auto-linked. Used by surfaces that render user-authored blob text —
 /// e.g. group description.
 enum Linkify {
+    /// Process-scoped detector. Reused on every call to avoid the
+    /// per-call NSDataDetector allocation. F24.
+    private static let detector: NSDataDetector? = try? NSDataDetector(
+        types: NSTextCheckingResult.CheckingType.link.rawValue)
+
     static func attributed(_ text: String) -> AttributedString {
         var attr = AttributedString(text)
         let str = String(attr.characters)
-        guard let detector = try? NSDataDetector(
-            types: NSTextCheckingResult.CheckingType.link.rawValue) else {
-            return attr
-        }
+        guard let detector else { return attr }
         let nsRange = NSRange(str.startIndex..<str.endIndex, in: str)
         detector.enumerateMatches(in: str, range: nsRange) { match, _, _ in
             guard let match, let url = match.url,

@@ -23,6 +23,15 @@ private struct DateSeparator: View {
 }
 
 struct ConversationView: View {
+    /// Process-scoped formatter for the "last seen Xm ago" header
+    /// status. Replaces the per-`headerStatus` allocation that fired on
+    /// every body eval. F24.
+    fileprivate static let lastSeenFmt: RelativeDateTimeFormatter = {
+        let f = RelativeDateTimeFormatter()
+        f.unitsStyle = .short
+        return f
+    }()
+
     let chatJID: String
     @Environment(SessionViewModel.self) private var session
     @Environment(\.modelContext) private var modelContext
@@ -90,9 +99,7 @@ struct ConversationView: View {
         }
         if p.lastSeen > 0 {
             let date = Date(timeIntervalSince1970: TimeInterval(p.lastSeen))
-            let fmt = RelativeDateTimeFormatter()
-            fmt.unitsStyle = .short
-            return (Theme.textFaint, "last seen \(fmt.localizedString(for: date, relativeTo: Date()))")
+            return (Theme.textFaint, "last seen \(Self.lastSeenFmt.localizedString(for: date, relativeTo: Date()))")
         }
         return nil
     }

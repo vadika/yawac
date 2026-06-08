@@ -587,12 +587,16 @@ struct ChatListView: View {
         return Text(cleaned).scaledUI(11)
     }
 
+    private static let hitDateFmt: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "d MMM"
+        return f
+    }()
+
     private func formatHitDate(_ ts: Int64) -> String {
         // ZTIMESTAMP is Apple-epoch seconds.
         let d = Date(timeIntervalSinceReferenceDate: TimeInterval(ts))
-        let f = DateFormatter()
-        f.dateFormat = "d MMM"
-        return f.string(from: d)
+        return Self.hitDateFmt.string(from: d)
     }
 
     /// Contact list passed to the participant picker in `NewGroupSheet`.
@@ -818,6 +822,22 @@ extension Chat {
     /// style string for the row's right-aligned mono timestamp. Mirrors
     /// WhatsApp/iMessage behavior; honors the system 12/24-hour preference
     /// and current locale.
+    fileprivate static let weekdayFmt: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "EEE"
+        return f
+    }()
+    fileprivate static let monthDayFmt: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "d MMM"
+        return f
+    }()
+    fileprivate static let monthDayYearFmt: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "d MMM yy"
+        return f
+    }()
+
     var lastTimestampShort: String {
         let date = Date(timeIntervalSince1970: TimeInterval(lastTimestamp))
         guard lastTimestamp > 0 else { return "" }
@@ -828,14 +848,14 @@ extension Chat {
         if cal.isDateInYesterday(date) {
             return Self.yesterdayFmt.localizedString(from: DateComponents(day: -1))
         }
-        let f = DateFormatter()
         let days = cal.dateComponents([.day], from: date, to: Date()).day ?? Int.max
+        let f: DateFormatter
         if days < 7 {
-            f.dateFormat = "EEE"
+            f = Self.weekdayFmt
         } else if days < 180 {
-            f.dateFormat = "d MMM"
+            f = Self.monthDayFmt
         } else {
-            f.dateFormat = "d MMM yy"
+            f = Self.monthDayYearFmt
         }
         return f.string(from: date)
     }
