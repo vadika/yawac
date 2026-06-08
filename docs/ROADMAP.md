@@ -205,6 +205,24 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **LanguageDetector scaled + persisted cache (F23)** (v0.9.40)
+  — `LanguageDetector.detect` ran from `translatableText` on
+  every visible message every body eval (SwiftUI re-renders on
+  `timelineGeneration` bumps, `ThumbnailCache.revision` bumps,
+  receipt updates, etc.). The prior cache had four problems:
+  `countLimit = 64` evicted on chats with more visible messages
+  than slots; nil "couldn't classify" results weren't cached at
+  all so the recognizer re-ran on every render for those texts;
+  the key was `text.hashValue` which is per-process randomized
+  and has collision risk; cold launches started with an empty
+  cache. Replaced with an `NSString`-keyed `NSCache` at
+  countLimit 512, a sentinel string for negative results
+  stored next to positives, and a disk cache at
+  `~/Library/Caches/<bundle>/LanguageDetector.json` loaded
+  once on first call and flushed on a 2 s debounced timer when
+  new entries arrive. Re-opens of yawac now skip detection
+  entirely for previously-seen text.
+
 - ✅ **2026-06-08 audit follow-up (F17–F22)** (v0.9.39) — six
   findings from the second Codex (gpt-5.4) pass after v0.9.38
   shipped. Plan at
