@@ -166,6 +166,14 @@ final class ThumbnailCache {
         return c
     }()
     @ObservationIgnored private var avatarInflight: Set<String> = []
+    /// JIDs that came back without a profile picture (status@broadcast
+    /// posters frequently have no avatar). Without this, every body eval
+    /// for such a row missed the cache → kicked another fetch → fetch
+    /// returned nil → storeAvatar dropped it → next body eval missed
+    /// again. Loop pinned the main thread at ~750 wake/s with CA
+    /// constantly re-decoding the visible JPEG thumbnails. Negative
+    /// entries skip both the cache lookup and the fetch.
+    @ObservationIgnored private var avatarNegative: Set<String> = []
 
     /// Returns the cached avatar `NSImage` for `key` (a canonical JID
     /// cache key — caller's responsibility to canonicalize). On miss,
@@ -182,6 +190,7 @@ final class ThumbnailCache {
     func avatarImage(forCacheKey key: String,
                      fetcher: @escaping @Sendable () async -> URL?) -> NSImage? {
         if let hit = avatarCache.object(forKey: key as NSString) { return hit }
+        if avatarNegative.contains(key) { return nil }
         if avatarInflight.contains(key) { return nil }
         avatarInflight.insert(key)
         Task.detached(priority: .userInitiated) { [weak self] in
@@ -203,7 +212,13 @@ final class ThumbnailCache {
 
     private func storeAvatar(key: String, image: NSImage?) {
         avatarInflight.remove(key)
-        guard let image else { return }
+        guard let image else {
+            // No profile picture available — remember so we don't refetch
+            // on every body eval. Cleared by `invalidateAvatar` when the
+            // user updates their picture (avatarCacheInvalidated event).
+            avatarNegative.insert(key)
+            return
+        }
         let cost = Int(image.size.width * image.size.height * 4)
         avatarCache.setObject(image, forKey: key as NSString, cost: cost)
         scheduleRevisionBump()
@@ -215,6 +230,7 @@ final class ThumbnailCache {
     func invalidateAvatar(forCacheKey key: String) {
         avatarCache.removeObject(forKey: key as NSString)
         avatarInflight.remove(key)
+        avatarNegative.remove(key)
         scheduleRevisionBump()
     }
 
