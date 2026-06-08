@@ -2,6 +2,45 @@ import AppKit
 import AVKit
 import SwiftUI
 
+/// Process-scoped statics shared by every `MessageRow` text body. Both
+/// objects are allocation-heavy and the old code rebuilt them on every
+/// body eval per message, which on a busy chat (with N visible rows
+/// and several observable bumps per second) dominated the per-render
+/// cost. F24.
+private enum MessageRowStatics {
+    /// URL auto-linker. Same instance is safe to reuse across threads
+    /// for enumerateMatches.
+    static let linkDetector: NSDataDetector? = try? NSDataDetector(
+        types: NSTextCheckingResult.CheckingType.link.rawValue)
+
+    /// Matches `@<digits>` mentions (5+ digit suffix matches both
+    /// `<digits>@s.whatsapp.net` and `<digits>@lid` JID flavors).
+    static let mentionRegex: NSRegularExpression? = try? NSRegularExpression(
+        pattern: "@(\\d{5,})")
+}
+
+/// Cached `richText` output keyed by raw text. SwiftUI bodies re-eval
+/// constantly (timelineGeneration bumps, ThumbnailCache.revision,
+/// receipt updates); the prior code re-built the AttributedString on
+/// every eval per visible message. Cache hit is O(1).
+///
+/// Edge case: when a contact name changes after a message has been
+/// rich-rendered, the cached AttributedString still shows the old
+/// mention label until the entry is evicted (countLimit + LRU). Trade
+/// accepted because contact-name changes mid-session are rare and the
+/// alternative (versioned keys) requires plumbing.
+private final class RichTextBox {
+    let attr: AttributedString
+    init(_ a: AttributedString) { self.attr = a }
+}
+private enum RichTextCache {
+    static let cache: NSCache<NSString, RichTextBox> = {
+        let c = NSCache<NSString, RichTextBox>()
+        c.countLimit = 512
+        return c
+    }()
+}
+
 /// One emoji + reactor list. Hover surfaces names via `.help`; click
 /// opens a popover with the same list (richer affordance + works on
 /// touch / a11y paths that ignore tooltips).
@@ -730,8 +769,12 @@ struct MessageRow: View {
     }
 
     /// Returns an `AttributedString` with @mentions styled bold + tinted and
-    /// any URLs auto-linked.
+    /// any URLs auto-linked. Cached by raw text — see RichTextCache.
     private func richText(from raw: String) -> AttributedString {
+        let key = raw as NSString
+        if let box = RichTextCache.cache.object(forKey: key) {
+            return box.attr
+        }
         let (rewritten, mentions) = resolveMentions(in: raw)
         var attr = AttributedString(rewritten)
         // Style mentions: bold, tint colour, custom URL scheme so taps fire.
@@ -747,10 +790,8 @@ struct MessageRow: View {
         }
         // Auto-link any plain URLs in the (possibly-rewritten) text.
         let str = String(attr.characters)
-        let detector = try? NSDataDetector(
-            types: NSTextCheckingResult.CheckingType.link.rawValue)
         let nsRange = NSRange(str.startIndex..<str.endIndex, in: str)
-        detector?.enumerateMatches(in: str, range: nsRange) { match, _, _ in
+        MessageRowStatics.linkDetector?.enumerateMatches(in: str, range: nsRange) { match, _, _ in
             guard let match, let url = match.url,
                   let range = Range(match.range, in: str),
                   let attrRange = attr.range(of: String(str[range])) else { return }
@@ -760,6 +801,7 @@ struct MessageRow: View {
             attr[attrRange].foregroundColor = .accentColor
             attr[attrRange].underlineStyle = .single
         }
+        RichTextCache.cache.setObject(RichTextBox(attr), forKey: key)
         return attr
     }
 
@@ -844,7 +886,7 @@ struct MessageRow: View {
     private func resolveMentions(in s: String)
         -> (String, [(replacement: String, jid: String)]) {
         guard s.contains("@"),
-              let regex = try? NSRegularExpression(pattern: "@(\\d{5,})") else {
+              let regex = MessageRowStatics.mentionRegex else {
             return (s, [])
         }
         var out = s
