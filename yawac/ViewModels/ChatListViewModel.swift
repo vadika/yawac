@@ -56,6 +56,10 @@ final class ChatListViewModel {
     @ObservationIgnored private var pendingIngest: [BridgeMessage] = []
     @ObservationIgnored private var pendingIngestFlush: Task<Void, Never>?
 
+    // F20: batched reaction writer — see persistReaction().
+    @ObservationIgnored private var pendingReactions: [BridgeReaction] = []
+    @ObservationIgnored private var pendingReactionsFlush: Task<Void, Never>?
+
     /// Per-event chat-row work coalescer. `.message` bursts (history
     /// sync, offline queue drain, group activity) hit `ingest` dozens
     /// of times in a single runloop turn — each one used to invoke
@@ -653,32 +657,24 @@ final class ChatListViewModel {
     /// reactions arrive once via the global event stream — without this,
     /// closing/reopening a chat would drop all of them.
     func persistReaction(_ r: BridgeReaction) {
-        guard let context else { return }
-        let id = r.targetMessageID
-        let sender = r.senderJID
-        let descriptor = FetchDescriptor<PersistedReaction>(
-            predicate: #Predicate {
-                $0.targetMessageID == id && $0.senderJID == sender
-            })
-        let ts = Date(timeIntervalSince1970: TimeInterval(r.timestamp))
-        if r.emoji.isEmpty {
-            if let row = try? context.fetch(descriptor).first {
-                context.delete(row)
+        // F20: SwiftData persistence is batched off-main via MessageWriter
+        // with a 50 ms coalesce window. The notification side below stays
+        // on MainActor and fires per-event because per-reaction policy
+        // (mute, NSApp.isActive, targetFromMe) is naturally per-event.
+        if writer != nil {
+            pendingReactions.append(r)
+            if pendingReactionsFlush == nil {
+                pendingReactionsFlush = Task { @MainActor [weak self] in
+                    try? await Task.sleep(for: .milliseconds(50))
+                    guard let self else { return }
+                    let batch = self.pendingReactions
+                    self.pendingReactions.removeAll(keepingCapacity: true)
+                    self.pendingReactionsFlush = nil
+                    guard !batch.isEmpty, let writer = self.writer else { return }
+                    await writer.enqueueReactions(batch)
+                }
             }
-        } else if let existing = try? context.fetch(descriptor).first {
-            existing.emoji = r.emoji
-            existing.timestamp = ts
-            existing.chatJID = JIDNormalize.canonical(r.chatJID, client: client)
-        } else {
-            let row = PersistedReaction(
-                chatJID: JIDNormalize.canonical(r.chatJID, client: client),
-                targetMessageID: r.targetMessageID,
-                senderJID: r.senderJID,
-                emoji: r.emoji,
-                timestamp: ts)
-            context.insert(row)
         }
-        try? context.save()
 
         // Notify only when somebody reacts to OUR message (`targetFromMe`)
         // and the window isn't focused. Skip self-reactions and clears.

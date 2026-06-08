@@ -143,4 +143,45 @@ actor MessageWriter {
         }
         return outcomes
     }
+
+    /// Persist a batch of inbound reactions off-main. Matches the upsert /
+    /// delete semantics of the original `ChatListViewModel.persistReaction`
+    /// (composite key `<targetMessageID>|<senderJID>`), but with one
+    /// `context.save()` per batch instead of per event — see F20.
+    func enqueueReactions(_ batch: [BridgeReaction]) {
+        for r in batch {
+            let id = r.targetMessageID
+            let sender = r.senderJID
+            let descriptor = FetchDescriptor<PersistedReaction>(
+                predicate: #Predicate {
+                    $0.targetMessageID == id && $0.senderJID == sender
+                })
+            let ts = Date(timeIntervalSince1970: TimeInterval(r.timestamp))
+            let canonChat = canonicalize(r.chatJID)
+            if r.emoji.isEmpty {
+                if let row = try? context.fetch(descriptor).first {
+                    context.delete(row)
+                }
+            } else if let existing = try? context.fetch(descriptor).first {
+                existing.emoji = r.emoji
+                existing.timestamp = ts
+                existing.chatJID = canonChat
+            } else {
+                let row = PersistedReaction(
+                    chatJID: canonChat,
+                    targetMessageID: r.targetMessageID,
+                    senderJID: r.senderJID,
+                    emoji: r.emoji,
+                    timestamp: ts)
+                context.insert(row)
+            }
+        }
+        do {
+            try context.save()
+        } catch {
+            NSLog("[yawac/MessageWriter] reaction save failed for batch of %d: %@",
+                  batch.count, String(describing: error))
+        }
+    }
+
 }
