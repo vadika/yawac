@@ -205,6 +205,24 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **Hoist per-render formatters + cache richText (F24)** (v0.9.41)
+  — same pattern as F23. Allocation-heavy Foundation objects were
+  rebuilt inside SwiftUI body evaluation, once per visible row
+  per re-render. Lifted to process-scoped statics:
+  `MessageRowStatics.linkDetector` (`NSDataDetector`),
+  `MessageRowStatics.mentionRegex` (`NSRegularExpression`),
+  `Linkify.detector`, `Chat.weekdayFmt` / `monthDayFmt` /
+  `monthDayYearFmt` (sidebar row dates),
+  `SidebarSearchHits.hitDateFmt` (global ⌘K hit dates),
+  `ConversationView.lastSeenFmt` (`RelativeDateTimeFormatter`
+  for the presence subtitle). Plus `MessageRow.richText` output
+  now goes through `RichTextCache`
+  (`NSCache<NSString, RichTextBox>`, countLimit 512) keyed by
+  raw text — mention resolution + URL detection + styling
+  reuses the cached `AttributedString` on subsequent renders.
+  Stale-mention edge case (contact-name change before LRU
+  evict shows the old name) accepted as rare in practice.
+
 - ✅ **LanguageDetector scaled + persisted cache (F23)** (v0.9.40)
   — `LanguageDetector.detect` ran from `translatableText` on
   every visible message every body eval (SwiftUI re-renders on
