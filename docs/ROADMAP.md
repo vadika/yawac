@@ -205,6 +205,25 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **Avatar negative-cache (F15)** (v0.9.37) — `status@broadcast`
+  and other chats with many distinct senders that have no profile
+  picture pinned the main thread at ~750 wake/s with constant JPEG
+  re-decode in the CoreAnimation commit path. Root cause: when
+  `AvatarCache.ensure(jid:using:)` returned an empty URL (no
+  picture on file), `ThumbnailCache.storeAvatar` saw `image ==
+  nil` and returned without caching anything — so the next
+  `AvatarView` body eval missed the cache, kicked another fetch,
+  fetch returned nil, loop. Each loop iteration bumped the
+  shared `revision` counter (eventually) and SwiftUI re-rendered
+  every visible row, forcing Core Animation to re-decode every
+  JPEG message thumbnail on commit. Added an
+  `avatarNegative: Set<String>` that `avatarImage(forCacheKey:fetcher:)`
+  short-circuits on, populated by `storeAvatar` when the fetcher
+  returns nil. `invalidateAvatar` clears the negative entry too
+  so a freshly-uploaded profile picture is picked up on the next
+  body eval. Live smoke on `status@broadcast`: sustained wake
+  rate ~750/s → ~77/s.
+
 - ✅ **ThumbnailCache observation-loop hotfix (F14)** (v0.9.36) —
   v0.9.35 install showed 146% CPU + 1.9 GB RAM under load.
   `sample` revealed the main thread pinned in a SwiftUI
