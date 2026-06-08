@@ -325,6 +325,12 @@ final class ThumbnailCache {
         return c
     }()
     @ObservationIgnored private var mapInflight: Set<String> = []
+    /// Coordinates whose MKMapSnapshotter call returned nil. Without this,
+    /// the next body eval would miss the positive cache, skip the inflight
+    /// gate (already cleared), and re-queue the same snapshot generator —
+    /// per frame. Same shape as `avatarNegative` (F15). Cleared only if
+    /// the snapshot is explicitly invalidated.
+    @ObservationIgnored private var mapNegative: Set<String> = []
 
     /// Returns the cached map snapshot `NSImage` for `(lat, lng)`. On
     /// miss, schedules a detached load through `MapSnapshotCache` and
@@ -333,6 +339,7 @@ final class ThumbnailCache {
     func mapImage(lat: Double, lng: Double) -> NSImage? {
         let key = "\(lat),\(lng)"
         if let hit = mapCache.object(forKey: key as NSString) { return hit }
+        if mapNegative.contains(key) { return nil }
         if mapInflight.contains(key) { return nil }
         mapInflight.insert(key)
         Task.detached(priority: .userInitiated) { [weak self] in
@@ -344,7 +351,13 @@ final class ThumbnailCache {
 
     private func storeMap(key: String, image: NSImage?) {
         mapInflight.remove(key)
-        guard let image else { return }
+        guard let image else {
+            // MKMapSnapshotter failed (offline, invalid coord, etc).
+            // Remember so we don't re-fire the snapshotter on every
+            // body eval.
+            mapNegative.insert(key)
+            return
+        }
         let cost = Int(image.size.width * image.size.height * 4)
         mapCache.setObject(image, forKey: key as NSString, cost: cost)
         scheduleRevisionBump()
