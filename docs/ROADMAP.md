@@ -205,6 +205,25 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **Downsample-decode at cache load (F16)** (v0.9.38) — group
+  chats with three+ large photos visible at once still blinked
+  after F15. Two related issues: (1) `NSImage(contentsOfFile:)`
+  is lazy — CoreAnimation re-decoded the JPEG on every
+  `CA::Transaction::commit`, visible as a per-scroll flash; and
+  (2) full-res decode of a 12 MP phone photo is ~48 MB RGBA, so
+  the cache's 64 MB image budget held only one or two entries
+  and the three visible bubbles evicted each other on every
+  redraw. Replaced every `NSImage(contentsOfFile:)` /
+  `NSImage(data:)` call site (image bubble, sticker bubble,
+  avatar, video, all four preheat paths) with
+  `CGImageSourceCreateThumbnailAtIndex` plus a per-surface max
+  pixel size (image / sticker / video 720 px; avatar 200 px).
+  ImageIO decodes + downsamples in one pass; the resulting
+  CGImage is bitmap-backed (no lazy provider) so CoreAnimation
+  blits straight to the IOSurface without re-decoding. Cached
+  entries shrink from ~50 MB to ~0.5–2 MB, so NSCache holds the
+  whole visible window plus plenty of off-screen rows.
+
 - ✅ **Avatar negative-cache (F15)** (v0.9.37) — `status@broadcast`
   and other chats with many distinct senders that have no profile
   picture pinned the main thread at ~750 wake/s with constant JPEG
