@@ -131,6 +131,13 @@ final class SessionViewModel {
     @ObservationIgnored
     private var didRebootstrapMessageIndex: Bool = false
 
+    /// Coalesces the `.historySync` reconcile fan-out (F19). Initial sync
+    /// delivers a burst of HistorySync events; we collapse the burst into
+    /// a single 250 ms-debounced flush so we don't run the CGo
+    /// `listContacts` round-trip + four reconcile passes per event.
+    @ObservationIgnored
+    private var historySyncFlush: Task<Void, Never>?
+
     /// Per-peer presence. `online == true` → currently connected.
     /// `lastSeen` is seconds-since-epoch when peer went offline; 0 means
     /// peer hasn't shared lastSeen privacy (the most common case).
@@ -319,6 +326,37 @@ final class SessionViewModel {
                 NSLog("[yawac/blocklist] loadBlocklist failed: %@",
                       String(describing: error))
             }
+        }
+    }
+
+    /// Debounced `.historySync` reconcile pass (F19). Initial sync delivers
+    /// a burst of HistorySync events; previously each one ran the CGo
+    /// `listContacts` round-trip + name resolve + merge + ingest + three
+    /// reconcile passes + a blocklist IQ inline on the MainActor
+    /// event-stream consumer. Coalesce the burst into one flush after a
+    /// 250 ms quiet period, and lift the bridge call off MainActor so the
+    /// marshal/unmarshal of a potentially large contacts array doesn't
+    /// block UI updates.
+    func scheduleHistorySyncReconcile(client: WAClient,
+                                      vm: ChatListViewModel) {
+        if historySyncFlush != nil { return }
+        historySyncFlush = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(250))
+            guard let self else { return }
+            self.historySyncFlush = nil
+            // CGo bridge call off MainActor — listContacts marshals a
+            // potentially large array.
+            let contacts = await Task.detached(priority: .userInitiated) {
+                () -> [BridgeContact] in
+                (try? client.listContacts()) ?? []
+            }.value
+            vm.resolveNames(contacts)
+            vm.mergeContacts(contacts)
+            self.ingestContacts(contacts)
+            vm.reconcilePinsWithStore()
+            vm.reconcileMutedWithStore()
+            vm.reconcileLIDDuplicates()
+            self.loadBlocklist()
         }
     }
 

@@ -1509,10 +1509,7 @@ final class ConversationViewModel {
     }
 
     func applyMediaRetry(messageID: String, ok: Bool, newDirectPath: String?, error: String?) {
-        guard let context else { return }
-        let descriptor = FetchDescriptor<PersistedMessage>(predicate: #Predicate { $0.id == messageID })
-        guard let row = try? context.fetch(descriptor).first,
-              let oldRefJSON = row.mediaRefJSON else { return }
+        guard let container = context?.container else { return }
         if !ok {
             let reason = "phone retry failed: \(error ?? "?")"
             if looksLikeExpiredError(reason) {
@@ -1526,19 +1523,42 @@ final class ConversationViewModel {
             downloadErrors[messageID] = "phone retry returned no path"
             return
         }
-        // Patch direct_path inside the stored MediaRef JSON so future
-        // retries (and the immediate re-download below) use the fresh path.
-        var refDict = (try? JSONSerialization.jsonObject(with: Data(oldRefJSON.utf8))) as? [String: Any] ?? [:]
-        refDict["direct_path"] = newPath
-        if let newJSON = try? JSONSerialization.data(withJSONObject: refDict),
-           let s = String(data: newJSON, encoding: .utf8) {
+        // F22: move the SwiftData fetch + JSON patch + save off MainActor.
+        // Background context with the same ModelContainer is per-thread
+        // safe and matches the F2 / F3 pattern. MainActor only handles
+        // the VM state update (downloadErrors / downloadTasks /
+        // ensureDownloadFromHistory) after the persistence is committed.
+        Task.detached(priority: .userInitiated) { [weak self] in
+            let ctx = ModelContext(container)
+            let descriptor = FetchDescriptor<PersistedMessage>(
+                predicate: #Predicate { $0.id == messageID })
+            guard let row = try? ctx.fetch(descriptor).first,
+                  let oldRefJSON = row.mediaRefJSON
+            else { return }
+            // Patch direct_path inside the stored MediaRef JSON so future
+            // retries (and the immediate re-download below) use the fresh
+            // path.
+            var refDict = (try? JSONSerialization.jsonObject(with: Data(oldRefJSON.utf8))) as? [String: Any] ?? [:]
+            refDict["direct_path"] = newPath
+            guard let newJSON = try? JSONSerialization.data(withJSONObject: refDict),
+                  let s = String(data: newJSON, encoding: .utf8)
+            else { return }
             row.mediaRefJSON = s
-            try? context.save()
-            downloadErrors[messageID] = nil
-            downloadTasks[messageID]?.cancel()
-            downloadTasks[messageID] = nil
-            ensureDownloadFromHistory(id: messageID, kind: row.kind, refJSON: s)
+            try? ctx.save()
+            let kind = row.kind
+            await self?.applyMediaRetrySucceeded(
+                messageID: messageID, kind: kind, refJSON: s)
         }
+    }
+
+    @MainActor
+    private func applyMediaRetrySucceeded(messageID: String,
+                                          kind: String,
+                                          refJSON: String) {
+        downloadErrors[messageID] = nil
+        downloadTasks[messageID]?.cancel()
+        downloadTasks[messageID] = nil
+        ensureDownloadFromHistory(id: messageID, kind: kind, refJSON: refJSON)
     }
 
     func sendDraft() async {

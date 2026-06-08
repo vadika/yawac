@@ -191,14 +191,11 @@ struct ContentView: View {
                     if !UserDefaults.standard.bool(forKey: "historyBackfillCompleted") {
                         UserDefaults.standard.set(true, forKey: "historyBackfillCompleted")
                     }
-                    let cs = (try? client.listContacts()) ?? []
-                    vm.resolveNames(cs)
-                    vm.mergeContacts(cs)
-                    session.ingestContacts(cs)
-                    vm.reconcilePinsWithStore()
-                    vm.reconcileMutedWithStore()
-                    vm.reconcileLIDDuplicates()
-                    session.loadBlocklist()
+                    // F19: initial sync delivers a burst of HistorySync
+                    // events; coalesce into one 250 ms-debounced flush so
+                    // we don't run listContacts (CGo bridge) + four
+                    // reconcile passes per event on the MainActor.
+                    session.scheduleHistorySyncReconcile(client: client, vm: vm)
                 case .messageEdited(let chatJID, let messageID, let newText, let ts):
                     let when = Date(timeIntervalSince1970: TimeInterval(ts))
                     let canonical = JIDNormalize.canonical(chatJID, client: client)

@@ -56,6 +56,14 @@ final class ChatListViewModel {
     @ObservationIgnored private var pendingIngest: [BridgeMessage] = []
     @ObservationIgnored private var pendingIngestFlush: Task<Void, Never>?
 
+    // F20: batched reaction writer — see persistReaction().
+    @ObservationIgnored private var pendingReactions: [BridgeReaction] = []
+    @ObservationIgnored private var pendingReactionsFlush: Task<Void, Never>?
+
+    // F21: batched message-mutation writer — see enqueueMutation().
+    @ObservationIgnored private var pendingMutations: [MessageWriter.MessageMutation] = []
+    @ObservationIgnored private var pendingMutationsFlush: Task<Void, Never>?
+
     /// Per-event chat-row work coalescer. `.message` bursts (history
     /// sync, offline queue drain, group activity) hit `ingest` dozens
     /// of times in a single runloop turn — each one used to invoke
@@ -653,32 +661,24 @@ final class ChatListViewModel {
     /// reactions arrive once via the global event stream — without this,
     /// closing/reopening a chat would drop all of them.
     func persistReaction(_ r: BridgeReaction) {
-        guard let context else { return }
-        let id = r.targetMessageID
-        let sender = r.senderJID
-        let descriptor = FetchDescriptor<PersistedReaction>(
-            predicate: #Predicate {
-                $0.targetMessageID == id && $0.senderJID == sender
-            })
-        let ts = Date(timeIntervalSince1970: TimeInterval(r.timestamp))
-        if r.emoji.isEmpty {
-            if let row = try? context.fetch(descriptor).first {
-                context.delete(row)
+        // F20: SwiftData persistence is batched off-main via MessageWriter
+        // with a 50 ms coalesce window. The notification side below stays
+        // on MainActor and fires per-event because per-reaction policy
+        // (mute, NSApp.isActive, targetFromMe) is naturally per-event.
+        if writer != nil {
+            pendingReactions.append(r)
+            if pendingReactionsFlush == nil {
+                pendingReactionsFlush = Task { @MainActor [weak self] in
+                    try? await Task.sleep(for: .milliseconds(50))
+                    guard let self else { return }
+                    let batch = self.pendingReactions
+                    self.pendingReactions.removeAll(keepingCapacity: true)
+                    self.pendingReactionsFlush = nil
+                    guard !batch.isEmpty, let writer = self.writer else { return }
+                    await writer.enqueueReactions(batch)
+                }
             }
-        } else if let existing = try? context.fetch(descriptor).first {
-            existing.emoji = r.emoji
-            existing.timestamp = ts
-            existing.chatJID = JIDNormalize.canonical(r.chatJID, client: client)
-        } else {
-            let row = PersistedReaction(
-                chatJID: JIDNormalize.canonical(r.chatJID, client: client),
-                targetMessageID: r.targetMessageID,
-                senderJID: r.senderJID,
-                emoji: r.emoji,
-                timestamp: ts)
-            context.insert(row)
         }
-        try? context.save()
 
         // Notify only when somebody reacts to OUR message (`targetFromMe`)
         // and the window isn't focused. Skip self-reactions and clears.
@@ -789,29 +789,20 @@ final class ChatListViewModel {
     /// PersistedMessage row, independent of whether the chat is
     /// currently open. Called by the event loop on every inbound
     /// `.messageLocallyDeleted` so the row stays hidden after restart.
+    ///
+    /// F21: SwiftData persistence is batched off-main via MessageWriter
+    /// with a 50 ms coalesce window. The post-batch flush calls
+    /// `refreshPreview` for every chat JID that got a row that affects
+    /// preview text (delete / revoke / edit) so the sidebar reflects
+    /// the new last-message state.
     func applyIncomingLocalDelete(chatJID: String, messageID: String) {
-        guard let context else { return }
-        let descriptor = FetchDescriptor<PersistedMessage>(
-            predicate: #Predicate { $0.id == messageID })
-        if let row = try? context.fetch(descriptor).first {
-            row.locallyDeleted = true
-            try? context.save()
-        }
-        refreshPreview(chatJID: chatJID)
+        enqueueMutation(.localDelete(id: messageID, chatJID: chatJID))
     }
 
     /// Persist a peer-device revoke directly to PersistedMessage row,
     /// regardless of whether the chat is currently open.
     func applyIncomingRevoke(chatJID: String, messageID: String, revokedBy: String, at: Date) {
-        guard let context else { return }
-        let descriptor = FetchDescriptor<PersistedMessage>(
-            predicate: #Predicate { $0.id == messageID })
-        if let row = try? context.fetch(descriptor).first {
-            row.revokedAt = at
-            row.revokedBy = revokedBy
-            try? context.save()
-        }
-        refreshPreview(chatJID: chatJID)
+        enqueueMutation(.revoke(id: messageID, chatJID: chatJID, by: revokedBy, at: at))
     }
 
     /// Persist a peer-device or peer-participant in-chat pin/unpin
@@ -819,13 +810,8 @@ final class ChatListViewModel {
     /// is currently open.
     func applyIncomingMessagePin(chatJID: String, targetMessageID: String,
                                  pinned: Bool, at: Date) {
-        guard let context else { return }
-        let descriptor = FetchDescriptor<PersistedMessage>(
-            predicate: #Predicate { $0.id == targetMessageID })
-        if let row = try? context.fetch(descriptor).first {
-            row.pinnedAt = pinned ? at : nil
-            try? context.save()
-        }
+        enqueueMutation(.messagePin(id: targetMessageID, chatJID: chatJID,
+                                    pinned: pinned, at: at))
     }
 
     /// Persist a peer-device (un)star directly to PersistedMessage,
@@ -833,27 +819,51 @@ final class ChatListViewModel {
     /// refresh — starring doesn't change last-message state.
     func applyIncomingStar(chatJID: String, messageID: String,
                            starred: Bool, at: Date) {
-        guard let context else { return }
-        let descriptor = FetchDescriptor<PersistedMessage>(
-            predicate: #Predicate { $0.id == messageID })
-        if let row = try? context.fetch(descriptor).first {
-            row.starredAt = starred ? at : nil
-            try? context.save()
-        }
+        enqueueMutation(.star(id: messageID, chatJID: chatJID,
+                              starred: starred, at: at))
     }
 
     /// Persist a peer-device edit directly to PersistedMessage row,
     /// regardless of whether the chat is currently open.
     func applyIncomingEdit(chatJID: String, messageID: String, newText: String, at: Date) {
-        guard let context else { return }
-        let descriptor = FetchDescriptor<PersistedMessage>(
-            predicate: #Predicate { $0.id == messageID })
-        if let row = try? context.fetch(descriptor).first {
-            row.text = newText
-            row.editedAt = at
-            try? context.save()
+        enqueueMutation(.edit(id: messageID, chatJID: chatJID,
+                              newText: newText, at: at))
+    }
+
+    /// F21: queue a `MessageMutation` for the background writer and arm
+    /// a 50 ms flush task. When the batch persists, refresh the sidebar
+    /// preview for every chat JID that received a mutation that affects
+    /// last-message text (delete / revoke / edit).
+    private func enqueueMutation(_ m: MessageWriter.MessageMutation) {
+        pendingMutations.append(m)
+        guard pendingMutationsFlush == nil else { return }
+        pendingMutationsFlush = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(50))
+            guard let self else { return }
+            let batch = self.pendingMutations
+            self.pendingMutations.removeAll(keepingCapacity: true)
+            self.pendingMutationsFlush = nil
+            guard !batch.isEmpty, let writer = self.writer else { return }
+            await writer.enqueueMutations(batch)
+            // Preview refresh runs AFTER the writer commits so the
+            // MainActor fetch sees the new revoked / locally-deleted /
+            // text fields. star and message-pin don't affect preview
+            // text so they don't trigger a refresh.
+            var chatsNeedingRefresh: Set<String> = []
+            for m in batch {
+                switch m {
+                case .localDelete(_, let chatJID),
+                     .revoke(_, let chatJID, _, _),
+                     .edit(_, let chatJID, _, _):
+                    chatsNeedingRefresh.insert(chatJID)
+                case .messagePin, .star:
+                    break
+                }
+            }
+            for jid in chatsNeedingRefresh {
+                self.refreshPreview(chatJID: jid)
+            }
         }
-        refreshPreview(chatJID: chatJID)
     }
 
     /// Re-derive `lastMessage` / `lastTimestamp` for `chatJID` from the
