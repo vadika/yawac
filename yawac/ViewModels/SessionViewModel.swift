@@ -37,6 +37,25 @@ final class SessionViewModel {
         set { UserDefaults.standard.set(newValue,
                                         forKey: Self.historyBackfillCompletedKey) }
     }
+    /// User-triggered full history sync progress state. Read by the
+    /// AccountPanel "Full history sync" row to render a linear
+    /// ProgressView + counters while a backfill burst is in flight.
+    /// F28.
+    struct FullSyncState: Equatable {
+        var inFlight: Bool = false
+        /// Highest progress value seen during the current burst (phone may
+        /// report 100 on every ON_DEMAND chunk; we keep the max).
+        var progress: Int = 0
+        /// Number of contentful HistorySync chunks observed during the burst.
+        var chunks: Int = 0
+        /// Sum of per-chunk message counts during the burst.
+        var messages: Int = 0
+    }
+
+    /// Observable so the Settings row redraws on each chunk.
+    private(set) var fullSync: FullSyncState = .init()
+    /// Watchdog cleared 60s after the last chunk arrives.
+    @ObservationIgnored private var fullSyncTimeoutTask: Task<Void, Never>?
     /// Throttle for `didBecomeActive` refresh fan-out (30s).
     private var lastForegroundRefresh: Date?
     @ObservationIgnored
@@ -591,9 +610,28 @@ final class SessionViewModel {
             } else {
                 self.joinRequestStore.clear(chatJID: chatJID)
             }
-        case .historySync(_, let n, _, _, _):
+        case .historySync(let syncType, let n, let progress, _, let chunkMessages):
             syncedConversations += n
             armSyncWatchdog()
+            if fullSync.inFlight {
+                // Only count chunks that actually carry conversation messages.
+                // PUSH_NAME / INITIAL_STATUS_V3 / NON_BLOCKING_DATA arrive
+                // alongside but shouldn't bump the counters. Same gate F26
+                // uses for the one-shot UserDefaults flag.
+                let contentful: Set<String> = [
+                    "INITIAL_BOOTSTRAP", "RECENT", "FULL", "ON_DEMAND",
+                ]
+                if contentful.contains(syncType) {
+                    fullSync.progress = max(fullSync.progress, progress)
+                    fullSync.chunks += 1
+                    fullSync.messages += chunkMessages
+                    armFullSyncTimeout()  // re-arm silence window
+                    if fullSync.progress >= 100 {
+                        fullSync.inFlight = false
+                        fullSyncTimeoutTask?.cancel()
+                    }
+                }
+            }
         case .loggedOut:
             state = .needsPair
             syncWatchdog?.cancel()
@@ -638,6 +676,33 @@ final class SessionViewModel {
                 voterJID: voterJID,
                 optionHashesJSON: json,
                 timestamp: Date())
+        }
+    }
+
+    /// User-triggered full history sync. Clears the F26 one-shot gate,
+    /// resets counters, and fires the existing FULL_HISTORY_SYNC_ON_DEMAND
+    /// path. The 60s silence-timeout (armed on every chunk) clears
+    /// inFlight if the phone goes quiet.
+    /// F28.
+    @MainActor
+    func startFullHistorySync() {
+        guard !fullSync.inFlight else { return }
+        historyBackfillCompleted = false
+        fullSync = FullSyncState(inFlight: true)
+        armFullSyncTimeout()
+        Task { await self.requestHistoryBackfillIfNeeded() }
+    }
+
+    @MainActor
+    private func armFullSyncTimeout() {
+        fullSyncTimeoutTask?.cancel()
+        fullSyncTimeoutTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(60))
+            guard let self else { return }
+            // If a chunk arrived in the last 60s it would have cancelled
+            // this task and re-armed a fresh one. Reaching here means
+            // silence; clear inFlight so the row falls back to idle.
+            self.fullSync.inFlight = false
         }
     }
 
