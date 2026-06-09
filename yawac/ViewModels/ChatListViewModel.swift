@@ -558,11 +558,19 @@ final class ChatListViewModel {
         let now = message.timestamp
         if let idx = chats.firstIndex(where: { $0.jid == chatJID }) {
             var c = chats[idx]
-            if now >= c.lastTimestamp {
+            let advancesTip = now >= c.lastTimestamp
+            if advancesTip {
                 c.lastMessage = preview
                 c.lastTimestamp = now
             }
-            if !alreadySeen, !message.fromMe { c.unread += 1 }
+            // F31: only bump unread for messages that advance the chat
+            // tip (genuine new arrival). Backfill replays from F30
+            // multi-round HistorySync ingest are older than the current
+            // tip and would otherwise inflate unread by every historical
+            // message pulled — observed counts in the thousands after a
+            // single full-sync run even though the user had read those
+            // messages on the phone weeks ago.
+            if !alreadySeen, !message.fromMe, advancesTip { c.unread += 1 }
             let looksLikePhonePlaceholder: Bool = {
                 guard c.name.hasPrefix("+") else { return c.name == c.jid }
                 return c.name.dropFirst().allSatisfy(\.isNumber)
@@ -587,12 +595,18 @@ final class ChatListViewModel {
             } else {
                 initialName = chatJID
             }
+            // F31: brand-new chat row. Only mark unread=1 if the
+            // message is fresh (within ~5 min of now). Otherwise it's a
+            // backfill replay from F30 deep sync — don't inflate.
+            let nowSeconds = Int64(Date().timeIntervalSince1970)
+            let isFresh = (nowSeconds - now) < 300
+            let unread = (!alreadySeen && !message.fromMe && isFresh) ? 1 : 0
             let c = Chat(
                 jid: chatJID,
                 name: initialName,
                 lastMessage: preview,
                 lastTimestamp: now,
-                unread: (!alreadySeen && !message.fromMe) ? 1 : 0)
+                unread: unread)
             chats.append(c)
         }
         markChatDirty(chatJID)

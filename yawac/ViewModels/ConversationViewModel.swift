@@ -552,7 +552,14 @@ final class ConversationViewModel {
     /// First-paint cap. Lower than `extendedHistoryLimit` so chat-switch
     /// stays snappy; older rows page in via `loadMoreHistory` on scroll.
     static let historyLoadLimit = 60
-    static let extendedHistoryLimit = 500
+    /// F31: bumped 500 → 10000 across two iterations. Heavy-backlog
+    /// chats (post-F30 deep sync) routinely have 4000+ persisted
+    /// rows; capping at 500 then 2500 left the deeper messages
+    /// invisible until repeated "Load earlier" taps. LazyVStack
+    /// handles 10k entries fine because only the visible window of
+    /// rows actually instantiates; per-row state lives in caches that
+    /// share storage across rows.
+    static let extendedHistoryLimit = 10000
 
     /// Message id to anchor the initial scroll position to. Set in
     /// `loadHistory` based on the chat's persisted unread count: anchors
@@ -563,7 +570,15 @@ final class ConversationViewModel {
     func loadHistory() {
         guard let container = context?.container else { return }
         let jid = chatJID
-        let limit = Self.historyLoadLimit
+        // F31v2: always fetch up to `extendedHistoryLimit` on first
+        // open. The original F9 historyLoadLimit=60 was sized for fast
+        // chat-switch, but F2 made the snapshot build detached so
+        // first-paint isn't on the critical path. With 10k cap and
+        // LazyVStack, paying the SwiftData read up-front means the
+        // whole persisted history is reachable without "Load earlier"
+        // taps. Chats with fewer than the cap just return what they
+        // have. Memory: ~1 KB per UIMessage × 10k = ~10 MB worst case.
+        let limit = Self.extendedHistoryLimit
         let client = self.client
         // Closure captures the @MainActor-isolated WAClient instance.
         // `resolveLIDToPN` / `resolvePNToLID` are nonisolated, so the
@@ -887,19 +902,32 @@ final class ConversationViewModel {
         let unread = (try? context.fetch(pcDescriptor))?.first?.unread ?? 0
         var initialAnchorID: String?
         var unreadInboundIDs: Set<String> = []
-        if unread > 0 && unread <= messages.count {
-            let firstUnreadIdx = messages.count - unread
-            initialAnchorID = messages[firstUnreadIdx].id
+        // F31: when unread exceeds what we loaded, anchor to the
+        // OLDEST loaded message so the user lands on the deepest
+        // unread we have instead of snapping to the bottom (which
+        // hid the entire offline backlog). "Load earlier messages"
+        // then digs further. Loading limit is already scaled by
+        // unread in `loadHistory`, capped at extendedHistoryLimit.
+        if unread > 0 && !messages.isEmpty {
+            if unread <= messages.count {
+                let firstUnreadIdx = messages.count - unread
+                initialAnchorID = messages[firstUnreadIdx].id
+            } else {
+                initialAnchorID = messages.first?.id
+            }
         } else {
             initialAnchorID = messages.last?.id
         }
         // Seed the dwell-tracked unread set. We don't know exactly
         // which message ids were unread on the phone, so we take
         // the trailing `unread` inbound rows as the best guess —
-        // matches the first-unread scroll anchor above.
+        // matches the first-unread scroll anchor above. When unread
+        // exceeds loaded messages, mark every loaded inbound as
+        // unread (we can't be more precise without older anchors).
         if unread > 0 {
             let inbound = messages.filter { !$0.fromMe }
-            for m in inbound.suffix(unread) {
+            let take = min(unread, inbound.count)
+            for m in inbound.suffix(take) {
                 unreadInboundIDs.insert(m.id)
             }
         }
