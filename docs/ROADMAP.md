@@ -205,6 +205,26 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **F35 — inline system notices** (v0.9.49) — yawac filtered
+  out protocol + system messages everywhere so the user never saw
+  the "encryption key with X changed" + "disappearing messages
+  turned on/off" notices that WhatsApp shows inline. Bridge gains
+  `dispatchIdentityChange` (server-pushed only — `Implicit=true`
+  local untrusted-identity errors skipped) and
+  `dispatchEphemeralSystemRow`. The latter wires both the live
+  `dispatchMessage` EPHEMERAL_SETTING branch and the historical
+  `dispatchWebMessage` path so a HistorySync replay surfaces past
+  toggles too. Existing `EphemeralTimerChanged` event preserved —
+  the ChatInfoView timer chip behavior is unchanged. Swift ingest
+  paths allow `kind="system"` rows with a non-empty `text` body
+  through; three snapshot-construction sites and the live
+  `UIMessage(_ b: BridgeMessage)` init route `.system` body
+  construction through the persisted text when present. Per-chat
+  one-shot sweep drops `"system"` from the deleted-kind list.
+  `MessageRow.rowContent` special-cases `.system(text)` to render
+  in date-separator style — hairlines flanking centered text, no
+  bubble — so notices read as in-band rather than as messages.
+
 - ✅ **F34 — flush ThumbnailCache on didResignActive** (v0.9.48) —
   F31 bumped the four NSCache budgets (image 256 MB, video 128 MB,
   avatar 64 MB, map 32 MB = ~480 MB worst case) to stop the
