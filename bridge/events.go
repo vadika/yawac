@@ -174,9 +174,20 @@ func (c *Client) dispatchChatPresence(evt *events.ChatPresence) {
 func (c *Client) dispatchHistory(evt *events.HistorySync) {
 	c.applyHistorySync(evt)
 	convs := evt.Data.GetConversations()
+	// Count messages inside this chunk so the Swift Settings panel can
+	// show a running "X messages so far" counter during user-initiated
+	// full sync (F28). Same loop the F-instr trace used; cost is one
+	// extra range per chunk, negligible.
+	var chunkMessages int
+	for _, conv := range convs {
+		chunkMessages += len(conv.GetMessages())
+	}
 	payload := map[string]any{
-		"sync_type":     evt.Data.GetSyncType().String(),
-		"conversations": len(convs),
+		"sync_type":      evt.Data.GetSyncType().String(),
+		"conversations":  len(convs),
+		"progress":       int(evt.Data.GetProgress()),
+		"chunk_order":    int(evt.Data.GetChunkOrder()),
+		"chunk_messages": chunkMessages,
 	}
 	b, _ := json.Marshal(payload)
 	c.dispatch("HistorySync", string(b))

@@ -187,7 +187,7 @@ struct ContentView: View {
                     vm.reconcileMutedWithStore()
                     vm.reconcileLIDDuplicates()
                     session.loadBlocklist()
-                case .historySync(let syncType, _):
+                case .historySync(let syncType, _, _, _, _):
                     // F26: only flip the one-shot backfill gate on chunks
                     // that actually carry conversation messages. Without
                     // this guard, a PUSH_NAME / INITIAL_STATUS_V3 chunk

@@ -116,8 +116,40 @@ struct AccountPanel: View {
                     showChevron: true,
                     onTap: { showPrivacy = true }
                 )
+                fullHistorySyncRow
             }
         }
+    }
+
+    // MARK: - Full history sync (F28)
+
+    @ViewBuilder
+    private var fullHistorySyncRow: some View {
+        let s = session.fullSync
+        SettingsRow(
+            icon: "arrow.down.circle",
+            label: "Full history sync",
+            sublabel: fullSyncSublabel(s),
+            showChevron: !s.inFlight,
+            onTap: { session.startFullHistorySync() }
+        )
+        if s.inFlight {
+            ProgressView(value: Double(s.progress), total: 100)
+                .progressViewStyle(.linear)
+                .tint(Theme.accent)
+                .padding(.horizontal, 14)
+                .padding(.bottom, 8)
+        }
+    }
+
+    private func fullSyncSublabel(_ s: SessionViewModel.FullSyncState) -> String {
+        if s.inFlight {
+            return "\(s.progress)% • chunk \(s.chunks) • \(s.messages) messages"
+        }
+        if s.chunks > 0 {
+            return "Last run: \(s.messages) messages across \(s.chunks) chunks"
+        }
+        return "Pull older messages from phone"
     }
 
     private var linkedDevicesSublabel: String {

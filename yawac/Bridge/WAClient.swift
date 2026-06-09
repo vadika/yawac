@@ -40,7 +40,11 @@ class WAClient: PhoneValidating, LIDResolving {
         case pollVote(chatJID: String, pollMessageID: String, voterJID: String, optionHashes: [String])
         case presence(jid: String, online: Bool, lastSeen: Int64)
         case chatPresence(chat: String, sender: String, typing: Bool)
-        case historySync(syncType: String, conversations: Int)
+        case historySync(syncType: String,
+                         conversations: Int,
+                         progress: Int,
+                         chunkOrder: Int,
+                         chunkMessages: Int)
         case mediaRetry(messageID: String, ok: Bool, newDirectPath: String?, error: String?)
         case messageEdited(chatJID: String, messageID: String, newText: String, timestamp: Int64)
         case messageRevoked(chatJID: String, messageID: String, revokedBy: String, timestamp: Int64)
@@ -1006,14 +1010,23 @@ class WAClient: PhoneValidating, LIDResolving {
             struct H: Codable {
                 let conversations: Int
                 let syncType: String?
+                let progress: Int?
+                let chunkOrder: Int?
+                let chunkMessages: Int?
                 enum CodingKeys: String, CodingKey {
                     case conversations
                     case syncType = "sync_type"
+                    case progress
+                    case chunkOrder = "chunk_order"
+                    case chunkMessages = "chunk_messages"
                 }
             }
             if let h = try? dec.decode(H.self, from: data) {
                 return .historySync(syncType: h.syncType ?? "",
-                                    conversations: h.conversations)
+                                    conversations: h.conversations,
+                                    progress: h.progress ?? 0,
+                                    chunkOrder: h.chunkOrder ?? 0,
+                                    chunkMessages: h.chunkMessages ?? 0)
             }
         case "MediaRetry":
             struct R: Codable {
