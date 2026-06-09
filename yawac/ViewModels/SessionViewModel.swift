@@ -591,7 +591,7 @@ final class SessionViewModel {
             } else {
                 self.joinRequestStore.clear(chatJID: chatJID)
             }
-        case .historySync(_, let n):
+        case .historySync(_, let n, _, _, _):
             syncedConversations += n
             armSyncWatchdog()
         case .loggedOut:
