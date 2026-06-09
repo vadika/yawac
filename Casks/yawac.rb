@@ -4,7 +4,7 @@ cask "yawac" do
 
   url "https://github.com/vadika/yawac/releases/download/v#{version}/yawac-#{version}.zip"
   name "yawac"
-  desc "Yet Another WhatsApp Client — native macOS SwiftUI"
+  desc "Yet Another Client for WhatsApp — native macOS SwiftUI"
   homepage "https://github.com/vadika/yawac"
 
   depends_on macos: ">= :sonoma"

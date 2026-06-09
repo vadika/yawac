@@ -1,4 +1,4 @@
-# yawac — Yet Another WhatsApp Client
+# yawac — Yet Another Client for WhatsApp
 
 A native macOS SwiftUI client backed by [tulir/whatsmeow](https://github.com/tulir/whatsmeow).
 

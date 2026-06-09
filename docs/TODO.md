@@ -50,7 +50,7 @@ poll-vote count: 0
 via `Store.MsgSecrets.PutMessageSecret` so future votes can decrypt — but no
 vote messages ever arrive in HistorySync to be decrypted.
 
-The phone-side WhatsApp client maintains an aggregated tally view privately
+The phone-side client for WhatsApp maintains an aggregated tally view privately
 and apparently doesn't replay individual vote events to companion devices.
 
 **Workarounds considered (not implemented):**
