@@ -205,6 +205,14 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **F33 — stable reaction chip order** (v0.9.47) —
+  `ForEach(Array(Set(reactions)), id: \.self)` shuffled the chip
+  order on every body eval because `Set` iteration order is
+  unspecified. Visible as reaction chips "blinking" and the
+  reactor count appearing to jump between adjacent emojis (two
+  thumbs-up variants observed on a single message). Sort the
+  deduped emoji array so the order is stable across renders.
+
 - ✅ **F32 — group bubble redesign + mark-as-read** (v0.9.46) —
   Inbound group messages now mirror the sidebar chat-list rhythm:
   avatar sits to the LEFT of the bubble (28 pt; tap opens DM),
