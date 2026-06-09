@@ -205,6 +205,21 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **F32 — group bubble redesign + mark-as-read** (v0.9.46) —
+  Inbound group messages now mirror the sidebar chat-list rhythm:
+  avatar sits to the LEFT of the bubble (28 pt; tap opens DM),
+  sender name fills the top-left, and a timestamp overlay hugs
+  the bubble's top-right corner regardless of body width.
+  `footerView` suppresses the bottom timestamp for inbound group
+  rows (it now lives on the header line). Own messages + 1:1
+  inbound keep the bubble-bottom timestamp behavior. Bubble width
+  follows content — short messages stay narrow, the header
+  doesn't pin the row to full width. Also added a "Mark as read"
+  item at the top of the sidebar chat-row context menu (shows
+  only when `chat.unread > 0`); clears the local counter via
+  `vm.markRead`. Useful for chats whose unread was inflated by
+  the F30 deep backfill before F31 stopped the inflation.
+
 - ✅ **F31 — full chat load + unread non-inflation + cache budgets**
   (v0.9.45) — three coupled fixes for the user-visible "I ran Full
   history sync but the chat still only shows ~14 months and the

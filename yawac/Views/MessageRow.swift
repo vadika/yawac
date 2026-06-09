@@ -263,8 +263,18 @@ struct MessageRow: View {
     }
 
     private var rowContent: some View {
-        HStack {
+        HStack(alignment: .top, spacing: 6) {
             if message.fromMe { Spacer(minLength: 60) }
+            // F32: WhatsApp-style avatar to the left of the bubble for
+            // inbound group messages (matches the sidebar chat-list
+            // layout). Tap = open DM with the sender.
+            if !message.fromMe && isGroupChat {
+                Button { onOpenChat?(message.senderJID) } label: {
+                    AvatarView(jid: message.senderJID,
+                               name: senderDisplay, size: 28)
+                }
+                .buttonStyle(.plain)
+            }
             VStack(alignment: message.fromMe ? .trailing : .leading, spacing: 2) {
                 VStack(alignment: message.fromMe ? .trailing : .leading, spacing: 4) {
                     if !message.fromMe && isGroupChat {
@@ -282,6 +292,21 @@ struct MessageRow: View {
                         .stroke(message.fromMe ? Theme.ownBorder : Theme.otherBorder,
                                 lineWidth: 1)
                 )
+                // F32: top-right timestamp overlay for inbound group
+                // messages. Sits on top of the bubble shape, hugs the
+                // top-right corner. Inset matches the bubble's own
+                // .padding(.horizontal, 14) so it lines up with the
+                // bubble's right edge.
+                .overlay(alignment: .topTrailing) {
+                    if !message.fromMe && isGroupChat {
+                        Text(message.timestamp,
+                             format: .dateTime.hour(.twoDigits(amPM: .omitted)).minute())
+                            .scaledMono(10.5)
+                            .monospacedDigit()
+                            .foregroundStyle(Theme.textFaint)
+                            .padding(.top, 10).padding(.trailing, 14)
+                    }
+                }
                 .foregroundStyle(message.fromMe ? Theme.ownText : Theme.otherText)
                 .background(
                     isHighlighted
@@ -368,18 +393,24 @@ struct MessageRow: View {
 
     /// Sender avatar + name. Left-click switches to that contact's 1:1
     /// chat; right-click opens the same user menu as @mention popovers.
+    /// F32: avatar moved out to the left of the bubble (sidebar style);
+    /// name + timestamp share the top line so the bubble has a chat-list
+    /// rhythm instead of a name-only header above the body.
     @ViewBuilder
     private var senderHeader: some View {
+        // F32: name only — the timestamp is laid in as a top-trailing
+        // overlay on the bubble shape so it always hugs the right edge
+        // regardless of body / name widths.
         Button {
             onOpenChat?(message.senderJID)
         } label: {
-            HStack(spacing: 6) {
-                AvatarView(jid: message.senderJID, name: senderDisplay, size: 24)
-                Text(senderDisplay)
-                    .font(.caption).bold()
-                    .foregroundStyle(.tint)
-            }
-            .contentShape(.rect)
+            Text(senderDisplay)
+                .font(.caption).bold()
+                .foregroundStyle(.tint)
+                // Padding-trailing reserves space so a long sender name
+                // doesn't slip under the overlaid timestamp.
+                .padding(.trailing, 44)
+                .contentShape(.rect)
         }
         .buttonStyle(.plain)
         .contextMenu {
@@ -917,10 +948,16 @@ struct MessageRow: View {
     @ViewBuilder
     private var footerView: some View {
         HStack(spacing: 5) {
-            Text(message.timestamp, format: .dateTime.hour(.twoDigits(amPM: .omitted)).minute())
-                .scaledMono(10.5)
-                .monospacedDigit()
-                .foregroundStyle(Theme.textFaint)
+            // F32: hide the timestamp here for inbound group messages —
+            // it now lives on the top line alongside the sender name.
+            // Own messages + 1:1 inbound keep the bubble-bottom time.
+            let showTimeInFooter = !(!message.fromMe && isGroupChat)
+            if showTimeInFooter {
+                Text(message.timestamp, format: .dateTime.hour(.twoDigits(amPM: .omitted)).minute())
+                    .scaledMono(10.5)
+                    .monospacedDigit()
+                    .foregroundStyle(Theme.textFaint)
+            }
             if message.editedAt != nil {
                 Text("· edited")
                     .scaledMono(10.5)

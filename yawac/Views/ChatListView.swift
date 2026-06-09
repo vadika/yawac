@@ -468,6 +468,9 @@ struct ChatListView: View {
         }
         .buttonStyle(.plain)
         .contextMenu {
+            if chat.unread > 0 {
+                Button("Mark as read") { vm.markRead(chat.jid) }
+            }
             Button(chat.pinnedAt != nil ? "Unpin chat" : "Pin chat") {
                 vm.pinChat(chat, pinned: chat.pinnedAt == nil)
             }
