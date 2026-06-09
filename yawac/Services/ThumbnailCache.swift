@@ -73,8 +73,12 @@ final class ThumbnailCache {
 
     private let cache: NSCache<NSString, NSImage> = {
         let c = NSCache<NSString, NSImage>()
-        c.countLimit = 256
-        c.totalCostLimit = 64 * 1024 * 1024  // ~64 MB of NSImage backing
+        // F31: bumped 256 / 64 MB → 1024 / 256 MB. The extendedHistoryLimit
+        // bump to 10000 means a single chat-open can paint thousands of
+        // image bubbles; previous countLimit triggered eviction storms
+        // → re-decode → revision bumps → re-paint = visible flicker.
+        c.countLimit = 1024
+        c.totalCostLimit = 256 * 1024 * 1024
         return c
     }()
     /// Separate NSCache for video bubble thumbnails. Decoded PNGs from
@@ -85,8 +89,10 @@ final class ThumbnailCache {
     /// need on screen.
     private let videoCache: NSCache<NSString, NSImage> = {
         let c = NSCache<NSString, NSImage>()
-        c.countLimit = 256
-        c.totalCostLimit = 32 * 1024 * 1024  // ~32 MB of thumb NSImage backing
+        // F31: bumped 256 / 32 MB → 1024 / 128 MB for the same reason
+        // as the image cache above.
+        c.countLimit = 1024
+        c.totalCostLimit = 128 * 1024 * 1024
         return c
     }()
     // Must be @ObservationIgnored. The @Observable macro otherwise tracks
@@ -220,8 +226,14 @@ final class ThumbnailCache {
     /// large group threads; the 16 MB byte budget caps memory.
     private let avatarCache: NSCache<NSString, NSImage> = {
         let c = NSCache<NSString, NSImage>()
-        c.countLimit = 512
-        c.totalCostLimit = 16 * 1024 * 1024
+        // F31: bumped 512 / 16 MB → 4096 / 64 MB. After the
+        // extendedHistoryLimit bump to 10000, a single chat-open in a
+        // large group renders an avatar per message — thousands of
+        // distinct senders. Previous countLimit blew its budget and
+        // every scroll re-evicted half the visible avatars, looking
+        // exactly like "all avatars blinking" the user reported.
+        c.countLimit = 4096
+        c.totalCostLimit = 64 * 1024 * 1024
         return c
     }()
     @ObservationIgnored private var avatarInflight: Set<String> = []
