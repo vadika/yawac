@@ -493,8 +493,14 @@ struct MessageRow: View {
 
     @ViewBuilder
     private var reactionChips: some View {
+        // F33: Set iteration order is unspecified, so each body eval
+        // re-shuffled the chip order — the row looked like it was
+        // blinking and the reactor count "3" appeared to jump between
+        // emojis. Sort the deduped emojis so the order is stable
+        // across renders.
+        let uniqueEmojis = Array(Set(reactions)).sorted()
         HStack(spacing: 4) {
-            ForEach(Array(Set(reactions)), id: \.self) { emoji in
+            ForEach(uniqueEmojis, id: \.self) { emoji in
                 ReactionChip(
                     emoji: emoji,
                     senders: reactors[emoji] ?? [],
