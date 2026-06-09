@@ -205,6 +205,20 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **F34 — flush ThumbnailCache on didResignActive** (v0.9.48) —
+  F31 bumped the four NSCache budgets (image 256 MB, video 128 MB,
+  avatar 64 MB, map 32 MB = ~480 MB worst case) to stop the
+  "all avatars are blinking" eviction storm on the 10000-message
+  `LazyVStack`. Side effect: an idle yawac in the background kept
+  the full budget resident, and macOS Activity Monitor flagged
+  yawac as significant energy use (~2 GB physical footprint).
+  Subscribe to `NSApplication.didResignActiveNotification` and
+  `flushAll` the four caches + inflight / negative sets when the
+  user switches away. The existing on-demand decode path
+  transparently repopulates visible bubbles on re-activate.
+  `flushAll` is public so a future low-memory hook can call it
+  too.
+
 - ✅ **F33 — stable reaction chip order** (v0.9.47) —
   `ForEach(Array(Set(reactions)), id: \.self)` shuffled the chip
   order on every body eval because `Set` iteration order is
