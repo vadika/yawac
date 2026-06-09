@@ -511,9 +511,20 @@ func TestDispatchEphemeralTimerChangedOnDirectMessage(t *testing.T) {
 	if !strings.Contains(ev.payload, `"chat_jid":"12345@s.whatsapp.net"`) {
 		t.Errorf("payload missing chat_jid: %s", ev.payload)
 	}
-	// Carrier message must be suppressed — no regular Message event.
-	if findInSink(sink, "Message") != nil {
-		t.Error("expected EphemeralSetting carrier message to be suppressed")
+	// F35: the carrier itself is still suppressed (no `text` body, no
+	// `kind` field, etc.), but yawac now emits a synthetic Message
+	// with kind="system" carrying a friendly description so the user
+	// sees the timer change as an inline chat row. Verify it's there
+	// with the expected shape.
+	msg := findInSink(sink, "Message")
+	if msg == nil {
+		t.Fatal("expected synthetic system Message for EphemeralSetting")
+	}
+	if !strings.Contains(msg.payload, `"kind":"system"`) {
+		t.Errorf("expected kind=system, got %s", msg.payload)
+	}
+	if !strings.Contains(msg.payload, "Disappearing messages turned on") {
+		t.Errorf("expected friendly disappearing-on text, got %s", msg.payload)
 	}
 }
 

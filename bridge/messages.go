@@ -470,6 +470,14 @@ func (c *Client) dispatchMessage(evt *events.Message) {
 				Timestamp: evt.Info.Timestamp.Unix(),
 			})
 			c.dispatch("EphemeralTimerChanged", string(b))
+			// F35: also emit a synthetic system Message so the change
+			// renders as an inline chat row instead of just updating
+			// the ChatInfoView timer chip.
+			c.dispatchEphemeralSystemRow(
+				evt.Info.Chat.String(),
+				evt.Info.Sender.String(),
+				int32(pm.GetEphemeralExpiration()),
+				evt.Info.Timestamp.Unix())
 			return
 		}
 	}
@@ -656,6 +664,43 @@ func classifyKindUnwrapped(m *waE2E.Message) string {
 	default:
 		return "system"
 	}
+}
+
+// dispatchEphemeralSystemRow emits a synthetic system Message with a
+// friendly text body describing the new disappearing-messages timer
+// state. Persists + renders inline via the regular ingest pipeline.
+// F35.
+func (c *Client) dispatchEphemeralSystemRow(
+	chatJID, actorJID string, seconds int32, ts int64,
+) {
+	var text string
+	switch {
+	case seconds == 0:
+		text = "Disappearing messages turned off."
+	case seconds < 60*60:
+		text = fmt.Sprintf(
+			"Disappearing messages turned on (%d minutes).",
+			seconds/60)
+	case seconds < 24*60*60:
+		text = fmt.Sprintf(
+			"Disappearing messages turned on (%d hours).",
+			seconds/(60*60))
+	default:
+		text = fmt.Sprintf(
+			"Disappearing messages turned on (%d days).",
+			seconds/(24*60*60))
+	}
+	id := fmt.Sprintf("yawac-ephemeral-%s-%d", chatJID, ts)
+	b, _ := json.Marshal(JMessage{
+		ID:        id,
+		ChatJID:   chatJID,
+		SenderJID: actorJID,
+		FromMe:    false,
+		Timestamp: ts,
+		Kind:      "system",
+		Text:      text,
+	})
+	c.dispatch("Message", string(b))
 }
 
 // extractText returns the plain text body of a message, covering the two

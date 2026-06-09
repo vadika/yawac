@@ -80,7 +80,40 @@ func (c *Client) handleWAEvent(evt any) {
 		c.dispatchContact(v)
 	case *events.Blocklist:
 		c.dispatchBlocklist(v)
+	case *events.IdentityChange:
+		// F35: surface as an inline system message so the user sees
+		// "Encryption key with X changed" in the chat. Server-pushed
+		// notifications only (Implicit=true means whatsmeow triggered
+		// it locally on an untrusted-identity error; less interesting
+		// to display).
+		if !v.Implicit {
+			c.dispatchIdentityChange(v)
+		}
 	}
+}
+
+// dispatchIdentityChange emits a synthetic Message with kind="system"
+// so the regular chat ingest path persists + renders it inline. The
+// peer JID is left in the text un-resolved; the Swift side
+// mentionResolver kicks in at render time only for @-mention rewrites,
+// not arbitrary inline text, so we ship a stable phrasing.
+// F35.
+func (c *Client) dispatchIdentityChange(evt *events.IdentityChange) {
+	chatJID := evt.JID.String()
+	senderJID := evt.JID.String()
+	ts := evt.Timestamp.Unix()
+	id := fmt.Sprintf("yawac-identity-%s-%d", evt.JID.String(), ts)
+	text := fmt.Sprintf("Encryption key with %s changed.", evt.JID.User)
+	b, _ := json.Marshal(JMessage{
+		ID:        id,
+		ChatJID:   chatJID,
+		SenderJID: senderJID,
+		FromMe:    false,
+		Timestamp: ts,
+		Kind:      "system",
+		Text:      text,
+	})
+	c.dispatch("Message", string(b))
 }
 
 // dispatchPin surfaces app-state pin/unpin events (a chat pinned

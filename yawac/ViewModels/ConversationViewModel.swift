@@ -290,7 +290,14 @@ final class ConversationViewModel {
                 body = .system(p.kind)
             }
         default:
-            body = .system(p.kind)
+            // F35: kind=="system" rows now carry a friendly text (e.g.
+            // "Encryption key with X changed"). Use it when present;
+            // fall back to the bare kind otherwise.
+            if let t = p.text, !t.isEmpty {
+                body = .system(t)
+            } else {
+                body = .system(p.kind)
+            }
         }
         var m = UIMessage(
             id: p.id, chatJID: p.chatJID, senderJID: p.senderJID,
@@ -748,7 +755,12 @@ final class ConversationViewModel {
         let sweepKey = "yawac.cvm.sweptChat.\(jid)"
         if !UserDefaults.standard.bool(forKey: sweepKey) {
             var swept = 0
-            for p in rows where p.kind == "reaction" || p.kind == "protocol" || p.kind == "system" {
+            // F35: dropped "system" from the sweep list — we now emit
+            // synthetic system rows (encryption-key-changed,
+            // disappearing-timer-changed) that the user wants to see in
+            // the chat. "reaction" + "protocol" still sweep because
+            // those carry no human-visible body.
+            for p in rows where p.kind == "reaction" || p.kind == "protocol" {
                 context.delete(p)
                 swept += 1
             }
@@ -778,7 +790,14 @@ final class ConversationViewModel {
                     body = .system(p.kind)
                 }
             default:
-                body = .system(p.kind)
+                // F35: same fallback as in the buildHistorySnapshot
+                // path above — surface the synthetic system text when
+                // present.
+                if let t = p.text, !t.isEmpty {
+                    body = .system(t)
+                } else {
+                    body = .system(p.kind)
+                }
             }
             var m = UIMessage(
                 id: p.id,
@@ -1074,7 +1093,13 @@ final class ConversationViewModel {
                     body = .system(p.kind)
                 }
             default:
-                body = .system(p.kind)
+                // F35: same fallback as the other two snapshot sites —
+                // surface the synthetic system text when present.
+                if let t = p.text, !t.isEmpty {
+                    body = .system(t)
+                } else {
+                    body = .system(p.kind)
+                }
             }
             return UIMessage(
                 id: p.id, chatJID: p.chatJID, senderJID: p.senderJID,
@@ -1653,7 +1678,11 @@ final class ConversationViewModel {
         // stored `chatJID` is canonical. Match in canonical space so
         // events for this chat aren't dropped on the floor.
         guard JIDNormalize.canonical(b.chatJID, client: client) == chatJID else { return }
-        if b.kind == "protocol" || b.kind == "system" { return }
+        if b.kind == "protocol" { return }
+        // F35: allow synthetic system rows with body text through —
+        // the bridge emits these for encryption-key changes +
+        // disappearing-timer changes so the user sees them inline.
+        if b.kind == "system", (b.text ?? "").isEmpty { return }
         // O(1) dedupe via the Set mirror — both for rows already on
         // screen and for rows queued earlier in this flush window.
         if messageIDs.contains(b.id) { return }
