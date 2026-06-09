@@ -11,8 +11,41 @@ import (
 	"time"
 
 	"go.mau.fi/whatsmeow"
+	"go.mau.fi/whatsmeow/store"
 	waLog "go.mau.fi/whatsmeow/util/log"
+	"google.golang.org/protobuf/proto"
 )
+
+// applyDeeperHistorySyncDefaults overrides whatsmeow's stock
+// store.DeviceProps to ask the phone for substantially more history
+// than the default RECENT bootstrap. Phone-side default ships ~3
+// messages per chat from a single INITIAL_BOOTSTRAP chunk with
+// progress=100 — confirmed via the F-instr trace 2026-06-09
+// (sync_type=INITIAL_BOOTSTRAP total_msgs=621 across 211 chats).
+//
+// These flags only matter at the FIRST pair (or after Logout +
+// re-pair). Existing pairings already settled on the conservative
+// defaults; they'd need to re-pair to feel the difference.
+//
+// Called from init() so the override lands before any
+// whatsmeow.NewClient call.
+func applyDeeperHistorySyncDefaults() {
+	// RequireFullSync flips the phone from "ship RECENT" to "ship FULL".
+	store.DeviceProps.RequireFullSync = proto.Bool(true)
+	cfg := store.DeviceProps.HistorySyncConfig
+	if cfg == nil {
+		return
+	}
+	// Cap the full sync at 10 years and 2 GB so a comically large
+	// account doesn't try to transfer the universe. Phone enforces its
+	// own ceiling below these in practice.
+	cfg.FullSyncDaysLimit = proto.Uint32(3650)
+	cfg.FullSyncSizeMbLimit = proto.Uint32(2048)
+	// Advertise on-demand support so the phone honors
+	// BuildHistorySyncRequest / FULL_HISTORY_SYNC_ON_DEMAND.
+	cfg.OnDemandReady = proto.Bool(true)
+	cfg.CompleteOnDemandReady = proto.Bool(true)
+}
 
 // redirectStderr is run once at package init so logs (whatsmeow's
 // chatty INFO/WARN stream + our own fprintf traces) survive when the
@@ -38,6 +71,11 @@ func init() {
 	fmt.Fprintf(os.Stderr,
 		"[yawac] === bridge init %s ===\n",
 		time.Now().Format(time.RFC3339))
+	// Override whatsmeow's default DeviceProps to ask the phone for
+	// deep history at pair time. Must run BEFORE any whatsmeow.NewClient
+	// call — DeviceProps is a package-level singleton consulted at
+	// registration.
+	applyDeeperHistorySyncDefaults()
 }
 
 // Client wraps a *whatsmeow.Client and is the primary handle exposed to Swift.

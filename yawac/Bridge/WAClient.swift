@@ -40,7 +40,7 @@ class WAClient: PhoneValidating, LIDResolving {
         case pollVote(chatJID: String, pollMessageID: String, voterJID: String, optionHashes: [String])
         case presence(jid: String, online: Bool, lastSeen: Int64)
         case chatPresence(chat: String, sender: String, typing: Bool)
-        case historySync(conversations: Int)
+        case historySync(syncType: String, conversations: Int)
         case mediaRetry(messageID: String, ok: Bool, newDirectPath: String?, error: String?)
         case messageEdited(chatJID: String, messageID: String, newText: String, timestamp: Int64)
         case messageRevoked(chatJID: String, messageID: String, revokedBy: String, timestamp: Int64)
@@ -1003,9 +1003,17 @@ class WAClient: PhoneValidating, LIDResolving {
                 return .chatPresence(chat: p.chat, sender: p.sender, typing: p.state == "composing")
             }
         case "HistorySync":
-            struct H: Codable { let conversations: Int }
+            struct H: Codable {
+                let conversations: Int
+                let syncType: String?
+                enum CodingKeys: String, CodingKey {
+                    case conversations
+                    case syncType = "sync_type"
+                }
+            }
             if let h = try? dec.decode(H.self, from: data) {
-                return .historySync(conversations: h.conversations)
+                return .historySync(syncType: h.syncType ?? "",
+                                    conversations: h.conversations)
             }
         case "MediaRetry":
             struct R: Codable {
