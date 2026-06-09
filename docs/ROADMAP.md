@@ -205,6 +205,21 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **Full history sync settings control (F28)** (v0.9.43) —
+  Settings → Account → "Full history sync" row that fires the
+  F27 deep-history backfill on demand. Bridge `dispatchHistory`
+  now ships `progress` (0–100), `chunk_order`, and
+  `chunk_messages` alongside the existing `sync_type` +
+  `conversations` payload. `SessionViewModel` carries a new
+  observable `FullSyncState { inFlight, progress, chunks,
+  messages }` updated by every contentful chunk
+  (`INITIAL_BOOTSTRAP` / `RECENT` / `FULL` / `ON_DEMAND`); a
+  60 s silence-timeout clears the in-flight flag if the phone
+  goes quiet. `AccountPanel` shows the row's sublabel ticking
+  (`0% • chunk 1 • 50 messages`) and renders a linear
+  `ProgressView` underneath while `inFlight`. Spec at
+  `docs/superpowers/specs/2026-06-09-full-history-sync-control-design.md`.
+
 - ✅ **Deeper history sync (F25–F27)** (v0.9.42) — historical
   spread was ~3 messages per chat at pair time because yawac used
   whatsmeow's default `store.DeviceProps`. Instrumented
