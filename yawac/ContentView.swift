@@ -187,8 +187,20 @@ struct ContentView: View {
                     vm.reconcileMutedWithStore()
                     vm.reconcileLIDDuplicates()
                     session.loadBlocklist()
-                case .historySync:
-                    if !UserDefaults.standard.bool(forKey: "historyBackfillCompleted") {
+                case .historySync(let syncType, _):
+                    // F26: only flip the one-shot backfill gate on chunks
+                    // that actually carry conversation messages. Without
+                    // this guard, a PUSH_NAME / INITIAL_STATUS_V3 chunk
+                    // arriving FIRST locks requestHistoryBackfillIfNeeded
+                    // off permanently even though the deep history we
+                    // actually wanted never landed. Confirmed via the
+                    // F-instr trace 2026-06-09: PUSH_NAME chunk reported
+                    // 1000 pushnames + 0 conversations.
+                    let contentful: Set<String> = [
+                        "INITIAL_BOOTSTRAP", "RECENT", "FULL", "ON_DEMAND",
+                    ]
+                    if contentful.contains(syncType),
+                       !UserDefaults.standard.bool(forKey: "historyBackfillCompleted") {
                         UserDefaults.standard.set(true, forKey: "historyBackfillCompleted")
                     }
                     // F19: initial sync delivers a burst of HistorySync

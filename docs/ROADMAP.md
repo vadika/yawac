@@ -205,6 +205,44 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **Deeper history sync (F25–F27)** (v0.9.42) — historical
+  spread was ~3 messages per chat at pair time because yawac used
+  whatsmeow's default `store.DeviceProps`. Instrumented
+  `dispatchHistory` confirmed: phone shipped one
+  `INITIAL_BOOTSTRAP` chunk with `progress=100` (done) containing
+  621 messages across 211 chats, even though oldest_ts=2022 — the
+  phone HAS the history, it just isn't asked for more. Three
+  fixes:
+    - **F25 (L1)** — override `store.DeviceProps` at bridge
+      init() (before `whatsmeow.NewClient`): `RequireFullSync =
+      true`, `FullSyncDaysLimit = 3650`, `FullSyncSizeMbLimit =
+      2048`, `HistorySyncConfig.OnDemandReady = true`,
+      `CompleteOnDemandReady = true`. Phone now ships
+      `RECENT` chunks with `progress < 100` (multi-chunk
+      delivery). Measured: 621 → 4,563 messages from the same
+      account on first reconnect after fix (7.3×) without
+      re-pairing.
+    - **F26 (L2)** — the one-shot `historyBackfillCompleted`
+      UserDefaults gate flipped on the FIRST `.historySync`
+      event of any SyncType. Initial sync ships several
+      content-free chunks (`PUSH_NAME` with 1000 pushnames + 0
+      messages, `INITIAL_STATUS_V3` with 1 status + 0 messages).
+      If one of those arrived first the gate locked
+      `requestHistoryBackfillIfNeeded` off permanently. Gated
+      the flag flip on `SyncType ∈ {INITIAL_BOOTSTRAP, RECENT,
+      FULL, ON_DEMAND}`.
+    - **F27 (L3)** — `RequestFullHistorySync` previously called
+      whatsmeow's `BuildHistorySyncRequest`, which builds the
+      per-chat `HISTORY_SYNC_ON_DEMAND` variant
+      (`PeerDataOperationRequestType` 5, phone-capped to ~50
+      messages). The account-wide deep-history variant is
+      `FULL_HISTORY_SYNC_ON_DEMAND` (type 6) and whatsmeow has
+      no builder for it. Now hand-construct the type-6 request
+      directly with `FullHistorySyncOnDemandConfig{HistoryFromTimestamp=now,
+      HistoryDurationDays=count}` plus a random `RequestID`.
+      `requestHistoryBackfillIfNeeded` post-pair now fires the
+      deep variant the phone actually honors.
+
 - ✅ **Hoist per-render formatters + cache richText (F24)** (v0.9.41)
   — same pattern as F23. Allocation-heavy Foundation objects were
   rebuilt inside SwiftUI body evaluation, once per visible row
