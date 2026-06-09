@@ -407,7 +407,8 @@ final class ChatListViewModel {
         if self.chats.isEmpty {
             self.chats = resolved
         } else {
-            let bootstrapByJID = Dictionary(uniqueKeysWithValues: resolved.map { ($0.jid, $0) })
+            let bootstrapByJID = Dictionary(resolved.map { ($0.jid, $0) },
+                                            uniquingKeysWith: { first, _ in first })
             let existingJIDs = Set(self.chats.map { $0.jid })
             let newcomers = resolved.filter { !existingJIDs.contains($0.jid) }
             // For chats that exist both pre- and post-bootstrap (rare:
@@ -507,7 +508,13 @@ final class ChatListViewModel {
             // Re-pair outcomes with their originating BridgeMessage by id so
             // the apply step has access to the full message payload (preview
             // text, sender push name, fromMe, etc.).
-            let byID = Dictionary(uniqueKeysWithValues: batch.map { ($0.id, $0) })
+            // F30v4: deep backfill rounds can re-deliver the same
+            // message id multiple times across overlapping per-chat
+            // windows. Dictionary(uniqueKeysWithValues:) crashes on
+            // duplicates; uniquingKeysWith keeps the first and drops
+            // subsequent dupes.
+            let byID = Dictionary(batch.map { ($0.id, $0) },
+                                  uniquingKeysWith: { first, _ in first })
             for outcome in outcomes {
                 guard let original = byID[outcome.id] else { continue }
                 self.applyChatRowUpdate(
@@ -912,7 +919,8 @@ final class ChatListViewModel {
     }
 
     func resolveNames(_ cs: [BridgeContact]) {
-        let byJID = Dictionary(uniqueKeysWithValues: cs.map { ($0.jid, $0.name) })
+        let byJID = Dictionary(cs.map { ($0.jid, $0.name) },
+                               uniquingKeysWith: { first, _ in first })
         for i in chats.indices {
             if let resolved = byJID[chats[i].jid], chats[i].name != resolved {
                 chats[i].name = resolved
@@ -1157,8 +1165,8 @@ final class ChatListViewModel {
                   String(describing: error))
             return
         }
-        let byJID = Dictionary(uniqueKeysWithValues:
-            entries.map { ($0.jid, $0.mutedUntilMs) })
+        let byJID = Dictionary(entries.map { ($0.jid, $0.mutedUntilMs) },
+                               uniquingKeysWith: { first, _ in first })
         var changed = false
         for i in chats.indices {
             let serverMs = byJID[chats[i].jid] ?? 0

@@ -50,6 +50,11 @@ final class SessionViewModel {
         var chunks: Int = 0
         /// Sum of per-chunk message counts during the burst.
         var messages: Int = 0
+        /// F29: true once `startFullHistorySync` has run at least once
+        /// this app session. Lets the idle sublabel distinguish "never
+        /// tried" ("Pull older messages from phone") from "tried and
+        /// got nothing back" ("Phone replied with no new history").
+        var attempted: Bool = false
     }
 
     /// Observable so the Settings row redraws on each chunk.
@@ -626,10 +631,14 @@ final class SessionViewModel {
                     fullSync.chunks += 1
                     fullSync.messages += chunkMessages
                     armFullSyncTimeout()  // re-arm silence window
-                    if fullSync.progress >= 100 {
-                        fullSync.inFlight = false
-                        fullSyncTimeoutTask?.cancel()
-                    }
+                    // F29: removed the `progress >= 100` auto-clear.
+                    // Phone reports progress=100 on every ON_DEMAND chunk
+                    // (and on intermediate RECENT chunks too), so the
+                    // 60s silence-timeout is the only honest signal that
+                    // the burst is over. Auto-clearing on >=100 made the
+                    // second tap "blink" — phone replied with a single
+                    // progress=100 chunk and the row went back to idle
+                    // before SwiftUI even animated the ProgressView in.
                 }
             }
         case .loggedOut:
@@ -679,29 +688,168 @@ final class SessionViewModel {
         }
     }
 
-    /// User-triggered full history sync. Clears the F26 one-shot gate,
-    /// resets counters, and fires the existing FULL_HISTORY_SYNC_ON_DEMAND
-    /// path. The 60s silence-timeout (armed on every chunk) clears
-    /// inFlight if the phone goes quiet.
-    /// F28.
+    /// User-triggered full history sync. Belt-and-suspenders:
+    /// 1. Fire the account-wide FULL_HISTORY_SYNC_ON_DEMAND (type 6,
+    ///    F27 path) — works only on first pair / first session;
+    ///    phone silently drops repeats.
+    /// 2. Run a multi-round per-chat fan-out: each round snapshots the
+    ///    current oldest persisted message per chat, fires type-5
+    ///    HISTORY_SYNC_ON_DEMAND (count=200) for every chat with a
+    ///    100 ms throttle, waits ~30 s for chunks to land + the
+    ///    F3 batched writer to commit them, then samples again. If
+    ///    any chat got deeper, loop. Caps at 10 rounds so a stuck
+    ///    sync never spins forever.
+    /// F28, F29 (idle-sublabel + diagnostics), F30 (fan-out),
+    /// F30v2 (multi-round recursion).
     @MainActor
     func startFullHistorySync() {
         guard !fullSync.inFlight else { return }
+        NSLog("[yawac/backfill] startFullHistorySync — user tap")
         historyBackfillCompleted = false
-        fullSync = FullSyncState(inFlight: true)
+        fullSync = FullSyncState(inFlight: true, attempted: true)
         armFullSyncTimeout()
+        // Type-6 first. Cheap, sometimes works.
         Task { await self.requestHistoryBackfillIfNeeded() }
+        // Then run the recursive deep backfill.
+        Task { await self.runDeepBackfill() }
+    }
+
+    /// Recursive per-chat fan-out: repeatedly snapshot oldest message
+    /// per chat, fan out type-5 backfills, wait, sample again. Exit
+    /// when no chat got deeper or when the max round count is hit.
+    /// F30v2.
+    @MainActor
+    private func runDeepBackfill() async {
+        let maxRounds = 10
+        // F30v5: 60s. The previous 30s wasn't long enough for the F3
+        // batched MessageWriter to commit all incoming HistorySync
+        // messages before we re-sampled oldestTimestampPerChat. Late
+        // arrivals landed AFTER the sample and the round-over-round
+        // comparison declared `deeper=0` prematurely. SQLITE_BUSY
+        // contention with whatsmeow's secret-key store amplifies this.
+        let perRoundWaitSec: UInt64 = 60
+        for round in 1...maxRounds {
+            let before = oldestTimestampPerChat()
+            NSLog("[yawac/backfill] deep-backfill round=%d chats=%d", round, before.count)
+            await fanOutPerChatBackfill(countPerChat: 200, throttleMs: 100)
+            try? await Task.sleep(for: .seconds(perRoundWaitSec))
+            let after = oldestTimestampPerChat()
+            var deeperCount = 0
+            for (jid, beforeTS) in before {
+                if let afterTS = after[jid], afterTS < beforeTS {
+                    deeperCount += 1
+                }
+            }
+            NSLog("[yawac/backfill] deep-backfill round=%d deeper=%d/%d",
+                  round, deeperCount, before.count)
+            if deeperCount == 0 {
+                NSLog("[yawac/backfill] deep-backfill exit — phone has no more history")
+                break
+            }
+        }
+        NSLog("[yawac/backfill] deep-backfill complete")
+        fullSync.inFlight = false
+        fullSyncTimeoutTask?.cancel()
+    }
+
+    /// Sample current oldest-message timestamp per chat. Returns
+    /// `[chatJID: epochSeconds]`. Used by `runDeepBackfill` to detect
+    /// whether a fan-out round actually added deeper history.
+    @MainActor
+    private func oldestTimestampPerChat() -> [String: Int64] {
+        guard let context = modelContext else { return [:] }
+        let chatDescriptor = FetchDescriptor<PersistedChat>()
+        guard let chats = try? context.fetch(chatDescriptor) else { return [:] }
+        var out: [String: Int64] = [:]
+        out.reserveCapacity(chats.count)
+        for chat in chats {
+            let jid = chat.jid
+            var d = FetchDescriptor<PersistedMessage>(
+                predicate: #Predicate { $0.chatJID == jid },
+                sortBy: [SortDescriptor(\.timestamp, order: .forward)])
+            d.fetchLimit = 1
+            if let oldest = (try? context.fetch(d))?.first {
+                out[jid] = Int64(oldest.timestamp.timeIntervalSince1970)
+            }
+        }
+        return out
+    }
+
+    /// F30: iterates every PersistedChat that has at least one
+    /// persisted message and asks the phone for `countPerChat` older
+    /// messages anchored at that chat's oldest known message. Sequential
+    /// with a 100 ms throttle to avoid tripping WhatsApp's peer-message
+    /// rate limiter. Each response arrives asynchronously as a
+    /// HistorySync of SyncType=ON_DEMAND; the existing handler bumps
+    /// fullSync.chunks + .messages.
+    @MainActor
+    private func fanOutPerChatBackfill(countPerChat: Int,
+                                       throttleMs: UInt64) async {
+        guard let client else { return }
+        guard let context = modelContext else { return }
+        // Pull all chats, sorted by most-recent first so active chats
+        // get serviced before long-dormant ones.
+        let chatDescriptor = FetchDescriptor<PersistedChat>(
+            sortBy: [SortDescriptor(\.lastTimestamp, order: .reverse)])
+        guard let chats = try? context.fetch(chatDescriptor) else { return }
+        NSLog("[yawac/backfill] fan-out across %d chats count_per_chat=%d throttle_ms=%llu",
+              chats.count, countPerChat, throttleMs)
+        var sent = 0
+        for chat in chats {
+            let jid = chat.jid
+            var msgDescriptor = FetchDescriptor<PersistedMessage>(
+                predicate: #Predicate { $0.chatJID == jid },
+                sortBy: [SortDescriptor(\.timestamp, order: .forward)])
+            msgDescriptor.fetchLimit = 1
+            guard let oldest = (try? context.fetch(msgDescriptor))?.first
+            else { continue }
+            let msgID = oldest.id
+            let senderJID = oldest.senderJID
+            let fromMe = oldest.fromMe
+            let tsUnix = Int64(oldest.timestamp.timeIntervalSince1970)
+            // F30v3: fire-and-forget. Awaiting SendPeerMessage round-
+            // tripped each call (~300ms+ via the bridge), making 1033
+            // sequential dispatches take ~7 minutes. Detached without
+            // .value lets the throttle drive the rate cleanly.
+            Task.detached { [client] in
+                try? client.requestOlderHistory(
+                    chatJID: jid,
+                    oldestMsgID: msgID,
+                    oldestSenderJID: senderJID,
+                    oldestFromMe: fromMe,
+                    oldestTimestampSec: tsUnix,
+                    count: countPerChat)
+            }
+            sent += 1
+            try? await Task.sleep(for: .milliseconds(throttleMs))
+        }
+        NSLog("[yawac/backfill] fan-out complete — sent=%d", sent)
     }
 
     @MainActor
     private func armFullSyncTimeout() {
         fullSyncTimeoutTask?.cancel()
         fullSyncTimeoutTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .seconds(60))
+            // F30 timeout: 5 minutes. The fan-out dispatches ~1000+
+            // peer messages with a 100 ms throttle (~100 s sequential
+            // dispatch alone). Phone batches the replies behind that
+            // flood and first-chunk arrival can land near tap+2 min.
+            //
+            // The Task.isCancelled re-check after the sleep matters:
+            // `try?` swallows the CancellationError so cancellation
+            // would otherwise fall through and clear inFlight on the
+            // very next chunk's armFullSyncTimeout re-arm — racing
+            // every fresh chunk back to inFlight=false. Observed live
+            // 2026-06-09: second chunk landed 2.5s after first and
+            // immediately reported inFlight=false because the
+            // first-tap task resumed post-cancel and clobbered the
+            // flag.
+            try? await Task.sleep(for: .seconds(300))
             guard let self else { return }
-            // If a chunk arrived in the last 60s it would have cancelled
-            // this task and re-armed a fresh one. Reaching here means
-            // silence; clear inFlight so the row falls back to idle.
+            guard !Task.isCancelled else { return }
+            // If a chunk arrived during the window it would have
+            // cancelled this task and re-armed a fresh one. Reaching
+            // here means a full 5 minutes of silence; clear inFlight.
             self.fullSync.inFlight = false
         }
     }
@@ -734,6 +882,8 @@ final class SessionViewModel {
         let fromMe = oldest.fromMe
         let tsUnix = Int64(oldest.timestamp.timeIntervalSince1970)
         do {
+            NSLog("[yawac/backfill] sending FULL_HISTORY_SYNC_ON_DEMAND chat=%@ msg=%@ ts=%lld count=100000",
+                  chatJID, msgID, tsUnix)
             try await Task.detached { [client] in
                 try client.requestFullHistorySync(
                     beforeChatJID: chatJID,
@@ -742,6 +892,7 @@ final class SessionViewModel {
                     beforeTSUnix: tsUnix,
                     count: 100_000)
             }.value
+            NSLog("[yawac/backfill] SendPeerMessage returned ok — waiting for HistorySync chunks")
         } catch {
             NSLog("[yawac/backfill] history backfill request failed: %@",
                   String(describing: error))
