@@ -205,6 +205,30 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **F31 — full chat load + unread non-inflation + cache budgets**
+  (v0.9.45) — three coupled fixes for the user-visible "I ran Full
+  history sync but the chat still only shows ~14 months and the
+  unread count is in the thousands" report. `loadHistory` now always
+  fetches up to `extendedHistoryLimit` (bumped 500 → 10000), so a
+  chat with 4242 persisted messages loads them all in one shot
+  instead of capping at the F9 60-row chat-switch default. F2 made
+  the snapshot build detached so first-paint isn't on the critical
+  path; LazyVStack only instantiates the visible window. Anchor
+  logic for `unread > messages.count` now lands on `messages.first`
+  (oldest loaded) instead of `messages.last` so the user sees the
+  deepest unread row, not the bottom.
+  `ChatListViewModel.applyChatRowUpdate` no longer bumps
+  `chat.unread += 1` for backfill replays — F30's deep multi-round
+  ships thousands of OLD messages that all looked "new" to ingest,
+  inflating unread counters into the thousands. Now only bumps when
+  the message timestamp advances the chat tip (genuine new arrival),
+  and new-chat rows only seed `unread = 1` when the first message is
+  within ~5 min of now. NSCache budgets sized for the new load:
+  image 256 / 64 MB → 1024 / 256 MB, video 256 / 32 MB → 1024 /
+  128 MB, avatar 512 / 16 MB → 4096 / 64 MB. Previous budgets
+  evicted on every scroll → re-decode storm → "all avatars are
+  blinking" as the user observed.
+
 - ✅ **F29+F30 — honest progress + multi-round backfill** (v0.9.44)
   — v0.9.43 progress bar lied (phone reports `progress=100` on
   every ON_DEMAND chunk; first chunk auto-cleared `inFlight` so
