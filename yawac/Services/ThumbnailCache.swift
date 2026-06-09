@@ -71,6 +71,45 @@ private let videoThumbMaxPixel = 720
 final class ThumbnailCache {
     static let shared = ThumbnailCache()
 
+    init() {
+        // F34: flush every cache when the app resigns active. The F31
+        // budgets cap at ~480 MB worst case and routinely held ~1.5 GB
+        // resident even when the user wasn't looking at yawac, which
+        // macOS Activity Monitor flags as significant energy use.
+        // On re-activation the existing on-demand decode path repaints
+        // visible bubbles transparently; off-screen rows weren't using
+        // those NSImages anyway.
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.didResignActiveNotification,
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.flushAll()
+            }
+        }
+    }
+
+    /// Drop every NSCache + clear inflight + negative + cache sets.
+    /// Called when the app resigns active so an idle yawac in the
+    /// background doesn't keep a few hundred MB of NSImage backing
+    /// resident. Public so a future "low memory" hook can call it too.
+    func flushAll() {
+        cache.removeAllObjects()
+        videoCache.removeAllObjects()
+        avatarCache.removeAllObjects()
+        mapCache.removeAllObjects()
+        inflight.removeAll()
+        videoInflight.removeAll()
+        avatarInflight.removeAll()
+        avatarNegative.removeAll()
+        mapInflight.removeAll()
+        mapNegative.removeAll()
+        // Bump revision so any observer that's currently in foreground
+        // (rare during a resignActive flush, but possible) re-evaluates
+        // and kicks fresh decodes.
+        revision &+= 1
+    }
+
     private let cache: NSCache<NSString, NSImage> = {
         let c = NSCache<NSString, NSImage>()
         // F31: bumped 256 / 64 MB → 1024 / 256 MB. The extendedHistoryLimit
