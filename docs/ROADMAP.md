@@ -205,6 +205,39 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **F29+F30 — honest progress + multi-round backfill** (v0.9.44)
+  — v0.9.43 progress bar lied (phone reports `progress=100` on
+  every ON_DEMAND chunk; first chunk auto-cleared `inFlight` so
+  the row blinked) and FULL_HISTORY_SYNC_ON_DEMAND (type 6) is
+  silently dropped by the phone on repeat. **F29** drops the
+  lying percent: indeterminate `ProgressView()` until phone
+  reports something useful; in-flight sublabel switches to
+  `Requesting history from phone…` then `<chunks> chunks •
+  <messages> messages`; new idle sublabel `Phone replied with no
+  new history` distinguishes "never tried" from "tried, got
+  nothing." Removed the `progress >= 100` auto-clear; gated
+  `armFullSyncTimeout`'s post-sleep clear on `Task.isCancelled`
+  so cancelled re-arms don't race fresh chunks back to
+  `inFlight=false` (was clearing the flag 2.5 s after the first
+  chunk, observed live). Bumped silence-timeout 60 s → 5 min.
+  **F30** rewires the button to a multi-round per-chat fan-out:
+  each round snapshots `oldestTimestampPerChat`, fires type-5
+  `HISTORY_SYNC_ON_DEMAND` with `count=200` per chat
+  (fire-and-forget so dispatch isn't blocked by SendPeerMessage
+  latency), waits 60 s for the F3 batched writer to commit,
+  re-samples. Loops up to 10 rounds; exits early when no chat
+  got deeper. Type-6 still fires once per tap as
+  belt-and-suspenders. Live run on a 152-active-chat account:
+  1560 chunks, 3806 messages added across 7+ rounds before the
+  phone exhausted its reachable history.
+- ✅ **Crash fix — Dictionary(uniqueKeysWithValues:) on dupes**
+  (v0.9.44) — F30's overlapping per-chat windows re-delivered
+  the same message id across rounds.
+  `ChatListViewModel.ingest`'s outcome-pairing dictionary
+  panicked with `Fatal error: Duplicate values for key`. Swapped
+  four call sites in `ChatListViewModel` + one in `ChatListView`
+  to `Dictionary(_:uniquingKeysWith:)` keeping the first.
+
 - ✅ **Full history sync settings control (F28)** (v0.9.43) —
   Settings → Account → "Full history sync" row that fires the
   F27 deep-history backfill on demand. Bridge `dispatchHistory`

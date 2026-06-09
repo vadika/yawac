@@ -134,20 +134,45 @@ struct AccountPanel: View {
             onTap: { session.startFullHistorySync() }
         )
         if s.inFlight {
-            ProgressView(value: Double(s.progress), total: 100)
-                .progressViewStyle(.linear)
-                .tint(Theme.accent)
-                .padding(.horizontal, 14)
-                .padding(.bottom, 8)
+            // F29: phone reports progress=0 on FULL_HISTORY_SYNC_ON_DEMAND
+            // response chunks and progress=100 on every ON_DEMAND chunk —
+            // neither rises through 1–99 like a real percent. Use the
+            // determinate bar only when the phone reports something
+            // useful (progress between 1 and 99); otherwise fall back to
+            // the platform indeterminate animation so the user sees the
+            // sync is alive even when the counters haven't ticked yet.
+            Group {
+                if s.progress > 0 && s.progress < 100 {
+                    ProgressView(value: Double(s.progress), total: 100)
+                } else {
+                    ProgressView()
+                }
+            }
+            .progressViewStyle(.linear)
+            .tint(Theme.accent)
+            .padding(.horizontal, 14)
+            .padding(.bottom, 8)
         }
     }
 
     private func fullSyncSublabel(_ s: SessionViewModel.FullSyncState) -> String {
+        // F29: dropped the percent from in-flight sublabel — phone's
+        // progress field is unreliable here (see F29 comment in
+        // fullHistorySyncRow). Chunks + message count are honest.
         if s.inFlight {
-            return "\(s.progress)% • chunk \(s.chunks) • \(s.messages) messages"
+            if s.chunks == 0 {
+                return "Requesting history from phone…"
+            }
+            return "\(s.chunks) chunks • \(s.messages) messages"
         }
         if s.chunks > 0 {
             return "Last run: \(s.messages) messages across \(s.chunks) chunks"
+        }
+        if s.attempted {
+            // Tap fired + 60 s silence + zero chunks. Phone either
+            // rate-limited the FULL_HISTORY_SYNC_ON_DEMAND request or
+            // had nothing newer than what we already hold.
+            return "Phone replied with no new history"
         }
         return "Pull older messages from phone"
     }

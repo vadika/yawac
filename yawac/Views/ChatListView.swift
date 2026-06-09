@@ -180,8 +180,8 @@ struct ChatListView: View {
                 || search.globalChatFilter != nil) {
             out.append(.messageSection(count: search.messageHits.count))
             out.append(.messageFilterChips)
-            let nameLookup = Dictionary(uniqueKeysWithValues:
-                vm.chats.map { ($0.jid, $0.name) })
+            let nameLookup = Dictionary(vm.chats.map { ($0.jid, $0.name) },
+                                        uniquingKeysWith: { first, _ in first })
             for hit in search.messageHits {
                 let name = nameLookup[hit.chatJID] ?? hit.chatJID
                 out.append(.messageHit(hit: hit, chatName: name))
