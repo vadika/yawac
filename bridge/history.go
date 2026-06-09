@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 
+	"go.mau.fi/whatsmeow/proto/waE2E"
 	waWeb "go.mau.fi/whatsmeow/proto/waWeb"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
@@ -225,6 +226,18 @@ func (c *Client) dispatchWebMessage(chatJID string, wm *waWeb.WebMessageInfo) {
 		c.dispatch("EphemeralTimerChanged", string(b))
 	}
 	kind, loc, locSeq, contact, isViewOnce := classifyMessage(msg)
+	// F35: surface historical EPHEMERAL_SETTING toggles as inline
+	// system rows (same as the live dispatchMessage path does for
+	// newly-arrived ones). The carrier itself still gets dropped
+	// below by the protocol-skip — this just adds the human-visible
+	// shadow row.
+	if pm := msg.GetProtocolMessage(); pm != nil &&
+		pm.GetType() == waE2E.ProtocolMessage_EPHEMERAL_SETTING {
+		c.dispatchEphemeralSystemRow(
+			chatJID, senderJID,
+			int32(pm.GetEphemeralExpiration()),
+			int64(wm.GetMessageTimestamp()))
+	}
 	if kind == "protocol" || kind == "system" {
 		return // skip noise
 	}

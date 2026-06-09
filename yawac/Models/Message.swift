@@ -128,7 +128,15 @@ extension UIMessage {
                 self.body = .system("(contact)")
             }
         default:
-            self.body = .system(b.kind)
+            // F35: surface synthetic system text when present (the
+            // bridge emits these for encryption-key changes +
+            // disappearing-timer changes). Fall back to the bare kind
+            // for true unknowns.
+            if let t = b.text, !t.isEmpty {
+                self.body = .system(t)
+            } else {
+                self.body = .system(b.kind)
+            }
         }
         if let q = b.quoted {
             self.quotedMessageID = q.messageID

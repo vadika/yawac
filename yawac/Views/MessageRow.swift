@@ -262,7 +262,30 @@ struct MessageRow: View {
         .background(tint)
     }
 
+    @ViewBuilder
     private var rowContent: some View {
+        // F35: system messages (encryption-key change, disappearing-timer
+        // toggle, etc.) render in the same date-separator style as the
+        // chat's day headers — centered, no bubble, hairlines flanking
+        // the text — so they read as in-band notices rather than
+        // messages.
+        if case .system(let text) = message.body {
+            HStack(spacing: 12) {
+                Rectangle().fill(Theme.hairline).frame(height: 1)
+                Text(text)
+                    .scaledUI(11.5, weight: .medium)
+                    .tracking(0.4)
+                    .foregroundStyle(Theme.textFaint)
+                    .multilineTextAlignment(.center)
+                Rectangle().fill(Theme.hairline).frame(height: 1)
+            }
+            .padding(.vertical, 8)
+        } else {
+            bubbleRowContent
+        }
+    }
+
+    private var bubbleRowContent: some View {
         HStack(alignment: .top, spacing: 6) {
             if message.fromMe { Spacer(minLength: 60) }
             // F32: WhatsApp-style avatar to the left of the bubble for

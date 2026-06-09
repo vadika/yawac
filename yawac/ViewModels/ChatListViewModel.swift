@@ -479,8 +479,13 @@ final class ChatListViewModel {
     }
 
     func ingest(_ message: BridgeMessage) {
-        // Skip protocol/system noise — no UI value
-        if message.kind == "protocol" || message.kind == "system" { return }
+        // F35: drop protocol-only carriers, but allow synthetic
+        // kind="system" rows with a body text through (the bridge now
+        // emits these for encryption-key changes + disappearing-timer
+        // changes so the user sees what's happening in the chat).
+        if message.kind == "protocol" { return }
+        if message.kind == "system",
+           (message.text ?? "").isEmpty { return }
         let chatJID = JIDNormalize.canonical(message.chatJID, client: client)
 
         // Deleted-chat handling: a message older-or-equal to the deletion is a
