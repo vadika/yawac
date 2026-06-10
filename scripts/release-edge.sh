@@ -119,6 +119,13 @@ if [ -n "${SPARKLE_PRIVATE_KEY_FILE:-}" ] \
     APPCAST="${DIST}/appcast.xml"
     DOWNLOAD_URL="https://github.com/vadika/yawac/releases/download/v${VERSION}/yawac-${VERSION}.zip"
     PUB_DATE=$(LANG=C date "+%a, %d %b %Y %H:%M:%S %z")
+    # sparkle:version must match the app's CFBundleVersion (build
+    # number), not the marketing version. Sparkle does the
+    # newer-than comparison numerically against the running app's
+    # CFBundleVersion; emitting "0.9.57" when the running build is
+    # "71" caused the "you are running 0.9.56 / newest is 0.9.57 /
+    # up to date" contradiction on v0.9.56.
+    BUILD_NUMBER=$(awk -F'"' '/CFBundleVersion/{print $2; exit}' project.yml)
     cat > "$APPCAST" <<EOF
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
@@ -130,7 +137,7 @@ if [ -n "${SPARKLE_PRIVATE_KEY_FILE:-}" ] \
         <item>
             <title>yawac ${VERSION}</title>
             <pubDate>${PUB_DATE}</pubDate>
-            <sparkle:version>${VERSION}</sparkle:version>
+            <sparkle:version>${BUILD_NUMBER}</sparkle:version>
             <sparkle:shortVersionString>${VERSION}</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <enclosure url="${DOWNLOAD_URL}" type="application/octet-stream" ${SIG_RAW} />
