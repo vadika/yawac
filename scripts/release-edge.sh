@@ -90,4 +90,41 @@ fi
 ZIP="${DIST}/yawac-${VERSION}.zip"
 ditto -c -k --sequesterRsrc --keepParent "$APP" "$ZIP"
 
+# F41: Sparkle appcast. When SPARKLE_PRIVATE_KEY_FILE points at a
+# readable PEM, sign the final zip with sign_update and emit a
+# single-item appcast.xml alongside it for the workflow to upload
+# as a release asset. Sparkle's auto-update client only needs the
+# latest item to decide whether to update, so we don't need to
+# preserve history.
+if [ -n "${SPARKLE_PRIVATE_KEY_FILE:-}" ] \
+   && [ -r "$SPARKLE_PRIVATE_KEY_FILE" ]; then
+    SIGN_UPDATE="${SIGN_UPDATE_BIN:-sign_update}"
+    SIG_RAW=$("$SIGN_UPDATE" -f "$SPARKLE_PRIVATE_KEY_FILE" "$ZIP")
+    # sign_update prints attrs: sparkle:edSignature="..." length="..."
+    ZIP_LENGTH=$(stat -f%z "$ZIP")
+    APPCAST="${DIST}/appcast.xml"
+    DOWNLOAD_URL="https://github.com/vadika/yawac/releases/download/v${VERSION}/yawac-${VERSION}.zip"
+    PUB_DATE=$(LANG=C date "+%a, %d %b %Y %H:%M:%S %z")
+    cat > "$APPCAST" <<EOF
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+    <channel>
+        <title>yawac</title>
+        <link>https://github.com/vadika/yawac</link>
+        <description>Most recent yawac update</description>
+        <language>en</language>
+        <item>
+            <title>yawac ${VERSION}</title>
+            <pubDate>${PUB_DATE}</pubDate>
+            <sparkle:version>${VERSION}</sparkle:version>
+            <sparkle:shortVersionString>${VERSION}</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <enclosure url="${DOWNLOAD_URL}" type="application/octet-stream" length="${ZIP_LENGTH}" ${SIG_RAW} />
+        </item>
+    </channel>
+</rss>
+EOF
+    echo "wrote appcast: $APPCAST"
+fi
+
 echo "built: $ZIP"

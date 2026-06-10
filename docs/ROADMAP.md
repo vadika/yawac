@@ -264,6 +264,24 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **F41 — Sparkle auto-update** (v0.9.56) — Sparkle 2 wired
+  end-to-end on top of F40's notarized builds. New SPM dep
+  `sparkle-project/Sparkle`. `yawacApp` owns a
+  `SPUStandardUpdaterController(startingUpdater: true)` that fires
+  a background update check on launch; a "Check for Updates…"
+  menu item under the app menu drives a manual check. Info.plist
+  carries `SUFeedURL`
+  (`github.com/vadika/yawac/releases/latest/download/appcast.xml`)
+  and the EdDSA `SUPublicEDKey`. CI release path: `release-edge.sh`
+  signs the final dist zip with `sign_update`, emits a single-item
+  `appcast.xml` carrying `sparkle:edSignature` + `length` +
+  download URL, and the workflow uploads the appcast alongside the
+  zip as a release asset. Private signing key lives in the
+  `SPARKLE_ED_PRIVATE_KEY` GitHub secret. Update flow:
+  user launches yawac → background fetch of latest appcast →
+  newer item found → Sparkle verifies the signature with the
+  embedded public key → installs in-place.
+
 - ✅ **F40 — Developer ID signing + notarization** (v0.9.55) —
   Cask installs no longer require the `xattr -dr
   com.apple.quarantine` postflight hack; Gatekeeper accepts the app
