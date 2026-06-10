@@ -264,6 +264,25 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **F39 — at-floor tracking + fresh/dupe sublabel + 30-round cap**
+  (v0.9.53) — Systematic-debugging investigation of "full history
+  fetch refetches the same messages" found phone was shipping 98%
+  new rows per round; perception came from (1) fanning out 152
+  per-chat requests every round even after most chats had returned
+  no-deeper, and (2) the sublabel showing only `N chunks • M
+  messages` with no signal of how many were actually new vs.
+  already-in-DB. `runDeepBackfill` keeps a per-chat consecutive
+  "did not deepen" counter; after 2 consecutive rounds a chat joins
+  an `atFloor` set; subsequent rounds skip it via
+  `fanOutPerChatBackfill`'s new `excludeJIDs` parameter.
+  `FullSyncState` gains `fresh: Int` + `dupe: Int`; bumped per flush
+  from `ChatListViewModel.ingest`. `AccountPanel.fullSyncSublabel`
+  shows `N chunks • X new, Y already had` during inFlight and
+  `Last run: X new, Y already had across N chunks` idle.
+  `maxRounds` bumped 10 → 30; at-floor pruning + the
+  zero-deeper exit gate keep healthy syncs short while letting a
+  single tap dig deeper into long histories.
+
 - ✅ **F38 — reserve image / video bubble size from sender dims**
   (v0.9.52) — Scrolling through a media-heavy chat showed every
   image bubble drawing in two passes: a 240 × 180 placeholder, then
