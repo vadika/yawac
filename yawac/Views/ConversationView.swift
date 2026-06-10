@@ -539,9 +539,15 @@ struct ConversationView: View {
                         }
                         .onChange(of: vm.pendingScrollToID) { _, id in
                             guard let id else { return }
-                            withAnimation(.easeInOut(duration: 0.25)) {
-                                proxy.scrollTo(id, anchor: .center)
-                            }
+                            // F36: no withAnimation. LazyVStack with
+                            // 10k rows + animated scrollTo across a
+                            // multi-month gap forces SwiftUI to
+                            // instantiate every intermediate row to
+                            // interpolate. Main thread blocks for
+                            // seconds; the window goes blank during
+                            // the freeze. Instant jump keeps it on
+                            // one rendering pass.
+                            proxy.scrollTo(id, anchor: .center)
                             vm.didFinishScroll(to: id)
                             vm.pendingScrollToID = nil
                         }

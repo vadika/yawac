@@ -254,9 +254,26 @@ final class ConversationViewModel {
     }
 
     func jumpToQuoted(id: String) {
-        if messages.contains(where: { $0.id == id }) {
-            pendingScrollToID = id
-            return
+        // F36: always re-window when the loaded slice is large enough
+        // that scrollTo would beachball. Below the jumpWindowSize
+        // ceiling the LazyVStack handles cross-chat scrolls fine —
+        // skip the rebuild and use the existing fast path.
+        if messages.count <= Self.jumpWindowSize {
+            if messages.contains(where: { $0.id == id }) {
+                pendingScrollToID = id
+                return
+            }
+        } else {
+            // Re-window: replace `messages` with a smaller slice
+            // centered on the target's timestamp. Subsequent scrollTo
+            // is then fast because LazyVStack only has to compute
+            // ~jumpWindowSize layouts instead of 10k+.
+            if rewindowAround(targetID: id) {
+                pendingScrollToID = id
+                return
+            }
+            // Fall through to the inject-single-row fallback below if
+            // the target persisted row can't be found.
         }
         // Row is outside the currently-loaded window — try to fetch from
         // SwiftData and inject. (loadHistory pages from newest; the quoted
@@ -325,10 +342,103 @@ final class ConversationViewModel {
         pendingScrollToID = id
     }
 
+    /// F36: replace `messages` with a `jumpWindowSize`-row slice
+    /// centered on the row whose id is `targetID`. Returns `true` on
+    /// success, `false` if the persisted row can't be located. Used by
+    /// `jumpToQuoted` to shrink the visible LazyVStack so
+    /// `proxy.scrollTo` doesn't beachball.
+    @MainActor
+    private func rewindowAround(targetID: String) -> Bool {
+        guard let context else { return false }
+        let descriptor = FetchDescriptor<PersistedMessage>(
+            predicate: #Predicate { $0.id == targetID })
+        guard let target = (try? context.fetch(descriptor))?.first else {
+            return false
+        }
+        let jid = chatJID
+        let targetTs = target.timestamp
+        let half = Self.jumpWindowSize / 2
+        var beforeDesc = FetchDescriptor<PersistedMessage>(
+            predicate: #Predicate {
+                $0.chatJID == jid && $0.timestamp <= targetTs
+            },
+            sortBy: [SortDescriptor(\.timestamp, order: .reverse)])
+        beforeDesc.fetchLimit = half
+        var afterDesc = FetchDescriptor<PersistedMessage>(
+            predicate: #Predicate {
+                $0.chatJID == jid && $0.timestamp > targetTs
+            },
+            sortBy: [SortDescriptor(\.timestamp, order: .forward)])
+        afterDesc.fetchLimit = half
+        let beforeRows = (try? context.fetch(beforeDesc)) ?? []
+        let afterRows = (try? context.fetch(afterDesc)) ?? []
+        let combined = beforeRows.reversed() + afterRows
+        let uiMessages = combined.map { Self.uiMessage(from: $0) }
+        messages = uiMessages
+        messageIDs = Set(uiMessages.map(\.id))
+        invalidateTimeline()
+        return true
+    }
+
+    /// F36: build a UIMessage from a PersistedMessage. Used by
+    /// `rewindowAround`. Mirrors the body-construction logic in
+    /// `buildHistorySnapshot` but factored into a shared helper so
+    /// both paths stay in sync.
+    private static func uiMessage(from p: PersistedMessage) -> UIMessage {
+        let body: UIMessage.Body
+        switch p.kind {
+        case "text":
+            body = .text(p.text ?? "")
+        case "image", "video", "audio", "document", "sticker":
+            body = .media(kind: p.kind, caption: p.mediaCaption,
+                          fileName: p.mediaFileName, localPath: p.mediaPath,
+                          waveform: p.audioWaveform, isPTT: p.isPTT)
+        case "poll":
+            if let json = p.pollJSON,
+               let data = json.data(using: .utf8),
+               let poll = try? JSONDecoder().decode(BridgePoll.self, from: data) {
+                body = .poll(question: poll.question,
+                             options: poll.options,
+                             selectableCount: poll.selectableCount)
+            } else {
+                body = .system(p.kind)
+            }
+        default:
+            if let t = p.text, !t.isEmpty {
+                body = .system(t)
+            } else {
+                body = .system(p.kind)
+            }
+        }
+        var m = UIMessage(
+            id: p.id, chatJID: p.chatJID, senderJID: p.senderJID,
+            fromMe: p.fromMe, timestamp: p.timestamp, body: body)
+        m.editedAt = p.editedAt
+        m.revokedAt = p.revokedAt
+        m.revokedBy = p.revokedBy
+        m.locallyDeleted = p.locallyDeleted
+        m.starredAt = p.starredAt
+        m.pinnedAt = p.pinnedAt
+        m.isForwarded = p.isForwarded
+        m.isViewOnce = p.isViewOnce
+        m.viewOnceLocked = p.viewOnceLocked
+        m.quotedMessageID = p.quotedMessageID
+        m.quotedSenderJID = p.quotedSenderJID
+        m.quotedFromMe = p.quotedFromMe
+        m.quotedTextSnippet = p.quotedTextSnippet
+        m.quotedKind = p.quotedKind
+        return m
+    }
+
     func didFinishScroll(to id: String) {
         highlightedID = id
         Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 1_200_000_000)
+            // F36: bumped 1.2 s → 2.5 s so the user has time to spot
+            // the highlight after the scroll-into-view animation
+            // finishes (≈0.25 s) and the row settles. Previously the
+            // highlight started fading before the user even noticed
+            // anything happened.
+            try? await Task.sleep(nanoseconds: 2_500_000_000)
             guard let self else { return }
             if self.highlightedID == id { self.highlightedID = nil }
         }
@@ -559,14 +669,20 @@ final class ConversationViewModel {
     /// First-paint cap. Lower than `extendedHistoryLimit` so chat-switch
     /// stays snappy; older rows page in via `loadMoreHistory` on scroll.
     static let historyLoadLimit = 60
-    /// F31: bumped 500 → 10000 across two iterations. Heavy-backlog
-    /// chats (post-F30 deep sync) routinely have 4000+ persisted
-    /// rows; capping at 500 then 2500 left the deeper messages
-    /// invisible until repeated "Load earlier" taps. LazyVStack
-    /// handles 10k entries fine because only the visible window of
-    /// rows actually instantiates; per-row state lives in caches that
-    /// share storage across rows.
+    /// F36: bumped back to 10000 for the default chat-open load (user
+    /// gets the whole persisted history at once), but `jumpToQuoted`
+    /// re-windows to a 2500-row slice centered on the target before
+    /// kicking the scroll — SwiftUI's ScrollViewReader.scrollTo on a
+    /// 10k-row LazyVStack with variable-height rows beachballs the
+    /// main thread because it has to lay out every preceding row to
+    /// compute the target offset. The re-window keeps the jump
+    /// instant; the user pages back to other windows via "Load
+    /// earlier" if needed.
     static let extendedHistoryLimit = 10000
+    /// F36: how many rows around the jump target to keep in the
+    /// visible messages array. Empirically 2500 is the upper bound
+    /// SwiftUI can scrollTo without a noticeable beachball.
+    static let jumpWindowSize = 2500
 
     /// Message id to anchor the initial scroll position to. Set in
     /// `loadHistory` based on the chat's persisted unread count: anchors
