@@ -41,6 +41,7 @@ A native macOS SwiftUI client backed by [tulir/whatsmeow](https://github.com/tul
 
 **Platform**
 - QR code to link your account, just like the official mobile + web clients
+- Signed + notarized — installs cleanly without Gatekeeper workarounds
 - Native macOS notifications and dock badge
 - Read receipts, typing indicators, and online presence
 - Edits, deletes, stars, pins, and mutes stay in sync across your linked devices
@@ -54,9 +55,10 @@ brew tap vadika/yawac https://github.com/vadika/yawac
 brew install --cask vadika/yawac/yawac
 ```
 
-Builds are ad-hoc signed; the cask strips the macOS quarantine flag
-automatically. Releases are cut from `vX.Y.Z` git tags (e.g. `git tag v0.6.0
-&& git push origin v0.6.0`).
+Builds are signed with a Developer ID Application certificate and
+notarized by Apple. Gatekeeper accepts the app on first launch with
+no prompt and no quarantine workaround. Releases are cut from
+`vX.Y.Z` git tags (e.g. `git tag v0.6.0 && git push origin v0.6.0`).
 
 Requires macOS 14 (Sonoma) or newer.
 

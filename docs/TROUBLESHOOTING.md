@@ -24,9 +24,9 @@ ver=$(curl -sSL https://api.github.com/repos/vadika/yawac/releases/latest \
 curl -L -o /tmp/yawac.zip \
   "https://github.com/vadika/yawac/releases/download/v${ver}/yawac-${ver}.zip"
 unzip -o /tmp/yawac.zip -d /Applications
-xattr -dr com.apple.quarantine /Applications/yawac.app
 open /Applications/yawac.app
 ```
 
-Builds are ad-hoc signed; the cask strips the macOS quarantine flag
-automatically.
+Builds are signed with a Developer ID Application certificate and
+notarized by Apple — Gatekeeper accepts the app on first launch
+without prompts or quarantine workarounds.
