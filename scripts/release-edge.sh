@@ -112,9 +112,10 @@ ditto -c -k --sequesterRsrc --keepParent "$APP" "$ZIP"
 if [ -n "${SPARKLE_PRIVATE_KEY_FILE:-}" ] \
    && [ -r "$SPARKLE_PRIVATE_KEY_FILE" ]; then
     SIGN_UPDATE="${SIGN_UPDATE_BIN:-sign_update}"
+    # sign_update emits attrs: sparkle:edSignature="..." length="...".
+    # Use those verbatim; do NOT add a second length= or the parser
+    # bails ("error parsing update feed", observed v0.9.56).
     SIG_RAW=$("$SIGN_UPDATE" -f "$SPARKLE_PRIVATE_KEY_FILE" "$ZIP")
-    # sign_update prints attrs: sparkle:edSignature="..." length="..."
-    ZIP_LENGTH=$(stat -f%z "$ZIP")
     APPCAST="${DIST}/appcast.xml"
     DOWNLOAD_URL="https://github.com/vadika/yawac/releases/download/v${VERSION}/yawac-${VERSION}.zip"
     PUB_DATE=$(LANG=C date "+%a, %d %b %Y %H:%M:%S %z")
@@ -132,7 +133,7 @@ if [ -n "${SPARKLE_PRIVATE_KEY_FILE:-}" ] \
             <sparkle:version>${VERSION}</sparkle:version>
             <sparkle:shortVersionString>${VERSION}</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="${DOWNLOAD_URL}" type="application/octet-stream" length="${ZIP_LENGTH}" ${SIG_RAW} />
+            <enclosure url="${DOWNLOAD_URL}" type="application/octet-stream" ${SIG_RAW} />
         </item>
     </channel>
 </rss>

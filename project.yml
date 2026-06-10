@@ -66,8 +66,8 @@ targets:
         NSLocationWhenInUseUsageDescription: yawac uses your location only when you choose Send current location.
         LSMinimumSystemVersion: "14.0"
         CFBundleDisplayName: yawac
-        CFBundleShortVersionString: "0.9.56"
-        CFBundleVersion: "71"
+        CFBundleShortVersionString: "0.9.57"
+        CFBundleVersion: "72"
         ATSApplicationFontsPath: Fonts
         CFBundleIconName: AppIcon
         SUFeedURL: https://github.com/vadika/yawac/releases/latest/download/appcast.xml
