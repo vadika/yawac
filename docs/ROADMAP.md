@@ -167,6 +167,16 @@ rare-use utilities) ships only when the important list is clear.
   picker + message field; cmd-shift-Y opens it from anywhere.
   Compose without bringing the full window forward. Pairs well
   with the Shortcuts integration above.
+- ☐ **Folders / chat lists** — user-defined groupings (Work,
+  Family, Side-project, Mute-list, …) shown as a top-level
+  sidebar pill row, optionally with smart filters (unread-only,
+  unanswered, has-media). Lives entirely client-side; mapping
+  is `chatJID → Set<folder>`, persisted in SwiftData with an
+  ordering int. Drag-to-folder + cmd-1..N folder switch +
+  context-menu "Add to folder…". Smart folder examples: All,
+  Direct (already a filter today), Groups, Communities,
+  Unread, VIP. The official Mac client has only Archive +
+  Pinned; folders are a power-user organization win.
 - ☐ **Wire cosmetic Settings toggles** (v0.9.13 follow-up) — the
   General + Display panels render the controls but the storage
   keys aren't read anywhere yet. Needs real wiring:
