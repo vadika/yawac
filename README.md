@@ -47,7 +47,14 @@ A native macOS SwiftUI client backed by [tulir/whatsmeow](https://github.com/tul
 - Adjustable interface size (Small → X-Large) for custom fonts
 - Keyboard shortcuts cheat sheet — `⌘?` from the Help menu
 
-## Install via Homebrew
+## Install
+
+Grab the latest signed + notarized zip from
+[**Releases**](https://github.com/vadika/yawac/releases/latest),
+unzip, drag `yawac.app` into `/Applications`, launch. After the
+first run, yawac auto-updates itself in-place via Sparkle.
+
+### Via Homebrew (optional)
 
 ```sh
 brew tap vadika/yawac https://github.com/vadika/yawac
