@@ -769,9 +769,20 @@ final class SessionViewModel {
         var atFloor: Set<String> = []
         for round in 1...maxRounds {
             let before = await oldestTimestampPerChat()
-            NSLog("[yawac/backfill] deep-backfill round=%d chats=%d at_floor=%d",
-                  round, before.count, atFloor.count)
-            await fanOutPerChatBackfill(countPerChat: 200, throttleMs: 100,
+            // F39: bump per-request count when the residual deepening
+            // set is small. Once at-floor pruning has narrowed
+            // fan-out to ≤5 chats, 200 msgs/request bottlenecks the
+            // long tail — those stragglers (typically one big
+            // group) need more history per round-trip to converge
+            // within maxRounds. Phone may silently truncate above
+            // some server-side ceiling; honoring it ≈2.5× depth /
+            // round on the remaining chat(s).
+            let remaining = before.count - atFloor.count
+            let countPerChat = remaining <= 5 ? 500 : 200
+            NSLog("[yawac/backfill] deep-backfill round=%d chats=%d at_floor=%d count_per_chat=%d",
+                  round, before.count, atFloor.count, countPerChat)
+            await fanOutPerChatBackfill(countPerChat: countPerChat,
+                                        throttleMs: 100,
                                         excludeJIDs: atFloor)
             try? await Task.sleep(for: .seconds(perRoundWaitSec))
             let after = await oldestTimestampPerChat()
