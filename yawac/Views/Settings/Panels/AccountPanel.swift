@@ -159,13 +159,21 @@ struct AccountPanel: View {
         // F29: dropped the percent from in-flight sublabel — phone's
         // progress field is unreliable here (see F29 comment in
         // fullHistorySyncRow). Chunks + message count are honest.
+        // F39: include fresh / already-had ratio so the user sees
+        // when the phone is shipping mostly-new vs. mostly-overlap.
         if s.inFlight {
             if s.chunks == 0 {
                 return "Requesting history from phone…"
             }
+            if s.fresh + s.dupe > 0 {
+                return "\(s.chunks) chunks • \(s.fresh) new, \(s.dupe) already had"
+            }
             return "\(s.chunks) chunks • \(s.messages) messages"
         }
         if s.chunks > 0 {
+            if s.fresh + s.dupe > 0 {
+                return "Last run: \(s.fresh) new, \(s.dupe) already had across \(s.chunks) chunks"
+            }
             return "Last run: \(s.messages) messages across \(s.chunks) chunks"
         }
         if s.attempted {

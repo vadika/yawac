@@ -55,6 +55,13 @@ final class SessionViewModel {
         /// tried" ("Pull older messages from phone") from "tried and
         /// got nothing back" ("Phone replied with no new history").
         var attempted: Bool = false
+        /// F39: per-message fresh / dupe counters bumped by
+        /// `ChatListViewModel.ingest`'s flush. Lets the AccountPanel
+        /// sublabel show "X new / Y already had" so the user can see
+        /// the rate of actually-new history vs. phone-side overlap
+        /// instead of guessing from the raw `chunks` count.
+        var fresh: Int = 0
+        var dupe: Int = 0
     }
 
     /// Observable so the Settings row redraws on each chunk.
@@ -708,6 +715,15 @@ final class SessionViewModel {
     ///    sync never spins forever.
     /// F28, F29 (idle-sublabel + diagnostics), F30 (fan-out),
     /// F30v2 (multi-round recursion).
+    /// F39: bumps fresh / dupe per-message counts on `fullSync`.
+    /// Public so `ChatListViewModel.ingest`'s flush can drive it.
+    @MainActor
+    func bumpFullSyncCounts(fresh: Int, dupe: Int) {
+        guard fullSync.inFlight else { return }
+        fullSync.fresh += fresh
+        fullSync.dupe += dupe
+    }
+
     @MainActor
     func startFullHistorySync() {
         guard !fullSync.inFlight else { return }
@@ -727,7 +743,13 @@ final class SessionViewModel {
     /// F30v2.
     @MainActor
     private func runDeepBackfill() async {
-        let maxRounds = 10
+        // F39: bumped 10 → 30. The exit gate is "round produced no
+        // deeper messages anywhere", and the at-floor pruning below
+        // shrinks the per-round work as chats reach their floor, so
+        // the higher cap costs almost nothing on healthy syncs and
+        // lets one tap dig further into deep histories. Worst-case
+        // wall clock: 30 × 60 s = 30 min if phone keeps shipping.
+        let maxRounds = 30
         // F30v5: 60s. The previous 30s wasn't long enough for the F3
         // batched MessageWriter to commit all incoming HistorySync
         // messages before we re-sampled oldestTimestampPerChat. Late
@@ -735,20 +757,40 @@ final class SessionViewModel {
         // comparison declared `deeper=0` prematurely. SQLITE_BUSY
         // contention with whatsmeow's secret-key store amplifies this.
         let perRoundWaitSec: UInt64 = 60
+        // F39: per-chat consecutive "did not deepen" counter. After
+        // `atFloorThreshold` consecutive rounds with no deeper rows
+        // for a chat, we mark it at-floor and skip it in subsequent
+        // rounds. The systematic-debugging investigation showed
+        // that 150/152 chats returned no-deeper in round 1 but we
+        // kept hammering all 152 every round, wasting peer-message
+        // sends and looking like "refetch" to the user.
+        let atFloorThreshold = 2
+        var stableRoundsByJID: [String: Int] = [:]
+        var atFloor: Set<String> = []
         for round in 1...maxRounds {
             let before = await oldestTimestampPerChat()
-            NSLog("[yawac/backfill] deep-backfill round=%d chats=%d", round, before.count)
-            await fanOutPerChatBackfill(countPerChat: 200, throttleMs: 100)
+            NSLog("[yawac/backfill] deep-backfill round=%d chats=%d at_floor=%d",
+                  round, before.count, atFloor.count)
+            await fanOutPerChatBackfill(countPerChat: 200, throttleMs: 100,
+                                        excludeJIDs: atFloor)
             try? await Task.sleep(for: .seconds(perRoundWaitSec))
             let after = await oldestTimestampPerChat()
             var deeperCount = 0
             for (jid, beforeTS) in before {
+                if atFloor.contains(jid) { continue }
                 if let afterTS = after[jid], afterTS < beforeTS {
                     deeperCount += 1
+                    stableRoundsByJID[jid] = 0
+                } else {
+                    let next = (stableRoundsByJID[jid] ?? 0) + 1
+                    stableRoundsByJID[jid] = next
+                    if next >= atFloorThreshold {
+                        atFloor.insert(jid)
+                    }
                 }
             }
-            NSLog("[yawac/backfill] deep-backfill round=%d deeper=%d/%d",
-                  round, deeperCount, before.count)
+            NSLog("[yawac/backfill] deep-backfill round=%d deeper=%d/%d new_at_floor=%d",
+                  round, deeperCount, before.count, atFloor.count)
             if deeperCount == 0 {
                 NSLog("[yawac/backfill] deep-backfill exit — phone has no more history")
                 break
@@ -803,8 +845,11 @@ final class SessionViewModel {
     /// background ModelContext, then walks the result list back on
     /// MainActor only to fire the (already fire-and-forget) peer
     /// sends + the throttle sleep.
+    /// F39: `excludeJIDs` skips chats marked at-floor by the
+    /// `runDeepBackfill` heuristic so we stop hammering them.
     private func fanOutPerChatBackfill(countPerChat: Int,
-                                       throttleMs: UInt64) async {
+                                       throttleMs: UInt64,
+                                       excludeJIDs: Set<String> = []) async {
         guard let client else { return }
         guard let container = modelContext?.container else { return }
         struct Anchor: Sendable {
@@ -824,6 +869,7 @@ final class SessionViewModel {
             out.reserveCapacity(chats.count)
             for chat in chats {
                 let jid = chat.jid
+                if excludeJIDs.contains(jid) { continue }
                 var msgDescriptor = FetchDescriptor<PersistedMessage>(
                     predicate: #Predicate { $0.chatJID == jid },
                     sortBy: [SortDescriptor(\.timestamp, order: .forward)])
