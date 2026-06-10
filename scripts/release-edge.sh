@@ -48,6 +48,18 @@ APP="${EXPORT}/${SCHEME}.app"
 SIGN_IDENTITY="${SIGN_IDENTITY:-}"
 if [ -n "$SIGN_IDENTITY" ]; then
     ENTITLEMENTS="yawac/yawac.entitlements"
+    # Sparkle's Autoupdate is a plain Mach-O helper inside the
+    # framework, not a .app / .xpc / .bundle. The depth-first
+    # container loop below won't match it, so sign explicitly
+    # BEFORE the framework's outer seal happens (otherwise the
+    # framework's signature is invalidated when Autoupdate is
+    # signed after).
+    SPARKLE_AUTOUPDATE="$APP/Contents/Frameworks/Sparkle.framework/Versions/B/Autoupdate"
+    if [ -f "$SPARKLE_AUTOUPDATE" ]; then
+        echo "[sign] $SPARKLE_AUTOUPDATE"
+        codesign --force --options=runtime --timestamp \
+            --sign "$SIGN_IDENTITY" "$SPARKLE_AUTOUPDATE"
+    fi
     # Depth-first traversal: codesign of a container (.framework,
     # .xpc, .app, .bundle) seals its current contents. Re-signing a
     # nested container afterwards invalidates the parent. -depth
@@ -64,14 +76,6 @@ if [ -n "$SIGN_IDENTITY" ]; then
         codesign --force --options=runtime --timestamp \
             --sign "$SIGN_IDENTITY" "$path"
     done
-    # Sparkle's Autoupdate is a plain Mach-O helper inside the
-    # framework, not a .app / .xpc / .bundle. Sign explicitly.
-    SPARKLE_AUTOUPDATE="$APP/Contents/Frameworks/Sparkle.framework/Versions/B/Autoupdate"
-    if [ -f "$SPARKLE_AUTOUPDATE" ]; then
-        echo "[sign] $SPARKLE_AUTOUPDATE"
-        codesign --force --options=runtime --timestamp \
-            --sign "$SIGN_IDENTITY" "$SPARKLE_AUTOUPDATE"
-    fi
     echo "[sign] $APP (outer)"
     codesign --force --options=runtime --timestamp \
         --entitlements "$ENTITLEMENTS" \
