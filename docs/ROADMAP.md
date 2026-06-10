@@ -264,6 +264,26 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **F38 — reserve image / video bubble size from sender dims**
+  (v0.9.52) — Scrolling through a media-heavy chat showed every
+  image bubble drawing in two passes: a 240 × 180 placeholder, then
+  the decoded image swapping in at its actual aspect ratio and
+  reflowing surrounding layout (user: "I see how the images are
+  drawn"). Whatsmeow ships `Width`/`Height` on every `ImageMessage`
+  + `VideoMessage`; the bridge was already serializing them and the
+  Swift `BridgeMedia` decoder already had the fields. We just
+  weren't persisting or rendering them. `PersistedMessage` gets
+  `mediaWidth` + `mediaHeight` (lightweight migration; pre-F38 rows
+  unaffected). `MessageWriter`'s insert path threads them in; the
+  upsert path re-merges them on history-sync replays so older
+  persisted-without-dims rows backfill the moment the sender's
+  chunk lands again. `UIMessage` mirrors the fields. `MessageRow`'s
+  `imageBubble` / `videoBubble` ask a new `mediaBubbleSize` helper
+  for the bubble's final rectangle (pinned to 320 × 240 while
+  preserving aspect; legacy 240 × 180 fallback when dims are
+  missing). Placeholder + decoded paint share the same rectangle —
+  the swap is now a content fade-in instead of a layout reflow.
+
 - ✅ **F37 — deep-backfill SwiftData off MainActor** (v0.9.51) —
   Full-history sync had been beachballing through every F30v*
   iteration. A 30 s main-thread `sample` during sync pinned the
