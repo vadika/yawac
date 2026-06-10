@@ -205,6 +205,30 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **F36 — jump-to-quoted re-window + brighter highlight**
+  (v0.9.50) — Tapping a quoted-reply chip used to beachball the
+  main thread, drop taps entirely, or scroll to a target so
+  subtly highlighted that the user couldn't tell anything
+  happened. Root cause was SwiftUI's `ScrollViewReader.scrollTo`
+  on a LazyVStack with thousands of variable-height rows —
+  LazyVStack lazily instantiates rows for paint, but scrollTo
+  has to walk and lay out every preceding row to compute the
+  target offset; with F31's 10000-row load that meant a multi-
+  second main-thread block. `jumpToQuoted` now re-windows
+  `messages` to a `jumpWindowSize` (2500) row slice centered on
+  the target's timestamp before kicking the scroll; SwiftUI
+  only has to scroll within 2500 rows. Cost: prior scroll
+  position is replaced by the target window. Highlight bumped
+  from 18% / 1.2 s to 45% fill + 2 pt accent outline / 2.5 s
+  so the destination is unmistakable. `quotedStrip`'s
+  `Button(label:)` swapped for explicit
+  `.contentShape(.rect).onTapGesture` — macOS SwiftUI Buttons
+  inside LazyVStack-with-thousands-of-rows can lose taps to
+  the parent gesture chain. `ConversationView` drops the
+  `withAnimation` wrapper around `proxy.scrollTo` —
+  interpolating across the unmaterialized gap was a second
+  contributor to the freeze.
+
 - ✅ **F35 — inline system notices** (v0.9.49) — yawac filtered
   out protocol + system messages everywhere so the user never saw
   the "encryption key with X changed" + "disappearing messages

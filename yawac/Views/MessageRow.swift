@@ -331,11 +331,20 @@ struct MessageRow: View {
                     }
                 }
                 .foregroundStyle(message.fromMe ? Theme.ownText : Theme.otherText)
+                // F36: highlight bumped 18% → 45% accent fill + a 2 pt
+                // accent outline so the jump-to-quoted destination is
+                // unmistakable. Previous tint was so subtle the user
+                // didn't realize anything had happened on a chip tap.
                 .background(
                     isHighlighted
-                        ? Color.accentColor.opacity(0.18)
+                        ? Color.accentColor.opacity(0.45)
                         : Color.clear,
                     in: .rect(cornerRadius: Theme.bubbleRadius)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: Theme.bubbleRadius)
+                        .stroke(isHighlighted ? Color.accentColor : .clear,
+                                lineWidth: 2)
                 )
                 .animation(.easeOut(duration: 0.3), value: isHighlighted)
                 .simultaneousGesture(
@@ -718,32 +727,35 @@ struct MessageRow: View {
 
     @ViewBuilder
     private var quotedStrip: some View {
-        Button {
+        // F36: Button → contentShape + onTapGesture. macOS SwiftUI
+        // Buttons embedded in a LazyVStack-with-thousands-of-rows
+        // can lose taps to the parent gesture chain, and the parent
+        // openURL environment then runs the snippet through the
+        // system handler (which in some cases launches the external
+        // viewer on the wrong target). Explicit gesture avoids both.
+        HStack(alignment: .top, spacing: 6) {
+            Rectangle()
+                .fill(Theme.accent)
+                .frame(width: 3)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(quotedSenderDisplay)
+                    .scaledUI(11, weight: .semibold)
+                    .foregroundStyle(Theme.text)
+                Text(message.quotedTextSnippet ?? "")
+                    .scaledUI(11)
+                    .foregroundStyle(Theme.textMuted)
+                    .lineLimit(2)
+            }
+        }
+        .padding(.vertical, 4)
+        .padding(.horizontal, 6)
+        .background(Theme.surfaceAlt, in: .rect(cornerRadius: 4))
+        .contentShape(.rect)
+        .onTapGesture {
             if let id = message.quotedMessageID {
                 onJumpToQuoted?(id)
             }
-        } label: {
-            HStack(alignment: .top, spacing: 6) {
-                Rectangle()
-                    .fill(Theme.accent)
-                    .frame(width: 3)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(quotedSenderDisplay)
-                        .scaledUI(11, weight: .semibold)
-                        .foregroundStyle(Theme.text)
-                    Text(message.quotedTextSnippet ?? "")
-                        .scaledUI(11)
-                        .foregroundStyle(Theme.textMuted)
-                        .lineLimit(2)
-                }
-            }
-            .padding(.vertical, 4)
-            .padding(.horizontal, 6)
-            .background(Theme.surfaceAlt, in: .rect(cornerRadius: 4))
-            .contentShape(.rect)
         }
-        .buttonStyle(.plain)
-        .disabled(onJumpToQuoted == nil)
     }
 
     private var quotedSenderDisplay: String {
