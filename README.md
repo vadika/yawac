@@ -99,6 +99,25 @@ Local build, project layout, troubleshooting, and release flow live in
 - **Multi-device limit.** WhatsApp allows up to 4 linked devices per account. yawac counts as one.
 - **No call support.** Voice/video calls are out of scope for this build.
 
+## Sponsor
+
+yawac is a one-person passion project, and it stays free and open source under
+MPL-2.0 — every feature, every release, no exceptions. There's no paid tier, no
+license key, nothing behind a paywall.
+
+If it's earned a place in your dock, you can help keep it maintained:
+
+[**❤️ Sponsor yawac on GitHub**](https://github.com/sponsors/vadika)
+
+Sponsorship funds the ongoing work — chasing WhatsApp's protocol changes, cutting
+notarized releases, and keeping the lights on. It is **not** a purchase, a support
+contract, or a warranty. yawac speaks an unofficial protocol (see
+[Caveats](#caveats)); sponsoring doesn't change that risk, and I can't promise
+uptime, compatibility, or that your account won't be flagged. You're backing the
+work, not buying a product.
+
+Sponsors (thank you 🙏): <!-- names added here -->
+
 ## License
 
 [Mozilla Public License 2.0](LICENSE). File-level copyleft: modifications to
