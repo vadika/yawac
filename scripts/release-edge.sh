@@ -48,21 +48,30 @@ APP="${EXPORT}/${SCHEME}.app"
 SIGN_IDENTITY="${SIGN_IDENTITY:-}"
 if [ -n "$SIGN_IDENTITY" ]; then
     ENTITLEMENTS="yawac/yawac.entitlements"
-    # Sign every nested framework + dylib + helper binary first, then
-    # the outer app. codesign refuses to sign an app whose contents
-    # are unsigned, but is happy when contents are signed by the
-    # same identity. Order: deepest first.
-    find "$APP" \
+    # Depth-first traversal: codesign of a container (.framework,
+    # .xpc, .app, .bundle) seals its current contents. Re-signing a
+    # nested container afterwards invalidates the parent. -depth
+    # makes find emit leaves first so we sign innermost first.
+    # Sparkle ships nested XPC services + Updater.app inside its
+    # framework that triggered exactly this failure on first try.
+    find -d "$APP" \
         \( -name "*.dylib" -o -name "*.framework" -o -name "*.xpc" \
            -o -name "*.app" -o -name "*.bundle" \) \
         -print0 |
     while IFS= read -r -d '' path; do
-        # Skip the outer .app itself; signed last.
         if [ "$path" = "$APP" ]; then continue; fi
         echo "[sign] $path"
         codesign --force --options=runtime --timestamp \
             --sign "$SIGN_IDENTITY" "$path"
     done
+    # Sparkle's Autoupdate is a plain Mach-O helper inside the
+    # framework, not a .app / .xpc / .bundle. Sign explicitly.
+    SPARKLE_AUTOUPDATE="$APP/Contents/Frameworks/Sparkle.framework/Versions/B/Autoupdate"
+    if [ -f "$SPARKLE_AUTOUPDATE" ]; then
+        echo "[sign] $SPARKLE_AUTOUPDATE"
+        codesign --force --options=runtime --timestamp \
+            --sign "$SIGN_IDENTITY" "$SPARKLE_AUTOUPDATE"
+    fi
     echo "[sign] $APP (outer)"
     codesign --force --options=runtime --timestamp \
         --entitlements "$ENTITLEMENTS" \
