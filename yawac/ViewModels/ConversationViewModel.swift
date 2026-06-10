@@ -333,6 +333,8 @@ final class ConversationViewModel {
         m.quotedFromMe = p.quotedFromMe
         m.quotedTextSnippet = p.quotedTextSnippet
         m.quotedKind = p.quotedKind
+        m.mediaWidth = p.mediaWidth
+        m.mediaHeight = p.mediaHeight
 
         // Insert sorted by timestamp.
         let idx = messages.firstIndex(where: { $0.timestamp > m.timestamp }) ?? messages.count
@@ -427,6 +429,8 @@ final class ConversationViewModel {
         m.quotedFromMe = p.quotedFromMe
         m.quotedTextSnippet = p.quotedTextSnippet
         m.quotedKind = p.quotedKind
+        m.mediaWidth = p.mediaWidth
+        m.mediaHeight = p.mediaHeight
         return m
     }
 
@@ -936,6 +940,8 @@ final class ConversationViewModel {
             m.quotedFromMe = p.quotedFromMe
             m.quotedTextSnippet = p.quotedTextSnippet
             m.quotedKind = p.quotedKind
+            m.mediaWidth = p.mediaWidth
+            m.mediaHeight = p.mediaHeight
             return m
         }
         // Hydrate persisted delivery status (fromMe only — receipts for

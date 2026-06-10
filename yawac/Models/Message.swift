@@ -42,6 +42,15 @@ struct UIMessage: Identifiable, Hashable, Sendable {
     /// false; populated from the persisted row in loadHistory + after
     /// ViewOnceReveal.reveal(_:) flips it.
     var viewOnceLocked: Bool = false
+    /// F38: image / video pixel dimensions captured from the sender's
+    /// upload metadata. Lets MessageRow size the bubble's reserved
+    /// space to the final aspect ratio BEFORE the thumbnail decode
+    /// finishes, eliminating the placeholder → image layout reflow
+    /// the user perceived as "I see how the images are drawn" while
+    /// scrolling. Both nil for non-image/video kinds + pre-F38
+    /// persisted rows.
+    var mediaWidth: Int? = nil
+    var mediaHeight: Int? = nil
 
     enum Body: Hashable, Sendable {
         case text(String)
@@ -88,6 +97,11 @@ extension UIMessage {
                                    Data(base64Encoded: $0)
                                },
                                isPTT: b.media?.isPTT ?? false)
+            // F38: capture sender-side dimensions for placeholder
+            // sizing. Drop zeros so the bubble can fall back to the
+            // square default when the sender didn't ship them.
+            if let w = b.media?.width, w > 0 { self.mediaWidth = w }
+            if let h = b.media?.height, h > 0 { self.mediaHeight = h }
         case "poll":
             if let p = b.poll {
                 self.body = .poll(question: p.question,
