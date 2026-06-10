@@ -51,8 +51,11 @@ A native macOS SwiftUI client backed by [tulir/whatsmeow](https://github.com/tul
 
 ```sh
 brew tap vadika/yawac https://github.com/vadika/yawac
+brew trust vadika/yawac
 brew install --cask vadika/yawac/yawac
 ```
+
+(Homebrew 4 requires the one-time `brew trust` for any third-party tap.)
 
 Requires macOS 14 (Sonoma) or newer.
 

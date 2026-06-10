@@ -1,5 +1,21 @@
 # Troubleshooting
 
+## `brew install` / `upgrade` says "Refusing to load cask from untrusted tap"
+
+Homebrew 4 added a one-time trust gate for third-party taps:
+
+```
+Error: Refusing to load cask vadika/yawac/yawac from untrusted tap
+vadika/yawac. Run `brew trust --cask vadika/yawac/yawac` or
+`brew trust vadika/yawac` to trust it.
+```
+
+Fix once, persists across upgrades:
+
+```sh
+brew trust vadika/yawac
+```
+
 ## `brew tap` asks for GitHub credentials
 
 `brew tap` runs `git clone` under the hood. GitHub no longer accepts
