@@ -21,8 +21,10 @@ jobs:
         with:
           go-version-file: bridge/go.mod
           cache-dependency-path: bridge/go.sum
-      - name: Install XcodeGen
-        run: brew install xcodegen
+      - name: Install XcodeGen + Sparkle
+        run: |
+          brew install xcodegen
+          brew install --cask sparkle
       - name: Install gomobile
         run: |
           go install golang.org/x/mobile/cmd/gomobile@latest
@@ -65,6 +67,19 @@ jobs:
           security list-keychain -d user -s "$KEYCHAIN_PATH" login.keychain-db
           # Sanity print the identity name (no secrets).
           security find-identity -v -p codesigning "$KEYCHAIN_PATH"
+      - name: Stash Sparkle EdDSA private key
+        env:
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+        run: |
+          KEY_PATH="$RUNNER_TEMP/sparkle.ed-private.pem"
+          printf "%s" "$SPARKLE_ED_PRIVATE_KEY" > "$KEY_PATH"
+          chmod 600 "$KEY_PATH"
+          echo "SPARKLE_PRIVATE_KEY_FILE=$KEY_PATH" >> "$GITHUB_ENV"
+          # generate_keys + sign_update ship from the Sparkle cask in
+          # /opt/homebrew/Caskroom/sparkle/<version>/bin; surface the
+          # path so release-edge.sh can call them.
+          SIGN_UPDATE=$(find /opt/homebrew/Caskroom/sparkle -name sign_update | head -1)
+          echo "SIGN_UPDATE_BIN=$SIGN_UPDATE" >> "$GITHUB_ENV"
       - name: Build + sign + notarize + zip
         env:
           VERSION: ${{ steps.ver.outputs.version }}
@@ -86,8 +101,12 @@ jobs:
           VERSION: ${{ steps.ver.outputs.version }}
           TAG: ${{ steps.ver.outputs.tag }}
         run: |
+          ASSETS=("build/dist/yawac-${VERSION}.zip")
+          if [ -f "build/dist/appcast.xml" ]; then
+            ASSETS+=("build/dist/appcast.xml")
+          fi
           gh release create "$TAG" \
-            "build/dist/yawac-${VERSION}.zip" \
+            "${ASSETS[@]}" \
             --title "$VERSION" \
             --notes "Release $VERSION"
       - name: Bump + commit cask

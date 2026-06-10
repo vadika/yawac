@@ -2,12 +2,22 @@ import SwiftUI
 import SwiftData
 import AppKit
 import UserNotifications
+import Sparkle
 
 @main
 struct YawacApp: App {
     @State private var session = SessionViewModel()
     @State private var menuBar = MenuBarController()
     @State private var showShortcuts = false
+    // F41: Sparkle 2 updater. The controller owns its own Updater
+    // instance, reads SUFeedURL + SUPublicEDKey from Info.plist, and
+    // fires a background update check on launch. The "Check for
+    // Updates…" menu item drives a manual check via
+    // `updater.checkForUpdates`.
+    private let updaterController = SPUStandardUpdaterController(
+        startingUpdater: true,
+        updaterDelegate: nil,
+        userDriverDelegate: nil)
     @State private var translation: TranslationViewModel = {
         let store = TranslationStore()
         let mgr = TranslationModelManager()
@@ -88,6 +98,11 @@ struct YawacApp: App {
             }
             CommandMenu("Find") {
                 FindCommands()
+            }
+            CommandGroup(after: .appInfo) {
+                Button("Check for Updates…") {
+                    updaterController.updater.checkForUpdates()
+                }
             }
             CommandGroup(replacing: .help) {
                 Button("Keyboard Shortcuts…") {

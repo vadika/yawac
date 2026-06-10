@@ -13,6 +13,9 @@ packages:
     from: "2.29.1"
   COpus:
     path: Packages/COpus
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    from: "2.9.3"
 targets:
   yawac:
     type: application
@@ -34,6 +37,8 @@ targets:
         product: Opus
       - package: COpus
         product: COpus
+      - package: Sparkle
+        product: Sparkle
     settings:
       base:
         OTHER_LDFLAGS: -lresolv
@@ -61,10 +66,13 @@ targets:
         NSLocationWhenInUseUsageDescription: yawac uses your location only when you choose Send current location.
         LSMinimumSystemVersion: "14.0"
         CFBundleDisplayName: yawac
-        CFBundleShortVersionString: "0.9.55"
-        CFBundleVersion: "70"
+        CFBundleShortVersionString: "0.9.56"
+        CFBundleVersion: "71"
         ATSApplicationFontsPath: Fonts
         CFBundleIconName: AppIcon
+        SUFeedURL: https://github.com/vadika/yawac/releases/latest/download/appcast.xml
+        SUPublicEDKey: YnHi982nr0r5CHtPBFeDiVttVsizvUQKlgH1TMeM0DE=
+        SUEnableInstallerLauncherService: false
   yawacTests:
     type: bundle.unit-test
     platform: macOS
