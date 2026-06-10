@@ -520,6 +520,16 @@ final class ChatListViewModel {
             self.pendingIngestFlush = nil
             guard !batch.isEmpty, let writer = self.writer else { return }
             let outcomes = await writer.enqueue(batch)
+            // F39: bump session.fullSync.fresh / .dupe so the
+            // AccountPanel sublabel shows the ratio of actually-new
+            // history vs. phone-side overlap. Replaces the F-instr
+            // NSLog from the systematic-debugging investigation that
+            // showed the "refetch" perception was 98% fresh.
+            if let session = self.session, session.fullSync.inFlight {
+                let dupes = outcomes.reduce(0) { $0 + ($1.alreadySeen ? 1 : 0) }
+                let fresh = outcomes.count - dupes
+                session.bumpFullSyncCounts(fresh: fresh, dupe: dupes)
+            }
             // Re-pair outcomes with their originating BridgeMessage by id so
             // the apply step has access to the full message payload (preview
             // text, sender push name, fromMe, etc.).
