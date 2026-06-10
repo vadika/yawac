@@ -13,40 +13,25 @@ mkdir -p "$DIST"
 ./scripts/build-xcframework.sh
 xcodegen generate
 
-# Developer ID signing path. Falls back to ad-hoc when the secrets
-# aren't present (local dev builds + workflow_dispatch from PRs).
-SIGN_IDENTITY="${SIGN_IDENTITY:--}"
-TEAM_ID="${TEAM_ID:-}"
-
+# Build ad-hoc. SPM packages auto-sign for development and refuse
+# to inherit a workspace-level `CODE_SIGN_IDENTITY=Developer ID
+# Application`. Build everything ad-hoc; re-sign the final .app
+# below with the Developer ID cert when the env is present.
 xcodebuild \
     -project yawac.xcodeproj \
     -scheme "$SCHEME" \
     -configuration Release \
     -archivePath "$ARCHIVE" \
     archive \
-    CODE_SIGN_IDENTITY="$SIGN_IDENTITY" \
+    CODE_SIGN_IDENTITY="-" \
     CODE_SIGNING_REQUIRED=YES \
-    CODE_SIGNING_ALLOWED=YES \
-    ${TEAM_ID:+DEVELOPMENT_TEAM="$TEAM_ID"} \
-    OTHER_CODE_SIGN_FLAGS="--timestamp --options=runtime"
+    CODE_SIGNING_ALLOWED=YES
 
 cat > build/ExportOptions.plist <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <plist version="1.0"><dict>
   <key>method</key><string>mac-application</string>
   <key>signingStyle</key><string>manual</string>
-EOF
-if [ "$SIGN_IDENTITY" != "-" ]; then
-cat >> build/ExportOptions.plist <<EOF
-  <key>signingCertificate</key><string>Developer ID Application</string>
-EOF
-fi
-if [ -n "$TEAM_ID" ]; then
-cat >> build/ExportOptions.plist <<EOF
-  <key>teamID</key><string>$TEAM_ID</string>
-EOF
-fi
-cat >> build/ExportOptions.plist <<EOF
 </dict></plist>
 EOF
 
@@ -58,8 +43,34 @@ xcodebuild \
 
 APP="${EXPORT}/${SCHEME}.app"
 
-# Notarize when credentials are present. Otherwise emit the unsigned
-# zip directly (local dev path).
+# Optional: re-sign with Developer ID + notarize when CI passes the
+# secrets. Local dev runs skip this and keep ad-hoc.
+SIGN_IDENTITY="${SIGN_IDENTITY:-}"
+if [ -n "$SIGN_IDENTITY" ]; then
+    ENTITLEMENTS="yawac/yawac.entitlements"
+    # Sign every nested framework + dylib + helper binary first, then
+    # the outer app. codesign refuses to sign an app whose contents
+    # are unsigned, but is happy when contents are signed by the
+    # same identity. Order: deepest first.
+    find "$APP" \
+        \( -name "*.dylib" -o -name "*.framework" -o -name "*.xpc" \
+           -o -name "*.app" -o -name "*.bundle" \) \
+        -print0 |
+    while IFS= read -r -d '' path; do
+        # Skip the outer .app itself; signed last.
+        if [ "$path" = "$APP" ]; then continue; fi
+        echo "[sign] $path"
+        codesign --force --options=runtime --timestamp \
+            --sign "$SIGN_IDENTITY" "$path"
+    done
+    echo "[sign] $APP (outer)"
+    codesign --force --options=runtime --timestamp \
+        --entitlements "$ENTITLEMENTS" \
+        --sign "$SIGN_IDENTITY" "$APP"
+    codesign --verify --deep --strict --verbose=2 "$APP"
+fi
+
+# Notarize when credentials are present.
 if [ -n "${NOTARY_APPLE_ID:-}" ] \
    && [ -n "${NOTARY_APP_PASSWORD:-}" ] \
    && [ -n "${NOTARY_TEAM_ID:-}" ]; then
