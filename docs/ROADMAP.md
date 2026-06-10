@@ -146,6 +146,22 @@ rare-use utilities) ships only when the important list is clear.
 
 ## Productivity / macOS
 
+- ☐ **Notarization + Developer ID signing** — current builds are
+  ad-hoc-signed; first launch demands the user open Settings →
+  Privacy & Security to allow. Real Developer ID Application
+  certificate + `notarytool submit --wait` in CI removes the
+  prompt entirely. Blocker is the $99 Apple Developer Program
+  membership + key generation; no code work upstream of that.
+  Once signed, the cask install ergonomics improve sharply
+  (zero-friction first-launch, Gatekeeper-clean).
+- ☐ **Sparkle auto-update** — embed Sparkle 2 framework; appcast
+  feed served from the GitHub Releases page (or a custom domain
+  with EdDSA key). Users get "Update available" prompts on launch
+  + manual "Check for updates" in the menu. Requires
+  Developer ID + notarization (item above) — Sparkle won't
+  install unsigned updates by default, and shipping with the
+  signature-check off defeats the security model. Brainstormed
+  2026-06-09; paused waiting on Apple Developer ID.
 - ☐ **Reply from native notification** — UNNotificationAction with
   text-input on incoming banners; send-back via existing
   `sendText`. Modest plumbing — ~150 LoC.
