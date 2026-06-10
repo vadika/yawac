@@ -38,6 +38,7 @@ targets:
       base:
         OTHER_LDFLAGS: -lresolv
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        CODE_SIGN_ENTITLEMENTS: yawac/yawac.entitlements
     info:
       path: yawac/Info.plist
       properties:
@@ -46,8 +47,8 @@ targets:
         NSLocationWhenInUseUsageDescription: yawac uses your location only when you choose Send current location.
         LSMinimumSystemVersion: "14.0"
         CFBundleDisplayName: yawac
-        CFBundleShortVersionString: "0.9.54"
-        CFBundleVersion: "69"
+        CFBundleShortVersionString: "0.9.55"
+        CFBundleVersion: "70"
         ATSApplicationFontsPath: Fonts
         CFBundleIconName: AppIcon
   yawacTests:

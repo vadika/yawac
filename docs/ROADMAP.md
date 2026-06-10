@@ -264,6 +264,23 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **F40 — Developer ID signing + notarization** (v0.9.55) —
+  Cask installs no longer require the `xattr -dr
+  com.apple.quarantine` postflight hack; Gatekeeper accepts the app
+  on first launch with no prompt. `release-edge.sh` signs with
+  `Developer ID Application: Vadim Likholetov (WJ65XC5777)`, then
+  `xcrun notarytool submit --wait` + `xcrun stapler staple`. The CI
+  release workflow imports the .p12 into a temp keychain from a
+  GitHub secret, runs notarytool with an app-specific password, and
+  staples the ticket onto the .app inside the dist zip. New
+  `yawac/yawac.entitlements` carries the three hardened-runtime
+  entitlements the Go runtime (whatsmeow bridge) needs to start
+  under codesign: `cs.allow-jit`,
+  `cs.allow-unsigned-executable-memory`, and
+  `cs.disable-library-validation`. Local dev builds without the
+  signing env still fall back to ad-hoc — same `release-edge.sh`
+  path. Unblocks Sparkle (next).
+
 - ✅ **F39v2 — adaptive count for at-floor tail** (v0.9.54) —
   After F39's at-floor pruning, deep backfill typically converges on
   1–2 stubborn chats (a large group with thousands of older

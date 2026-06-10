@@ -33,21 +33,46 @@ jobs:
         id: ver
         run: |
           if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
-            # Stable release: tag drives the version. Pushed tag is vX.Y.Z;
-            # the cask / asset / release title use the bare X.Y.Z.
             VERSION="${GITHUB_REF_NAME#v}"
             TAG="${GITHUB_REF_NAME}"
           else
-            # Manual dispatch: a throwaway dev build, no GitHub release.
             BASE=$(awk -F'"' '/CFBundleShortVersionString/{print $2; exit}' project.yml)
             VERSION="${BASE}-dev+$(git rev-parse --short=7 HEAD)"
             TAG="dev-$(git rev-parse --short=7 HEAD)"
           fi
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
-      - name: Build + sign + zip
+      - name: Import Developer ID certificate
+        env:
+          BUILD_CERT_BASE64: ${{ secrets.BUILD_CERT_BASE64 }}
+          BUILD_CERT_PASSWORD: ${{ secrets.BUILD_CERT_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          CERT_PATH="$RUNNER_TEMP/dev-id.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/build.keychain-db"
+          echo -n "$BUILD_CERT_BASE64" | base64 --decode -o "$CERT_PATH"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERT_PATH" \
+            -P "$BUILD_CERT_PASSWORD" \
+            -A -t cert -f pkcs12 \
+            -k "$KEYCHAIN_PATH"
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" \
+            "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH" login.keychain-db
+          # Sanity print the identity name (no secrets).
+          security find-identity -v -p codesigning "$KEYCHAIN_PATH"
+      - name: Build + sign + notarize + zip
         env:
           VERSION: ${{ steps.ver.outputs.version }}
+          SIGN_IDENTITY: "Developer ID Application"
+          TEAM_ID: ${{ secrets.NOTARY_TEAM_ID }}
+          NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
+          NOTARY_APP_PASSWORD: ${{ secrets.NOTARY_APP_PASSWORD }}
+          NOTARY_TEAM_ID: ${{ secrets.NOTARY_TEAM_ID }}
         run: ./scripts/release-edge.sh
       - name: SHA256
         id: sum
