@@ -264,6 +264,31 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **F37 — deep-backfill SwiftData off MainActor** (v0.9.51) —
+  Full-history sync had been beachballing through every F30v*
+  iteration. A 30 s main-thread `sample` during sync pinned the
+  cause: 60% of MainActor time inside
+  `SessionViewModel.fanOutPerChatBackfill` running 1033 per-chat
+  `FetchDescriptor<PersistedMessage>` calls inline, and 40% inside
+  `scheduleHistorySyncReconcile` firing the 6-pass chat reconcile
+  loop ≈4×/s on MainActor. `oldestTimestampPerChat` +
+  `fanOutPerChatBackfill` now resolve their per-chat anchors in a
+  detached `Task` with its own background `ModelContext`, then walk
+  the result list back on MainActor only to dispatch the
+  already-fire-and-forget peer sends + the throttle sleep. The
+  reconcile debounce stretches 250 ms → 5 s during
+  `fullSync.inFlight`. `ChatListViewModel.ingest`'s flush bulk-
+  publishes `chats[]` via a shadow array (one @Observable publish
+  per flush instead of per-outcome) and caches `jid → index` once
+  (was O(#chats) `firstIndex(where:)` per outcome). And: the
+  SwiftData store had grown to 239 MB, 207 MB of which was the
+  CoreData transaction log (ATRANSACTION + ACHANGE) intended for
+  CloudKit sync yawac doesn't use; added a startup
+  `pruneSwiftDataHistory` task that drops log rows older than 7 days
+  via raw `sqlite3 DELETE`. Existing user DBs shrink to actual-data
+  size on next launch. Main thread is ~60% idle during full sync
+  post-fix (was sub-percent).
+
 - ✅ **F36 — jump-to-quoted re-window + brighter highlight**
   (v0.9.50) — Tapping a quoted-reply chip used to beachball the
   main thread, drop taps entirely, or scroll to a target so
