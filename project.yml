@@ -39,6 +39,20 @@ targets:
         OTHER_LDFLAGS: -lresolv
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         CODE_SIGN_ENTITLEMENTS: yawac/yawac.entitlements
+      configs:
+        # F40: Debug builds run locally during dev. Use Apple
+        # Development automatic signing so the app keeps a stable
+        # team-bound identity across rebuilds — macOS treats
+        # ad-hoc-signed apps as a fresh bundle every launch, which
+        # resets notification authorization, badge counts, and Focus
+        # rules. Apple Development uses the free dev cert, no
+        # notarization needed; SPM packages auto-sign with the same
+        # team and don't conflict.
+        Debug:
+          CODE_SIGN_STYLE: Manual
+          CODE_SIGN_IDENTITY: "Apple Development: Vadim Likholetov (W76P62BYGQ)"
+          DEVELOPMENT_TEAM: WJ65XC5777
+          PROVISIONING_PROFILE_SPECIFIER: ""
     info:
       path: yawac/Info.plist
       properties:
