@@ -264,6 +264,19 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **F39v2 — adaptive count for at-floor tail** (v0.9.54) —
+  After F39's at-floor pruning, deep backfill typically converges on
+  1–2 stubborn chats (a large group with thousands of older
+  messages) while the rest reach their phone-side floor by round 2.
+  With `countPerChat` fixed at 200, those stragglers needed many
+  rounds × 60 s wait = ~30 minutes wall-clock to drill, and a tap
+  could hit the 30-round cap with the chat still deepening. When
+  the residual deepening set is ≤5 chats, `runDeepBackfill` now
+  bumps `countPerChat` 200 → 500. whatsmeow's recommended count is
+  50; we're already at 200 (4×). Phone may silently truncate above
+  some server-side ceiling — no-op if so; ≈2.5× depth per round on
+  stragglers if honored.
+
 - ✅ **F39 — at-floor tracking + fresh/dupe sublabel + 30-round cap**
   (v0.9.53) — Systematic-debugging investigation of "full history
   fetch refetches the same messages" found phone was shipping 98%
