@@ -35,6 +35,20 @@ struct YawacApp: App {
         } catch {
             fatalError("ModelContainer: \(error)")
         }
+        // F37: prune SwiftData's transaction log on startup. The
+        // backing CoreData store keeps an ATRANSACTION + ACHANGE
+        // history for CloudKit / cross-device sync semantics yawac
+        // doesn't use. With 44k message rows the log + its indexes
+        // had reached 207 MB on top of 32 MB of real data — every
+        // flush during full-history sync had to append to (and
+        // re-index) the log on top of the actual insert, which was a
+        // direct beachball contributor. Prune to a 7-day rolling
+        // window on each launch; the daily growth is tiny once
+        // history sync settles.
+        Task.detached(priority: .utility) { [container = self.container] in
+            await pruneSwiftDataHistory(container: container,
+                                        keepDays: 7)
+        }
         Task { await NotificationService.requestAuthorization() }
         UNUserNotificationCenter.current().delegate = NotificationRouter.shared
 
@@ -100,6 +114,43 @@ private struct FindCommands: View {
         }
         .keyboardShortcut("f", modifiers: .command)
         .disabled(conversation == nil)
+    }
+}
+
+/// F37: Drop SwiftData/CoreData transaction history older than
+/// `keepDays` days. The history tables back CloudKit / cross-device
+/// sync semantics yawac doesn't use; left unpruned they grow into
+/// hundreds of MB of garbage. SwiftData exposes the underlying
+/// CoreData history API only obliquely, so this runs a raw SQLite
+/// DELETE against the same on-disk store. Off-main + bounded; failure
+/// is non-fatal (next launch tries again).
+private func pruneSwiftDataHistory(container: ModelContainer,
+                                   keepDays: Int) async {
+    let supportDir = FileManager.default.urls(
+        for: .applicationSupportDirectory, in: .userDomainMask).first
+    guard let storeURL = supportDir?.appendingPathComponent("default.store") else {
+        return
+    }
+    // ZTIMESTAMP on ATRANSACTION is a CoreData reference epoch
+    // (2001-01-01). Convert keepDays back from that anchor.
+    let cutoff = Date().addingTimeInterval(-Double(keepDays) * 86_400)
+        .timeIntervalSinceReferenceDate
+    let path = storeURL.path
+    let sql = """
+    DELETE FROM ACHANGE WHERE ZTRANSACTIONID IN
+        (SELECT Z_PK FROM ATRANSACTION WHERE ZTIMESTAMP < \(cutoff));
+    DELETE FROM ATRANSACTION WHERE ZTIMESTAMP < \(cutoff);
+    """
+    let task = Process()
+    task.launchPath = "/usr/bin/sqlite3"
+    task.arguments = [path, sql]
+    let pipe = Pipe()
+    task.standardError = pipe
+    do {
+        try task.run()
+        task.waitUntilExit()
+    } catch {
+        NSLog("[yawac/prune-history] failed: %@", String(describing: error))
     }
 }
 

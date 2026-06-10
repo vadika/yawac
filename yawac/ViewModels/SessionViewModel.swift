@@ -364,8 +364,15 @@ final class SessionViewModel {
     func scheduleHistorySyncReconcile(client: WAClient,
                                       vm: ChatListViewModel) {
         if historySyncFlush != nil { return }
+        // F37: during a user-triggered full-history sync, the
+        // 250-ms-debounced reconcile (6 passes over 1033 chats +
+        // SwiftData upserts per pass) was firing repeatedly — a major
+        // main-thread chew that survived the F37/F37v2 sidebar fix.
+        // Stretch the debounce to 5 s during sync so reconcile fires
+        // a handful of times instead of dozens.
+        let debounceMs: UInt64 = fullSync.inFlight ? 5000 : 250
         historySyncFlush = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .milliseconds(250))
+            try? await Task.sleep(for: .milliseconds(debounceMs))
             guard let self else { return }
             self.historySyncFlush = nil
             // CGo bridge call off MainActor — listContacts marshals a
@@ -729,11 +736,11 @@ final class SessionViewModel {
         // contention with whatsmeow's secret-key store amplifies this.
         let perRoundWaitSec: UInt64 = 60
         for round in 1...maxRounds {
-            let before = oldestTimestampPerChat()
+            let before = await oldestTimestampPerChat()
             NSLog("[yawac/backfill] deep-backfill round=%d chats=%d", round, before.count)
             await fanOutPerChatBackfill(countPerChat: 200, throttleMs: 100)
             try? await Task.sleep(for: .seconds(perRoundWaitSec))
-            let after = oldestTimestampPerChat()
+            let after = await oldestTimestampPerChat()
             var deeperCount = 0
             for (jid, beforeTS) in before {
                 if let afterTS = after[jid], afterTS < beforeTS {
@@ -755,24 +762,32 @@ final class SessionViewModel {
     /// Sample current oldest-message timestamp per chat. Returns
     /// `[chatJID: epochSeconds]`. Used by `runDeepBackfill` to detect
     /// whether a fan-out round actually added deeper history.
-    @MainActor
-    private func oldestTimestampPerChat() -> [String: Int64] {
-        guard let context = modelContext else { return [:] }
-        let chatDescriptor = FetchDescriptor<PersistedChat>()
-        guard let chats = try? context.fetch(chatDescriptor) else { return [:] }
-        var out: [String: Int64] = [:]
-        out.reserveCapacity(chats.count)
-        for chat in chats {
-            let jid = chat.jid
-            var d = FetchDescriptor<PersistedMessage>(
-                predicate: #Predicate { $0.chatJID == jid },
-                sortBy: [SortDescriptor(\.timestamp, order: .forward)])
-            d.fetchLimit = 1
-            if let oldest = (try? context.fetch(d))?.first {
-                out[jid] = Int64(oldest.timestamp.timeIntervalSince1970)
+    /// F37: was @MainActor and ran 1033 SwiftData fetches on the main
+    /// thread (a 30-s sample during full-history sync showed this and
+    /// fanOutPerChatBackfill at ~60% of main-thread time, the
+    /// dominant beachball source). Now runs detached with its own
+    /// background ModelContext.
+    private func oldestTimestampPerChat() async -> [String: Int64] {
+        guard let container = modelContext?.container else { return [:] }
+        return await Task.detached(priority: .userInitiated) {
+            () -> [String: Int64] in
+            let ctx = ModelContext(container)
+            let chatDescriptor = FetchDescriptor<PersistedChat>()
+            guard let chats = try? ctx.fetch(chatDescriptor) else { return [:] }
+            var out: [String: Int64] = [:]
+            out.reserveCapacity(chats.count)
+            for chat in chats {
+                let jid = chat.jid
+                var d = FetchDescriptor<PersistedMessage>(
+                    predicate: #Predicate { $0.chatJID == jid },
+                    sortBy: [SortDescriptor(\.timestamp, order: .forward)])
+                d.fetchLimit = 1
+                if let oldest = (try? ctx.fetch(d))?.first {
+                    out[jid] = Int64(oldest.timestamp.timeIntervalSince1970)
+                }
             }
-        }
-        return out
+            return out
+        }.value
     }
 
     /// F30: iterates every PersistedChat that has at least one
@@ -782,42 +797,62 @@ final class SessionViewModel {
     /// rate limiter. Each response arrives asynchronously as a
     /// HistorySync of SyncType=ON_DEMAND; the existing handler bumps
     /// fullSync.chunks + .messages.
-    @MainActor
+    /// F37: was @MainActor and ran 1033 SwiftData fetches inline,
+    /// pinning the main thread for the full duration of the fan-out.
+    /// Now resolves per-chat anchors in a detached Task with its own
+    /// background ModelContext, then walks the result list back on
+    /// MainActor only to fire the (already fire-and-forget) peer
+    /// sends + the throttle sleep.
     private func fanOutPerChatBackfill(countPerChat: Int,
                                        throttleMs: UInt64) async {
         guard let client else { return }
-        guard let context = modelContext else { return }
-        // Pull all chats, sorted by most-recent first so active chats
-        // get serviced before long-dormant ones.
-        let chatDescriptor = FetchDescriptor<PersistedChat>(
-            sortBy: [SortDescriptor(\.lastTimestamp, order: .reverse)])
-        guard let chats = try? context.fetch(chatDescriptor) else { return }
+        guard let container = modelContext?.container else { return }
+        struct Anchor: Sendable {
+            let jid: String
+            let msgID: String
+            let senderJID: String
+            let fromMe: Bool
+            let tsUnix: Int64
+        }
+        let anchors: [Anchor] = await Task.detached(priority: .userInitiated) {
+            () -> [Anchor] in
+            let ctx = ModelContext(container)
+            let chatDescriptor = FetchDescriptor<PersistedChat>(
+                sortBy: [SortDescriptor(\.lastTimestamp, order: .reverse)])
+            guard let chats = try? ctx.fetch(chatDescriptor) else { return [] }
+            var out: [Anchor] = []
+            out.reserveCapacity(chats.count)
+            for chat in chats {
+                let jid = chat.jid
+                var msgDescriptor = FetchDescriptor<PersistedMessage>(
+                    predicate: #Predicate { $0.chatJID == jid },
+                    sortBy: [SortDescriptor(\.timestamp, order: .forward)])
+                msgDescriptor.fetchLimit = 1
+                guard let oldest = (try? ctx.fetch(msgDescriptor))?.first
+                else { continue }
+                out.append(Anchor(
+                    jid: jid,
+                    msgID: oldest.id,
+                    senderJID: oldest.senderJID,
+                    fromMe: oldest.fromMe,
+                    tsUnix: Int64(oldest.timestamp.timeIntervalSince1970)))
+            }
+            return out
+        }.value
         NSLog("[yawac/backfill] fan-out across %d chats count_per_chat=%d throttle_ms=%llu",
-              chats.count, countPerChat, throttleMs)
+              anchors.count, countPerChat, throttleMs)
         var sent = 0
-        for chat in chats {
-            let jid = chat.jid
-            var msgDescriptor = FetchDescriptor<PersistedMessage>(
-                predicate: #Predicate { $0.chatJID == jid },
-                sortBy: [SortDescriptor(\.timestamp, order: .forward)])
-            msgDescriptor.fetchLimit = 1
-            guard let oldest = (try? context.fetch(msgDescriptor))?.first
-            else { continue }
-            let msgID = oldest.id
-            let senderJID = oldest.senderJID
-            let fromMe = oldest.fromMe
-            let tsUnix = Int64(oldest.timestamp.timeIntervalSince1970)
-            // F30v3: fire-and-forget. Awaiting SendPeerMessage round-
-            // tripped each call (~300ms+ via the bridge), making 1033
-            // sequential dispatches take ~7 minutes. Detached without
-            // .value lets the throttle drive the rate cleanly.
+        for a in anchors {
+            let jid = a.msgID  // unused; preserve `sent += 1` flow below.
+            _ = jid
+            // F30v3 fire-and-forget; F37 hoisted anchor fetch off main.
             Task.detached { [client] in
                 try? client.requestOlderHistory(
-                    chatJID: jid,
-                    oldestMsgID: msgID,
-                    oldestSenderJID: senderJID,
-                    oldestFromMe: fromMe,
-                    oldestTimestampSec: tsUnix,
+                    chatJID: a.jid,
+                    oldestMsgID: a.msgID,
+                    oldestSenderJID: a.senderJID,
+                    oldestFromMe: a.fromMe,
+                    oldestTimestampSec: a.tsUnix,
                     count: countPerChat)
             }
             sent += 1

@@ -502,8 +502,18 @@ final class ChatListViewModel {
         // a single SwiftData save + FTS upsert pass per batch.
         pendingIngest.append(message)
         guard pendingIngestFlush == nil else { return }
+        // F37: during an active full-sync, stretch the coalesce
+        // window from 50 ms → 500 ms. Sync bursts ship 1000+ messages
+        // / chunk and the 50 ms cadence (≈20 flushes/sec) was firing
+        // a full sidebar publish + a writer.enqueue per cycle on the
+        // main thread — the dominant remaining beachball source after
+        // the F37v2 shadow-array fix. The longer window lets a single
+        // flush absorb a whole chunk; user gets fewer-but-larger
+        // sidebar updates during sync. Reverts automatically when
+        // `fullSync.inFlight` clears.
+        let coalesceMs: UInt64 = (session?.fullSync.inFlight == true) ? 500 : 50
         pendingIngestFlush = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .milliseconds(50))
+            try? await Task.sleep(for: .milliseconds(coalesceMs))
             guard let self else { return }
             let batch = self.pendingIngest
             self.pendingIngest.removeAll(keepingCapacity: true)
@@ -520,13 +530,28 @@ final class ChatListViewModel {
             // subsequent dupes.
             let byID = Dictionary(batch.map { ($0.id, $0) },
                                   uniquingKeysWith: { first, _ in first })
+            // F37: cache jid → index ONCE per flush + apply outcomes
+            // to a local shadow copy of `chats`, then publish the
+            // shadow back in ONE write. Mutating `chats[idx] = c` per
+            // outcome was firing an @Observable publish per outcome,
+            // re-rendering the sidebar 1000+ times during a single
+            // history-sync flush — the dominant beachball source.
+            // The shadow array's O(#chats) copy is paid once per
+            // flush; SwiftUI sees one mutation.
+            var workingChats = self.chats
+            var idxByJID: [String: Int] = [:]
+            idxByJID.reserveCapacity(workingChats.count)
+            for (i, c) in workingChats.enumerated() { idxByJID[c.jid] = i }
             for outcome in outcomes {
                 guard let original = byID[outcome.id] else { continue }
                 self.applyChatRowUpdate(
+                    chats: &workingChats,
+                    idxByJID: &idxByJID,
                     message: original,
                     canonJID: outcome.canonicalChatJID,
                     alreadySeen: outcome.alreadySeen)
             }
+            self.chats = workingChats
         }
     }
 
@@ -536,7 +561,15 @@ final class ChatListViewModel {
     /// notification. Iterating in batch order means the last message
     /// for a given chat wins on preview / lastTimestamp, matching the
     /// pre-F3 per-event behavior.
-    private func applyChatRowUpdate(message: BridgeMessage,
+    /// F37: takes a shadow `chats` array + a jid → index cache so the
+    /// per-outcome loop in `ingest`'s flush can apply 1000+ updates
+    /// off the published `self.chats` and publish the shadow back
+    /// once. Eliminates both the O(#chats) `firstIndex(where:)` per
+    /// outcome AND the 1000+ @Observable publishes that re-rendered
+    /// the sidebar mid-history-sync.
+    private func applyChatRowUpdate(chats: inout [Chat],
+                                    idxByJID: inout [String: Int],
+                                    message: BridgeMessage,
                                     canonJID: String,
                                     alreadySeen: Bool) {
         let chatJID = canonJID
@@ -561,7 +594,20 @@ final class ChatListViewModel {
         }
 
         let now = message.timestamp
-        if let idx = chats.firstIndex(where: { $0.jid == chatJID }) {
+        // F37: use cached idx when present; fall back to firstIndex
+        // only on miss + memoize. Shadow `chats` is mutated in place;
+        // the caller publishes back to `self.chats` once after the
+        // batch.
+        let cachedIdx: Int?
+        if let i = idxByJID[chatJID] {
+            cachedIdx = i
+        } else if let i = chats.firstIndex(where: { $0.jid == chatJID }) {
+            idxByJID[chatJID] = i
+            cachedIdx = i
+        } else {
+            cachedIdx = nil
+        }
+        if let idx = cachedIdx {
             var c = chats[idx]
             let advancesTip = now >= c.lastTimestamp
             if advancesTip {
@@ -613,6 +659,8 @@ final class ChatListViewModel {
                 lastTimestamp: now,
                 unread: unread)
             chats.append(c)
+            // F37: memoize the new row in the per-flush cache.
+            idxByJID[chatJID] = chats.count - 1
         }
         markChatDirty(chatJID)
 
