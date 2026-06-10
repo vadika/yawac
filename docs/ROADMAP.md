@@ -152,6 +152,21 @@ rare-use utilities) ships only when the important list is clear.
 - ☐ **Per-chat mute + notification customization** — extend
   existing mute (8h / 1w / Always) with custom durations + bell /
   sound toggles per chat. Touches sidebar ctx menu + ChatInfoView.
+- ☐ **Per-chat notification rules beyond mute / unmute** —
+  custom sound per chat, banner-vs-alert style, "show preview"
+  per chat, VIP chats that bypass do-not-disturb, quiet-hours
+  windows. Builds on the same plumbing as the mute customization
+  row above. Privacy-conscious UX win — the official app has
+  none of this.
+- ☐ **Shortcuts / AppleScript integration** — expose user-
+  initiated `send`, `open chat <jid|phone>`, `mark read <jid>`,
+  `start search "<query>"` as AppleScript verbs + matching
+  Shortcuts actions. Targets workflow / quick-action use cases
+  the official app can't do. Native-Mac citizenship.
+- ☐ **Menu-bar quick-send** — `NSStatusItem` popover with chat
+  picker + message field; cmd-shift-Y opens it from anywhere.
+  Compose without bringing the full window forward. Pairs well
+  with the Shortcuts integration above.
 - ☐ **Wire cosmetic Settings toggles** (v0.9.13 follow-up) — the
   General + Display panels render the controls but the storage
   keys aren't read anywhere yet. Needs real wiring:
@@ -166,10 +181,28 @@ rare-use utilities) ships only when the important list is clear.
 
 ## Account / Privacy
 
+- ☐ **Multi-account** — link N WhatsApp accounts into one yawac
+  window; account switcher in the sidebar so power users can
+  drive personal + work + side-project numbers without juggling
+  separate apps. The official Mac client is single-account, so
+  this is likely the single strongest reason for a power user to
+  pick yawac over it. Touches: per-account
+  whatsmeow `*Client`, per-account SwiftData store + media
+  cache, sidebar account chip + cmd-1..N keyboard switch,
+  global notification routing tagged by account. Non-trivial —
+  device count limits, paired-store isolation, and
+  cross-account contact dedupe all have to land cleanly.
 - ☐ **Push-name edit** — About + avatar shipped (v0.9.0 / v0.9.1,
   see Shipped). Push name (display name) is the only remaining
   profile field — whatsmeow has no top-level setter, so a
   `SETTING_PUSHNAME` app-state patch is needed. Phone-only for now.
+- ☐ **Local chat export / archive** — proper local backup of
+  conversations as machine-readable (JSON/SQLite) + human-
+  readable (HTML / Markdown). Meta deliberately makes phone-
+  side export painful, and the privacy-conscious user wants
+  this. We already persist everything in SwiftData; an export
+  panel + file format is the gap. Optional encrypted bundle so
+  the archive can sit safely in iCloud / Dropbox.
 - ☐ **2FA** (account-level).
 
 ## Messaging gaps (against shipped surface)
