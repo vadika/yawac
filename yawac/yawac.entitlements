@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTD/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  Hardened-runtime entitlements for Developer ID + notarization.
+
+	  The Go-side whatsmeow bridge runs inside the same process via
+	  the Bridge.xcframework. The Go runtime needs:
+	    - cs.allow-jit:                       JIT pages for goroutine
+	                                          stacks + Go GC.
+	    - cs.allow-unsigned-executable-memory: relax W^X so Go runtime
+	                                          can flip pages it owns.
+	    - cs.disable-library-validation:      gomobile-bind packages
+	                                          a dylib that isn't team-
+	                                          ID-matched to the app.
+
+	  We're not sandboxed (Developer ID distribution, not Mac App
+	  Store), so file / network access doesn't need explicit
+	  entitlements.
+	-->
+	<key>com.apple.security.cs.allow-jit</key>
+	<true/>
+	<key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+	<true/>
+	<key>com.apple.security.cs.disable-library-validation</key>
+	<true/>
+</dict>
+</plist>
