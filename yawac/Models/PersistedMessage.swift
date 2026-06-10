@@ -14,6 +14,13 @@ final class PersistedMessage {
     var mediaCaption: String?
     var mediaFileName: String?
     var mediaRefJSON: String?
+    /// F38: image / video pixel dimensions captured at receive time
+    /// so the chat row can reserve the bubble's final size BEFORE the
+    /// thumbnail decode finishes — eliminates the "I see how the
+    /// images are drawn" placeholder→image layout reflow on scroll.
+    /// Both nil for pre-F38 rows + non-image/video kinds.
+    var mediaWidth: Int? = nil
+    var mediaHeight: Int? = nil
     var pollJSON: String?
     // View-once envelope (Sticker / Image / Video).
     var isViewOnce: Bool = false
@@ -110,7 +117,9 @@ final class PersistedMessage {
          pinnedAt: Date? = nil,
          isForwarded: Bool = false,
          audioWaveform: Data? = nil,
-         isPTT: Bool = false) {
+         isPTT: Bool = false,
+         mediaWidth: Int? = nil,
+         mediaHeight: Int? = nil) {
         self.id = id
         self.chatJID = chatJID
         self.senderJID = senderJID
@@ -150,6 +159,8 @@ final class PersistedMessage {
         self.isForwarded = isForwarded
         self.audioWaveform = audioWaveform
         self.isPTT = isPTT
+        self.mediaWidth = mediaWidth
+        self.mediaHeight = mediaHeight
     }
 }
 

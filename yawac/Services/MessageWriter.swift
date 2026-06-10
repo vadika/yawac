@@ -69,6 +69,12 @@ actor MessageWriter {
                 if let p = m.media?.filePath, !p.isEmpty { existing.mediaPath = p }
                 if let c = m.media?.caption, !c.isEmpty { existing.mediaCaption = c }
                 if let f = m.media?.fileName, !f.isEmpty { existing.mediaFileName = f }
+                // F38: re-merge image/video dimensions on history-sync
+                // replays so pre-F38 rows get their placeholder size
+                // backfilled from the next replay without losing the
+                // already-persisted bytes.
+                if let w = m.media?.width, w > 0 { existing.mediaWidth = w }
+                if let h = m.media?.height, h > 0 { existing.mediaHeight = h }
                 // T12 fields: re-merge live-location sequence updates and
                 // pick up view-once / contact metadata that a later replay
                 // may carry. The insert path below threads these on first
@@ -125,7 +131,9 @@ actor MessageWriter {
                 quotedSenderJID: m.quoted?.senderJID,
                 quotedFromMe: m.quoted?.fromMe ?? false,
                 quotedTextSnippet: m.quoted?.snippet,
-                quotedKind: m.quoted?.kind)
+                quotedKind: m.quoted?.kind,
+                mediaWidth: m.media?.width,
+                mediaHeight: m.media?.height)
             context.insert(row)
             MessageIndex.shared.upsert(row.indexFields)
             outcomes.append(.init(

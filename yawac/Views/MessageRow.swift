@@ -1058,26 +1058,49 @@ struct MessageRow: View {
     private func imageBubble(path: String?) -> some View {
         let cache = ThumbnailCache.shared
         let _ = cache.revision  // subscribe to cache invalidations
+        // F38: size the bubble from the sender-provided pixel dims so
+        // the placeholder reserves the same rectangle the decoded
+        // image will occupy. Eliminates the placeholder → image
+        // layout reflow the user saw as "I see how the images are
+        // drawn" during scroll.
+        let bubbleSize = Self.mediaBubbleSize(
+            width: message.mediaWidth, height: message.mediaHeight,
+            maxW: 320, maxH: 240, defaultW: 240, defaultH: 180)
         if let p = path, let img = cache.image(forPath: p) {
             Image(nsImage: img)
                 .resizable()
                 .scaledToFit()
-                .frame(maxWidth: 320, maxHeight: 240)
+                .frame(width: bubbleSize.width, height: bubbleSize.height)
                 .clipShape(.rect(cornerRadius: 8))
                 .onTapGesture {
                     NSWorkspace.shared.open(URL(fileURLWithPath: p))
                 }
         } else if path != nil {
-            // Path known, decoding in flight — reserve a fixed bubble-sized
-            // placeholder. RoundedRectangle.fill() has zero intrinsic size, so
-            // using maxWidth/maxHeight here would collapse the row to a thin
-            // strip with only the timestamp overlay visible.
+            // Path known, decoding in flight — reserve the same
+            // rectangle the decoded image will land in.
             RoundedRectangle(cornerRadius: 8)
                 .fill(Theme.textMuted.opacity(0.15))
-                .frame(width: 240, height: 180)
+                .frame(width: bubbleSize.width, height: bubbleSize.height)
         } else {
             downloadingPlaceholder("photo")
         }
+    }
+
+    /// F38: pin a sender-supplied (width × height) into a bubble's
+    /// max box while preserving aspect. Falls back to the legacy
+    /// default size when the dims are missing.
+    static func mediaBubbleSize(
+        width: Int?, height: Int?,
+        maxW: CGFloat, maxH: CGFloat,
+        defaultW: CGFloat, defaultH: CGFloat
+    ) -> CGSize {
+        guard let w = width, w > 0, let h = height, h > 0 else {
+            return CGSize(width: defaultW, height: defaultH)
+        }
+        let wf = CGFloat(w)
+        let hf = CGFloat(h)
+        let scale = min(maxW / wf, maxH / hf, 1.0)
+        return CGSize(width: wf * scale, height: hf * scale)
     }
 
     @ViewBuilder
@@ -1100,9 +1123,15 @@ struct MessageRow: View {
 
     @ViewBuilder
     private func videoBubble(path: String?) -> some View {
+        // F38: video bubble gets the same sender-dimension reservation
+        // as the image bubble; the video thumbnail card's first paint
+        // would otherwise reflow the same way.
+        let bubbleSize = Self.mediaBubbleSize(
+            width: message.mediaWidth, height: message.mediaHeight,
+            maxW: 320, maxH: 240, defaultW: 240, defaultH: 180)
         if let p = path {
             VideoThumbnailView(path: p)
-                .frame(maxWidth: 320, maxHeight: 240)
+                .frame(width: bubbleSize.width, height: bubbleSize.height)
                 .clipShape(.rect(cornerRadius: 8))
                 .onTapGesture {
                     NSWorkspace.shared.open(URL(fileURLWithPath: p))
