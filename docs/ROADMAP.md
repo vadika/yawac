@@ -264,6 +264,29 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **F43 — Revert #Index data-loss + restore macOS 14 support**
+  (v0.9.60) — emergency hotfix for v0.9.59. The `#Index<T>` macros
+  added to PersistedMessage / PersistedReaction / PersistedPollVote
+  in v0.9.59 changed the SwiftData schema hash without a
+  VersionedSchema + SchemaMigrationPlan; lightweight migration
+  silently dropped every row from those three entities on first
+  launch (PersistedChat survived because no index was added).
+  Hotfix:
+  1. Removed all three `#Index<...>` declarations from
+     `PersistedMessage.swift`. SwiftData reads the existing data
+     fine without them; chat-scoped fetches go back to full-table
+     scans, but the off-main work in F42 still keeps the UI
+     responsive.
+  2. Reverted deployment target from macOS 15 back to macOS 14 —
+     the bump was tied to `#Index` (only available macOS 15+); with
+     the macro gone, restoring the broader install base costs
+     nothing.
+  3. Local recovery for the v0.9.59 affected user: SwiftData's
+     `default.store.bak.<unix-ts>` (auto-snapshotted by the F37
+     transaction-log prune flow) restored 43.6k rows.
+  Follow-up: re-add indices via a proper VersionedSchema /
+  SchemaMigrationPlan, gated behind a tested migration path.
+
 - ✅ **F42 — Chat-switch + scroll-to-message responsiveness**
   (v0.9.59) — four coordinated fixes targeting the 1-2s freeze on
   chat switch and message-preview jump:
@@ -283,14 +306,12 @@ surfaces.
      bubble cold; now flush is scheduled for +5min, cancelled on
      `didBecomeActive`. Memory-reclaim survives for genuinely
      backgrounded sessions; quick app switches stay warm.
-  4. **SwiftData fetches off MainActor + indices.** Bumped
-     deployment target to macOS 15 so `#Index<PersistedMessage>`
-     (compound `chatJID`+`timestamp` plus singles) lands
-     unconditionally. `rewindowAround`, `requestOlderHistory`,
-     `refreshPollTallies` switched to detached background
-     `ModelContext` fetches; only the final `messages =` assign
-     stays on main. Big-chat scroll-to-message and load-earlier
-     paths drop from full-table-scan to indexed lookup.
+  4. **SwiftData fetches off MainActor.** `rewindowAround`,
+     `requestOlderHistory`, `refreshPollTallies` switched to
+     detached background `ModelContext` fetches; only the final
+     `messages =` assign stays on main. (v0.9.59 also added
+     `#Index<T>` macros for compound indices but they were reverted
+     in v0.9.60 — see F43.)
 - ✅ **F41 — Sparkle auto-update** (v0.9.56) — Sparkle 2 wired
   end-to-end on top of F40's notarized builds. New SPM dep
   `sparkle-project/Sparkle`. `yawacApp` owns a

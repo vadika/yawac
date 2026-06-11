@@ -4,12 +4,16 @@ import SwiftData
 @Model
 final class PersistedMessage {
     @Attribute(.unique) var id: String
-    // chatJID + timestamp b-tree indices live at the bottom of the
-    // class via the `#Index<T>(...)` macro. Every chat-scoped fetch
-    // predicates on chatJID, often paired with timestamp ranges
-    // (rewindowAround / requestOlderHistory / refreshPollTallies);
-    // without these indices SQLite full-table-scans the entire
-    // message store on every chat switch.
+    // SwiftData `#Index<T>` macro looked attractive for the chat-scoped
+    // fetch predicates (rewindowAround / requestOlderHistory /
+    // refreshPollTallies all filter on chatJID, often paired with
+    // timestamp), but adding indices mid-life is a breaking schema
+    // change. v0.9.59 shipped #Index on this entity + PersistedReaction
+    // + PersistedPollVote without a VersionedSchema/SchemaMigrationPlan;
+    // SwiftData lightweight migration silently dropped every row from
+    // the indexed entities (PersistedChat survived because no index was
+    // added to it). Removed in v0.9.60 until a proper migration plan is
+    // in place; off-main fetches (the bigger win) ship without indices.
     var chatJID: String
     var senderJID: String
     var fromMe: Bool
@@ -168,8 +172,6 @@ final class PersistedMessage {
         self.mediaWidth = mediaWidth
         self.mediaHeight = mediaHeight
     }
-
-    #Index<PersistedMessage>([\.chatJID], [\.timestamp], [\.chatJID, \.timestamp])
 }
 
 @Model
@@ -178,7 +180,6 @@ final class PersistedReaction {
     /// upsert via SwiftData's @Attribute(.unique) without combining two
     /// columns.
     @Attribute(.unique) var compositeKey: String
-    // See PersistedMessage note on indexing — same constraint.
     var chatJID: String
     var targetMessageID: String
     var senderJID: String
@@ -194,8 +195,6 @@ final class PersistedReaction {
         self.emoji = emoji
         self.timestamp = timestamp
     }
-
-    #Index<PersistedReaction>([\.chatJID], [\.targetMessageID], [\.timestamp])
 }
 
 /// Last known vote from a voter on a specific poll. Composite key
@@ -205,7 +204,6 @@ final class PersistedReaction {
 @Model
 final class PersistedPollVote {
     @Attribute(.unique) var compositeKey: String
-    // See PersistedMessage note on indexing — same constraint.
     var chatJID: String
     var pollMessageID: String
     var voterJID: String
@@ -223,8 +221,6 @@ final class PersistedPollVote {
         self.optionHashesJSON = optionHashesJSON
         self.timestamp = timestamp
     }
-
-    #Index<PersistedPollVote>([\.chatJID], [\.pollMessageID], [\.timestamp])
 }
 
 @Model
