@@ -94,6 +94,42 @@ private struct ReactionChip: View {
     }
 }
 
+/// F62: Equatable conformance lets `.equatable()` at the
+/// ConversationView callsite short-circuit body re-evaluation for
+/// rows whose data inputs haven't changed. The previous behavior —
+/// any mutation to `vm.receiptStatus[id]` /
+/// `vm.reactionsBySender[id]` / `vm.localPaths[id]` invalidates
+/// EVERY observer of those `@Observable` dicts, which is every
+/// MessageRow visible — re-evaluated every row's body on every
+/// receipt event, firing `RightClickCatcher.updateNSView` for each
+/// (an AppKit bridge round-trip). Sample showed this as the
+/// dominant beachball source during sync bursts. Comparing data
+/// props only (closures + Environment refs ignored) is safe
+/// because the closures all capture `vm` by reference; the same vm
+/// instance is in scope across renders, so a stale closure still
+/// resolves the right action.
+extension MessageRow: Equatable {
+    static func == (l: MessageRow, r: MessageRow) -> Bool {
+        l.message == r.message
+            && l.status == r.status
+            && l.senderName == r.senderName
+            && l.localPath == r.localPath
+            && l.reactions == r.reactions
+            && l.reactors == r.reactors
+            && l.downloadError == r.downloadError
+            && l.voteCounts == r.voteCounts
+            && l.votersByOption == r.votersByOption
+            && l.mySelections == r.mySelections
+            && l.myReaction == r.myReaction
+            && l.isHighlighted == r.isHighlighted
+            && l.selecting == r.selecting
+            && l.selected == r.selected
+            && l.selectable == r.selectable
+            && l.isFindHit == r.isFindHit
+            && l.isFindCurrent == r.isFindCurrent
+    }
+}
+
 struct MessageRow: View {
     let message: UIMessage
     let status: UIMessage.Status?
@@ -365,10 +401,11 @@ struct MessageRow: View {
                 .overlay(
                     Group {
                         if !message.locallyDeleted, !isSystemMessage {
-                            RightClickCatcher { point in
+                            StableRightClickOverlay(id: message.id) { point in
                                 contextMenuAnchor = point
                                 showContextMenu = true
                             }
+                            .equatable()
                         }
                     }
                 )

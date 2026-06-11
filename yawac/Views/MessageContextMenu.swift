@@ -267,6 +267,32 @@ struct RightClickCatcher: NSViewRepresentable {
     }
 }
 
+/// F62: Stable wrapper around `RightClickCatcher` keyed by message
+/// id. The previous direct use re-fired `updateNSView` (an AppKit
+/// bridge call) on every MessageRow body eval — sample showed
+/// `RightClickCatcher.updateNSView` as the dominant beachball
+/// source during sync bursts (every receipt-dict mutation
+/// invalidates every visible row, each row's body re-runs, each
+/// run calls updateNSView).
+///
+/// Wrapping in an `Equatable` view + `.equatable()` short-circuits
+/// the subtree when the row id is stable. The captured closure
+/// holds Bindings to `MessageRow`'s `@State contextMenuAnchor` /
+/// `showContextMenu` — both per-row-identity stable across body
+/// evals — so a stale closure still resolves the right anchor.
+struct StableRightClickOverlay: View, Equatable {
+    let id: String
+    let onRightClick: (UnitPoint) -> Void
+
+    var body: some View {
+        RightClickCatcher(onRightClick: onRightClick)
+    }
+
+    static func == (l: StableRightClickOverlay, r: StableRightClickOverlay) -> Bool {
+        l.id == r.id
+    }
+}
+
 private final class RightClickHost: NSView {
     var onRightClick: ((UnitPoint) -> Void)?
 
