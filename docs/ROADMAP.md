@@ -248,6 +248,31 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **F62 — Kill RightClickCatcher per-row updateNSView storm**
+  (v0.10.2) — Plan B from the stability/debt wave. Samples during
+  full-history-sync showed `RightClickCatcher.updateNSView` +
+  `TimelineItem.id.getter` × N as the dominant beachball source:
+  any mutation to `vm.receiptStatus` / `reactionsBySender` /
+  `localPaths` (all `@Observable` dicts) invalidates every
+  observer regardless of which key changed, so every visible
+  MessageRow re-evaluated its body on every receipt event, and
+  each re-eval fired an AppKit bridge call to update the
+  right-click catcher overlay's closure.
+  First attempt — `MessageRow: Equatable` + `.equatable()` at the
+  ForEach callsite — broke LazyVStack's lazy materialization,
+  causing a ~15s pause on chat switch as SwiftUI eagerly compared
+  every row. Reverted.
+  Landed shape — `StableRightClickOverlay: View, Equatable` wraps
+  just `RightClickCatcher` keyed on `message.id`. `.equatable()`
+  on the wrapper short-circuits its subtree when the id is
+  stable — `updateNSView` no longer fires on receipt-storm body
+  re-evals. The captured closure holds Bindings to MessageRow's
+  per-row `@State contextMenuAnchor` / `showContextMenu`, both
+  per-identity stable across body evals, so a stale closure still
+  resolves the right popover anchor. Chat-switch path
+  unaffected (id changes → `==` false → re-renders); LazyVStack
+  laziness preserved (only the overlay subtree is equatable).
+
 - ✅ **F61 — Diagnostics inspector panel** (v0.10.1) — read-only
   `Settings → Diagnostics` view to surface internal state when a
   user reports a bug. Built first in the stability/debt wave
