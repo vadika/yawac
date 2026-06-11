@@ -76,7 +76,7 @@ struct ConversationView: View {
     }
 
     private func jumpToMessage(_ id: String) {
-        vm?.jumpToQuoted(id: id)
+        Task { await vm?.jumpToQuoted(id: id) }
     }
 
     /// Returns the optional dot color + label for the status segment of
@@ -243,7 +243,7 @@ struct ConversationView: View {
     private func pinnedBanner(_ vm: ConversationViewModel) -> some View {
         if let m = vm.pinnedBannerMessage {
             Button {
-                vm.jumpToQuoted(id: m.id)
+                Task { await vm.jumpToQuoted(id: m.id) }
             } label: {
                 HStack(spacing: 10) {
                     Image(systemName: "pin.fill")
@@ -457,7 +457,7 @@ struct ConversationView: View {
                                             onPin: { m in vm.pinMessage(m, pinned: m.pinnedAt == nil) },
                                             onForward: { m in vm.beginForward(m) },
                                             onRevealViewOnce: { m in vm.revealViewOnce(messageID: m.id) },
-                                            onJumpToQuoted: { id in vm.jumpToQuoted(id: id) },
+                                            onJumpToQuoted: { id in Task { await vm.jumpToQuoted(id: id) } },
                                             isHighlighted: vm.highlightedID == msg.id,
                                             selecting: vm.forwardSelecting,
                                             selected: vm.forwardSelection.contains(msg.id),
@@ -560,7 +560,7 @@ struct ConversationView: View {
                             // destination CVM mounts.
                             if let target = session.pendingJumpChatJID,
                                target != chatJID { return }
-                            vm.jumpToQuoted(id: jumpID)
+                            Task { await vm.jumpToQuoted(id: jumpID) }
                             session.pendingJumpMessageID = nil
                             session.pendingJumpChatJID = nil
                         }
@@ -571,7 +571,7 @@ struct ConversationView: View {
                                   !vm.messages.isEmpty else { return }
                             if let target = session.pendingJumpChatJID,
                                target != chatJID { return }
-                            vm.jumpToQuoted(id: jumpID)
+                            Task { await vm.jumpToQuoted(id: jumpID) }
                             session.pendingJumpMessageID = nil
                             session.pendingJumpChatJID = nil
                         }

@@ -17,12 +17,15 @@ struct AvatarView: View {
     }
 
     var body: some View {
-        // Read `ThumbnailCache.revision` so the body re-runs when the
-        // shared 50ms-coalesced bump fires — that's how cold avatars
-        // appear without a per-instance `@State` flip + `.task(id:)`
-        // (which flashed the placeholder on every disk hit).
+        // Read `ThumbnailCache.avatarRevision` so the body re-runs
+        // when the per-type 50ms-coalesced bump fires — that's how
+        // cold avatars appear without a per-instance `@State` flip +
+        // `.task(id:)` (which flashed the placeholder on every disk
+        // hit). Per-type revision (was a single shared `revision`
+        // until F39+) keeps image/video decode bursts from waking
+        // every avatar body.
         let cache = ThumbnailCache.shared
-        let _ = cache.revision
+        let _ = cache.avatarRevision
         let key = cacheKey
         // Capture the MainActor-isolated client ONCE so the detached
         // fetcher closure doesn't reach back into session state from a

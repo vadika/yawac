@@ -122,9 +122,10 @@ private struct ReplyThumb: View {
     var body: some View {
         // Shared in-memory cache + coalesced revision bump: no
         // per-instance @State / .task means staged-reply previews don't
-        // flash the placeholder on a disk hit (F12).
+        // flash the placeholder on a disk hit (F12). Subscribe to the
+        // per-type revision matching this reply's media kind.
         let cache = ThumbnailCache.shared
-        let _ = cache.revision
+        let _ = (kind == "video") ? cache.videoRevision : cache.imageRevision
         let img: NSImage? = kind == "video"
             ? cache.videoImage(forPath: path)
             : cache.image(forPath: path)

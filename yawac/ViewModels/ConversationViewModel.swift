@@ -253,7 +253,7 @@ final class ConversationViewModel {
         pendingScrollToID = findHits[findCurrentIdx].messageID
     }
 
-    func jumpToQuoted(id: String) {
+    func jumpToQuoted(id: String) async {
         // F36: always re-window when the loaded slice is large enough
         // that scrollTo would beachball. Below the jumpWindowSize
         // ceiling the LazyVStack handles cross-chat scrolls fine —
@@ -268,7 +268,7 @@ final class ConversationViewModel {
             // centered on the target's timestamp. Subsequent scrollTo
             // is then fast because LazyVStack only has to compute
             // ~jumpWindowSize layouts instead of 10k+.
-            if rewindowAround(targetID: id) {
+            if await rewindowAround(targetID: id) {
                 pendingScrollToID = id
                 return
             }
@@ -349,33 +349,45 @@ final class ConversationViewModel {
     /// success, `false` if the persisted row can't be located. Used by
     /// `jumpToQuoted` to shrink the visible LazyVStack so
     /// `proxy.scrollTo` doesn't beachball.
-    @MainActor
-    private func rewindowAround(targetID: String) -> Bool {
-        guard let context else { return false }
-        let descriptor = FetchDescriptor<PersistedMessage>(
-            predicate: #Predicate { $0.id == targetID })
-        guard let target = (try? context.fetch(descriptor))?.first else {
-            return false
-        }
+    ///
+    /// The three SwiftData fetches + UIMessage mapping run on a
+    /// detached background `ModelContext` bound to the shared
+    /// container; only the final `messages = …` commit hops back to
+    /// MainActor. Keeps the jump from freezing the UI on large chats.
+    private func rewindowAround(targetID: String) async -> Bool {
+        guard let container = context?.container else { return false }
         let jid = chatJID
-        let targetTs = target.timestamp
-        let half = Self.jumpWindowSize / 2
-        var beforeDesc = FetchDescriptor<PersistedMessage>(
-            predicate: #Predicate {
-                $0.chatJID == jid && $0.timestamp <= targetTs
-            },
-            sortBy: [SortDescriptor(\.timestamp, order: .reverse)])
-        beforeDesc.fetchLimit = half
-        var afterDesc = FetchDescriptor<PersistedMessage>(
-            predicate: #Predicate {
-                $0.chatJID == jid && $0.timestamp > targetTs
-            },
-            sortBy: [SortDescriptor(\.timestamp, order: .forward)])
-        afterDesc.fetchLimit = half
-        let beforeRows = (try? context.fetch(beforeDesc)) ?? []
-        let afterRows = (try? context.fetch(afterDesc)) ?? []
-        let combined = beforeRows.reversed() + afterRows
-        let uiMessages = combined.map { Self.uiMessage(from: $0) }
+        let windowHalf = Self.jumpWindowSize / 2
+        let uiMessages = await Task.detached(priority: .userInitiated) {
+            () -> [UIMessage]? in
+            let bgCtx = ModelContext(container)
+            let targetDesc = FetchDescriptor<PersistedMessage>(
+                predicate: #Predicate { $0.id == targetID })
+            guard let target = (try? bgCtx.fetch(targetDesc))?.first else {
+                return nil
+            }
+            let targetTs = target.timestamp
+            var beforeDesc = FetchDescriptor<PersistedMessage>(
+                predicate: #Predicate {
+                    $0.chatJID == jid && $0.timestamp <= targetTs
+                },
+                sortBy: [SortDescriptor(\.timestamp, order: .reverse)])
+            beforeDesc.fetchLimit = windowHalf
+            var afterDesc = FetchDescriptor<PersistedMessage>(
+                predicate: #Predicate {
+                    $0.chatJID == jid && $0.timestamp > targetTs
+                },
+                sortBy: [SortDescriptor(\.timestamp, order: .forward)])
+            afterDesc.fetchLimit = windowHalf
+            let beforeRows = (try? bgCtx.fetch(beforeDesc)) ?? []
+            let afterRows = (try? bgCtx.fetch(afterDesc)) ?? []
+            let combined = beforeRows.reversed() + afterRows
+            // Build the [UIMessage] array entirely on the bg context —
+            // PersistedMessage instances must not cross actor
+            // boundaries.
+            return combined.map { Self.uiMessage(from: $0) }
+        }.value
+        guard let uiMessages else { return false }
         messages = uiMessages
         messageIDs = Set(uiMessages.map(\.id))
         invalidateTimeline()
@@ -385,8 +397,12 @@ final class ConversationViewModel {
     /// F36: build a UIMessage from a PersistedMessage. Used by
     /// `rewindowAround`. Mirrors the body-construction logic in
     /// `buildHistorySnapshot` but factored into a shared helper so
-    /// both paths stay in sync.
-    private static func uiMessage(from p: PersistedMessage) -> UIMessage {
+    /// both paths stay in sync. `nonisolated` so the detached fetch
+    /// task in `rewindowAround` can call it without hopping back to
+    /// MainActor — it only reads PersistedMessage stored properties
+    /// (which are safe on the bg ModelContext that fetched them) and
+    /// constructs a value-type UIMessage.
+    nonisolated private static func uiMessage(from p: PersistedMessage) -> UIMessage {
         let body: UIMessage.Body
         switch p.kind {
         case "text":
@@ -742,20 +758,23 @@ final class ConversationViewModel {
         // image bubble runs `ThumbnailCache.shared.image(forPath:)`. If
         // the cache is cold that returns nil and the bubble paints a
         // placeholder; the async decode landings then flicker images in
-        // one by one. Synchronous preheat here means the first body eval
-        // hits the cache. Placing this AFTER the assignment would defeat
-        // the point (F10).
+        // one by one. The snapshot carries pre-decoded NSImages
+        // (decode ran off-MainActor inside `buildHistorySnapshot`), so
+        // preheat is a pointer-store loop on main — microseconds, not
+        // the ~600-1200ms freeze the prior on-main decode caused (F10).
+        // Placing this AFTER the assignment would defeat the point.
         ThumbnailCache.shared.preheat(snap.preheatThumbs)
-        // Same contract for video bubbles: warm the in-memory cache
-        // from pre-existing SHA disk-cache PNG bytes BEFORE the
-        // LazyVStack lays out, so VideoThumbnailView's first body eval
-        // hits the cache instead of returning nil → gray placeholder →
-        // single-frame flicker once the async load lands (F11).
+        // Same contract for video bubbles: pre-decoded NSImages from
+        // pre-existing SHA disk-cache PNGs land in the in-memory
+        // cache BEFORE the LazyVStack lays out, so VideoThumbnailView's
+        // first body eval hits the cache instead of returning nil →
+        // gray placeholder → single-frame flicker (F11).
         ThumbnailCache.shared.preheatVideo(snap.preheatVideoThumbs)
         // Avatar preheat — the highest-impact one. Every message row
         // has an AvatarView; without this preheat the entire visible
         // window flashes initials placeholders for one frame before
-        // the in-memory cache fills from disk (F12).
+        // the in-memory cache fills from disk. Decode ran off-MainActor
+        // in the snapshot builder (F12).
         ThumbnailCache.shared.preheatAvatar(snap.preheatAvatars)
         let snapIDs = Set(snap.messages.map { $0.id })
         let lateArrivals = self.messages.filter { !snapIDs.contains($0.id) }
@@ -1074,14 +1093,17 @@ final class ConversationViewModel {
         }
         // Preheat the in-memory thumbnail cache for the visible bottom
         // window: the last ~30 image/sticker rows with on-disk media.
-        // Reading raw file Data here (off MainActor) lets
-        // `applyHistorySnapshot` populate `ThumbnailCache` synchronously
-        // before assigning `self.messages`, so the LazyVStack's first
-        // paint of visible bubbles hits the cache instead of starting
-        // from placeholders and popping in over successive decode
-        // landings (F10). Caps: 30 files, 5 MB per file — bounds memory
-        // for pathological attachments.
-        var preheatThumbs: [String: Data] = [:]
+        // Read raw file bytes AND run the ImageIO downsample here
+        // (off MainActor — `buildHistorySnapshot` is called from a
+        // `Task.detached` in `loadHistory`). The pre-decoded NSImage
+        // is then handed to MainActor's `applyHistorySnapshot` for a
+        // pointer-store into `ThumbnailCache` — no decode on main.
+        // Prior version carried raw `Data` and decoded inside
+        // `applyHistorySnapshot`, which paid 600-1200ms of MainActor
+        // CGImageSourceCreateThumbnailAtIndex per chat switch (F10).
+        // Caps: 30 files, 5 MB per file — bounds memory for
+        // pathological attachments.
+        var preheatThumbs: [String: PreheatImage] = [:]
         let preheatMaxCount = 30
         let preheatPerFileCap = 5 * 1024 * 1024
         var preheatRemaining = preheatMaxCount
@@ -1099,20 +1121,23 @@ final class ConversationViewModel {
                size > preheatPerFileCap { continue }
             guard let data = try? Data(contentsOf: url) else { continue }
             if data.count > preheatPerFileCap { continue }
-            preheatThumbs[path] = data
+            guard let img = ThumbnailCache.decode(
+                data: data, maxPixel: ThumbnailCache.imageBubbleMaxPixelExternal)
+            else { continue }
+            preheatThumbs[path] = PreheatImage(img)
             preheatRemaining -= 1
         }
         // Same preheat treatment for video bubbles: walk the last ~30
         // video rows with on-disk media, look up the SHA disk-cache
-        // PNG path, read its bytes if present. Skip rows whose PNG
-        // hasn't been generated yet — the cache's async miss path
-        // will fall through to AVAsset generation on first paint.
-        // Caps mirror the image branch: 30 entries, 5 MB per file.
-        // Keyed by the SOURCE video file path (NOT the SHA PNG path),
-        // since that's what VideoThumbnailView passes to
-        // `videoImage(forPath:)` at body time. The Data values ARE
-        // the PNG bytes — ThumbnailCache decodes via NSImage(data:).
-        var preheatVideoThumbs: [String: Data] = [:]
+        // PNG path, read its bytes if present, decode off-MainActor.
+        // Skip rows whose PNG hasn't been generated yet — the cache's
+        // async miss path will fall through to AVAsset generation on
+        // first paint. Caps mirror the image branch: 30 entries, 5 MB
+        // per file. Keyed by the SOURCE video file path (NOT the SHA
+        // PNG path), since that's what VideoThumbnailView passes to
+        // `videoImage(forPath:)` at body time. The values are
+        // pre-decoded NSImages (F11).
+        var preheatVideoThumbs: [String: PreheatImage] = [:]
         var preheatVideoRemaining = preheatMaxCount
         for p in displayable.reversed() {
             if preheatVideoRemaining == 0 { break }
@@ -1124,16 +1149,19 @@ final class ConversationViewModel {
                size > preheatPerFileCap { continue }
             guard let data = try? Data(contentsOf: pngURL) else { continue }
             if data.count > preheatPerFileCap { continue }
-            preheatVideoThumbs[sourcePath] = data
+            guard let img = ThumbnailCache.decode(
+                data: data, maxPixel: ThumbnailCache.videoThumbMaxPixelExternal)
+            else { continue }
+            preheatVideoThumbs[sourcePath] = PreheatImage(img)
             preheatVideoRemaining -= 1
         }
         // Avatar preheat: collect distinct sender canonical-JID cache
-        // keys from the last ~60 visible messages and read their
-        // on-disk avatar bytes. This is the highest-impact preheat
+        // keys from the last ~60 visible messages, read their on-disk
+        // avatar bytes, decode off-MainActor. Highest-impact preheat
         // since EVERY message row has an AvatarView (F12). Caps
         // mirror the image preheat — 60 entries, 5 MB per file —
         // since most avatars are well under 100 KB anyway.
-        var preheatAvatars: [String: Data] = [:]
+        var preheatAvatars: [String: PreheatImage] = [:]
         let avatarPreheatMaxCount = 60
         var avatarPreheatRemaining = avatarPreheatMaxCount
         var seenAvatarKeys: Set<String> = []
@@ -1148,7 +1176,10 @@ final class ConversationViewModel {
                size > preheatPerFileCap { continue }
             guard let data = try? Data(contentsOf: url) else { continue }
             if data.count > preheatPerFileCap { continue }
-            preheatAvatars[key] = data
+            guard let img = ThumbnailCache.decode(
+                data: data, maxPixel: ThumbnailCache.avatarMaxPixelExternal)
+            else { continue }
+            preheatAvatars[key] = PreheatImage(img)
             avatarPreheatRemaining -= 1
         }
         let t3 = CFAbsoluteTimeGetCurrent()
@@ -1272,29 +1303,39 @@ final class ConversationViewModel {
     /// On-demand HistorySync requested at the chat's newest message gives
     /// the phone a chance to bundle all current votes into the response.
     func refreshPollTallies() {
-        guard !refreshingPolls, let context else { return }
-        // Anchor at the newest message in the chat — server returns up to
-        // ~50 messages older than the anchor, which includes recent polls.
-        let jid = chatJID
-        var descriptor = FetchDescriptor<PersistedMessage>(
-            predicate: #Predicate { $0.chatJID == jid },
-            sortBy: [SortDescriptor(\.timestamp, order: .reverse)])
-        descriptor.fetchLimit = 1
-        guard let anchor = (try? context.fetch(descriptor))?.first else { return }
+        guard !refreshingPolls, let container = context?.container else { return }
         refreshingPolls = true
-        let id = anchor.id
-        let senderJID = anchor.senderJID
-        let fromMe = anchor.fromMe
-        let ts = Int64(anchor.timestamp.timeIntervalSince1970)
+        let jid = chatJID
         Task { @MainActor [weak self] in
+            // Anchor at the newest message in the chat — server returns up to
+            // ~50 messages older than the anchor, which includes recent polls.
+            // Fetch on a detached bg ModelContext so the main thread stays
+            // free while SQLite resolves the index lookup.
+            let anchor = await Task.detached(priority: .userInitiated) {
+                () -> (id: String, senderJID: String, fromMe: Bool, ts: Int64)? in
+                let bgCtx = ModelContext(container)
+                var descriptor = FetchDescriptor<PersistedMessage>(
+                    predicate: #Predicate { $0.chatJID == jid },
+                    sortBy: [SortDescriptor(\.timestamp, order: .reverse)])
+                descriptor.fetchLimit = 1
+                guard let row = (try? bgCtx.fetch(descriptor))?.first else {
+                    return nil
+                }
+                return (row.id, row.senderJID, row.fromMe,
+                        Int64(row.timestamp.timeIntervalSince1970))
+            }.value
             guard let self else { return }
+            guard let anchor else {
+                self.refreshingPolls = false
+                return
+            }
             defer { self.refreshingPolls = false }
             try? self.client.requestOlderHistory(
                 chatJID: self.chatJID,
-                oldestMsgID: id,
-                oldestSenderJID: senderJID,
-                oldestFromMe: fromMe,
-                oldestTimestampSec: ts,
+                oldestMsgID: anchor.id,
+                oldestSenderJID: anchor.senderJID,
+                oldestFromMe: anchor.fromMe,
+                oldestTimestampSec: anchor.ts,
                 count: 50)
             // PollVote events from the response stream into pollVotes via
             // ConversationView's .pollVote subscriber — no further work
@@ -1309,30 +1350,41 @@ final class ConversationViewModel {
     /// HistorySync event; messages persist via the existing ChatList path,
     /// then we re-query PersistedMessage with a bigger window.
     func requestOlderHistory() {
-        guard !loadingOlder, !olderUnavailable, let context else { return }
-        // Find oldest persisted message for this chat (not just in-memory,
-        // since the in-memory cap is 500).
-        let jid = chatJID
-        var descriptor = FetchDescriptor<PersistedMessage>(
-            predicate: #Predicate { $0.chatJID == jid },
-            sortBy: [SortDescriptor(\.timestamp, order: .forward)])
-        descriptor.fetchLimit = 1
-        guard let anchor = (try? context.fetch(descriptor))?.first else { return }
+        guard !loadingOlder, !olderUnavailable,
+              let container = context?.container else { return }
         loadingOlder = true
-        let id = anchor.id
-        let senderJID = anchor.senderJID
-        let fromMe = anchor.fromMe
-        let ts = Int64(anchor.timestamp.timeIntervalSince1970)
+        let jid = chatJID
         Task { @MainActor [weak self] in
+            // Find oldest persisted message for this chat (not just
+            // in-memory, since the in-memory cap is 500). Fetch on a
+            // detached bg ModelContext so the main thread isn't blocked
+            // while SQLite resolves the chatJID/timestamp index.
+            let anchor = await Task.detached(priority: .userInitiated) {
+                () -> (id: String, senderJID: String, fromMe: Bool, ts: Int64)? in
+                let bgCtx = ModelContext(container)
+                var descriptor = FetchDescriptor<PersistedMessage>(
+                    predicate: #Predicate { $0.chatJID == jid },
+                    sortBy: [SortDescriptor(\.timestamp, order: .forward)])
+                descriptor.fetchLimit = 1
+                guard let row = (try? bgCtx.fetch(descriptor))?.first else {
+                    return nil
+                }
+                return (row.id, row.senderJID, row.fromMe,
+                        Int64(row.timestamp.timeIntervalSince1970))
+            }.value
             guard let self else { return }
+            guard let anchor else {
+                self.loadingOlder = false
+                return
+            }
             defer { self.loadingOlder = false }
             do {
                 try self.client.requestOlderHistory(
                     chatJID: self.chatJID,
-                    oldestMsgID: id,
-                    oldestSenderJID: senderJID,
-                    oldestFromMe: fromMe,
-                    oldestTimestampSec: ts,
+                    oldestMsgID: anchor.id,
+                    oldestSenderJID: anchor.senderJID,
+                    oldestFromMe: anchor.fromMe,
+                    oldestTimestampSec: anchor.ts,
                     count: 50)
                 // After ~5 s, if no new rows landed, mark unavailable so the
                 // user isn't given an indefinite "Loading…" UI.

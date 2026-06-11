@@ -264,6 +264,33 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **F42 — Chat-switch + scroll-to-message responsiveness**
+  (v0.9.59) — four coordinated fixes targeting the 1-2s freeze on
+  chat switch and message-preview jump:
+  1. **Thumbnail preheat decode off MainActor.** Snapshot builder
+     (`buildHistorySnapshot`, nonisolated) now runs the ImageIO
+     downsample for the visible-window image / video / avatar
+     bubbles before returning; `applyHistorySnapshot` does a
+     pointer-store into `ThumbnailCache` on main — microseconds
+     vs. the prior 600-1200ms on-main decode.
+  2. **Per-cache-type revision split.** Single `ThumbnailCache.revision`
+     became `imageRevision` / `videoRevision` / `avatarRevision`. Each
+     view subscribes only to the revision relevant to its bubble
+     kind, eliminating cross-bubble re-eval storms that surfaced as
+     "all media + avatars blinking" during chat switch.
+  3. **5-minute idle gate on `flushAll`.** F34's instant flush on
+     `didResignActive` made every Cmd-Tab return repaint every
+     bubble cold; now flush is scheduled for +5min, cancelled on
+     `didBecomeActive`. Memory-reclaim survives for genuinely
+     backgrounded sessions; quick app switches stay warm.
+  4. **SwiftData fetches off MainActor + indices.** Bumped
+     deployment target to macOS 15 so `#Index<PersistedMessage>`
+     (compound `chatJID`+`timestamp` plus singles) lands
+     unconditionally. `rewindowAround`, `requestOlderHistory`,
+     `refreshPollTallies` switched to detached background
+     `ModelContext` fetches; only the final `messages =` assign
+     stays on main. Big-chat scroll-to-message and load-earlier
+     paths drop from full-table-scan to indexed lookup.
 - ✅ **F41 — Sparkle auto-update** (v0.9.56) — Sparkle 2 wired
   end-to-end on top of F40's notarized builds. New SPM dep
   `sparkle-project/Sparkle`. `yawacApp` owns a

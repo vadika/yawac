@@ -1,7 +1,7 @@
 name: yawac
 options:
   deploymentTarget:
-    macOS: "14.0"
+    macOS: "15.0"
   bundleIdPrefix: dev.vadikas.yawac
 settings:
   base:
@@ -64,10 +64,10 @@ targets:
         NSAppleEventsUsageDescription: yawac needs Apple events for notifications
         NSMicrophoneUsageDescription: yawac needs the microphone to record voice messages
         NSLocationWhenInUseUsageDescription: yawac uses your location only when you choose Send current location.
-        LSMinimumSystemVersion: "14.0"
+        LSMinimumSystemVersion: "15.0"
         CFBundleDisplayName: yawac
-        CFBundleShortVersionString: "0.9.58"
-        CFBundleVersion: "73"
+        CFBundleShortVersionString: "0.9.59"
+        CFBundleVersion: "74"
         ATSApplicationFontsPath: Fonts
         CFBundleIconName: AppIcon
         SUFeedURL: https://github.com/vadika/yawac/releases/latest/download/appcast.xml
