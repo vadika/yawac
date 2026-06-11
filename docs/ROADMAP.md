@@ -146,22 +146,6 @@ rare-use utilities) ships only when the important list is clear.
 
 ## Productivity / macOS
 
-- ☐ **Notarization + Developer ID signing** — current builds are
-  ad-hoc-signed; first launch demands the user open Settings →
-  Privacy & Security to allow. Real Developer ID Application
-  certificate + `notarytool submit --wait` in CI removes the
-  prompt entirely. Blocker is the $99 Apple Developer Program
-  membership + key generation; no code work upstream of that.
-  Once signed, the cask install ergonomics improve sharply
-  (zero-friction first-launch, Gatekeeper-clean).
-- ☐ **Sparkle auto-update** — embed Sparkle 2 framework; appcast
-  feed served from the GitHub Releases page (or a custom domain
-  with EdDSA key). Users get "Update available" prompts on launch
-  + manual "Check for updates" in the menu. Requires
-  Developer ID + notarization (item above) — Sparkle won't
-  install unsigned updates by default, and shipping with the
-  signature-check off defeats the security model. Brainstormed
-  2026-06-09; paused waiting on Apple Developer ID.
 - ☐ **Reply from native notification** — UNNotificationAction with
   text-input on incoming banners; send-back via existing
   `sendText`. Modest plumbing — ~150 LoC.
@@ -263,6 +247,33 @@ the important list is materially shorter.
 
 Kept here for context — flip back to open only if a regression
 surfaces.
+
+- ✅ **F61 — Diagnostics inspector panel** (v0.10.1) — read-only
+  `Settings → Diagnostics` view to surface internal state when a
+  user reports a bug. Built first in the stability/debt wave
+  before refactoring the conversation re-render storm (Plan B)
+  so future investigations have data instead of guesses. Four
+  sections:
+  - **Sync state**: `fullSync.{inFlight,attempted,progress,chunks,
+    fresh,dupe}`, the `historyBackfillCompleted` UserDefaults
+    flag, connection state, syncing banner.
+  - **JID lookup probe**: paste any JID; see `JIDNormalize.bare`,
+    `JIDNormalize.canonical` (LID→PN translated), and
+    `session.displayName(for:)` results live. Confirms where a
+    name lookup falls through (bare miss vs canonical miss vs
+    fallback prefix).
+  - **SQLite indices**: ✅/❌ per `yawac_idx_*` index expected by
+    `SwiftDataIndexes.ensure`. Catches the "F45 raw-SQL fallback
+    didn't fire" regression class quickly.
+  - **Stored history stats**: total persisted messages, distinct
+    chats, oldest/newest timestamps, distinct senders, distinct
+    senders with non-empty push-name, push-name coverage %. Plus
+    a refresh button — the queries cost ms but bound the rate to
+    user taps.
+  No mutation, no side-effects; all `sqlite3_open_v2 READONLY`
+  one-shots on `.onAppear`. Skipped wiring to `SwiftDataIndexes
+  .statements` because it's `private` — duplicated the nine names
+  with a sync-required comment.
 
 - ✅ **F60 — Recognizable fallback for unresolved @lid senders**
   (v0.10.0) — group participants without any name source (no

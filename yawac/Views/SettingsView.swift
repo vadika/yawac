@@ -38,7 +38,7 @@ struct SettingsView: View {
     }
 
     enum SettingsCategory: String, CaseIterable, Identifiable {
-        case general, display, translation, privacy, blocked, account
+        case general, display, translation, privacy, blocked, account, diagnostics
         var id: String { rawValue }
         var label: String {
             switch self {
@@ -48,6 +48,7 @@ struct SettingsView: View {
             case .privacy:     return "Privacy"
             case .blocked:     return "Blocked"
             case .account:     return "Account"
+            case .diagnostics: return "Diagnostics"
             }
         }
         var icon: String {
@@ -58,6 +59,7 @@ struct SettingsView: View {
             case .privacy:     return "lock"
             case .blocked:     return "nosign"
             case .account:     return "person.crop.circle"
+            case .diagnostics: return "stethoscope"
             }
         }
     }
@@ -167,6 +169,7 @@ struct SettingsView: View {
         case .privacy:     PrivacyPanel().environment(session)
         case .blocked:     BlockedPanel().environment(session)
         case .account:     AccountPanel().environment(session)
+        case .diagnostics: DiagnosticsPanel().environment(session)
         }
     }
 }
