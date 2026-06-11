@@ -23,8 +23,10 @@ struct SharedMediaCell: View {
             GeometryReader { geo in
                 // Shared cache + coalesced revision: media-grid cells
                 // populate without a per-cell @State flip (F12).
+                // Subscribe to the per-type revision matching this
+                // cell's media kind.
                 let cache = ThumbnailCache.shared
-                let _ = cache.revision
+                let _ = (item.kind == "video") ? cache.videoRevision : cache.imageRevision
                 let img: NSImage? = {
                     guard let p = item.path, !p.isEmpty,
                           FileManager.default.fileExists(atPath: p) else { return nil }

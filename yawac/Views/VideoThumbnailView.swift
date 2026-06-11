@@ -48,7 +48,7 @@ struct VideoThumbnailView: View {
         // background load on miss; preheat in applyHistorySnapshot
         // fills the cache for the visible window before first paint.
         let cache = ThumbnailCache.shared
-        let _ = cache.revision
+        let _ = cache.videoRevision
         ZStack {
             if let img = cache.videoImage(forPath: path) {
                 Image(nsImage: img)

@@ -1057,7 +1057,7 @@ struct MessageRow: View {
     @ViewBuilder
     private func imageBubble(path: String?) -> some View {
         let cache = ThumbnailCache.shared
-        let _ = cache.revision  // subscribe to cache invalidations
+        let _ = cache.imageRevision  // subscribe to image cache invalidations
         // F38: size the bubble from the sender-provided pixel dims so
         // the placeholder reserves the same rectangle the decoded
         // image will occupy. Eliminates the placeholder → image
@@ -1106,7 +1106,7 @@ struct MessageRow: View {
     @ViewBuilder
     private func stickerBubble(path: String?) -> some View {
         let cache = ThumbnailCache.shared
-        let _ = cache.revision
+        let _ = cache.imageRevision
         if let p = path, let img = cache.image(forPath: p) {
             Image(nsImage: img)
                 .resizable()
@@ -1257,9 +1257,10 @@ private struct MapSnapshotImage: View {
         // Shared in-memory cache + coalesced revision bump avoids the
         // per-instance @State flip + .task(id:) flicker on every
         // location bubble on scroll (F12). Underlying snapshot source
-        // is still `MapSnapshotCache`.
+        // is still `MapSnapshotCache`. Map landings piggyback on
+        // imageRevision (no dedicated map observer needed).
         let cache = ThumbnailCache.shared
-        let _ = cache.revision
+        let _ = cache.imageRevision
         Group {
             if let img = cache.mapImage(lat: lat, lng: lng) {
                 Image(nsImage: img).resizable().aspectRatio(contentMode: .fill)

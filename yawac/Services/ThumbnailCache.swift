@@ -22,7 +22,7 @@ import Observation
 /// downsample in a single ImageIO pass. The resulting CGImage is
 /// bitmap-backed (no lazy JPEG provider) so CoreAnimation blits
 /// straight to the IOSurface without re-decoding.
-private func decodedImage(fromFile path: String, maxPixel: Int) -> NSImage? {
+func decodedImage(fromFile path: String, maxPixel: Int) -> NSImage? {
     let url = URL(fileURLWithPath: path) as CFURL
     guard let src = CGImageSourceCreateWithURL(url, nil) else { return nil }
     let opts: [CFString: Any] = [
@@ -37,7 +37,7 @@ private func decodedImage(fromFile path: String, maxPixel: Int) -> NSImage? {
 }
 
 /// Same downsample-decode path for in-memory Data blobs (snapshot preheat).
-private func decodedImage(fromData data: Data, maxPixel: Int) -> NSImage? {
+func decodedImage(fromData data: Data, maxPixel: Int) -> NSImage? {
     guard let src = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
     let opts: [CFString: Any] = [
         kCGImageSourceCreateThumbnailFromImageAlways: true,
@@ -63,29 +63,73 @@ private let videoThumbMaxPixel = 720
 /// SwiftUI bodies must remain cheap; decoding `NSImage(contentsOfFile:)`
 /// inline re-decodes the same files on every scroll / re-render. This cache
 /// hands back cached `NSImage`s synchronously on hit, and schedules a
-/// background decode on miss. Once the decode lands, `revision` is bumped,
-/// which (because this is an `@Observable`) re-runs any view body that read
-/// `revision` and lets the bubble pick up the now-cached image.
+/// background decode on miss. Once the decode lands, the corresponding
+/// per-type revision is bumped, which (because this is an `@Observable`)
+/// re-runs any view body that read that revision and lets the bubble pick
+/// up the now-cached image.
 @MainActor
 @Observable
 final class ThumbnailCache {
     static let shared = ThumbnailCache()
 
+    /// Off-MainActor decode entry point used by `buildHistorySnapshot`
+    /// so the ImageIO downsample runs on the background task building
+    /// the snapshot instead of blocking MainActor in
+    /// `applyHistorySnapshot`. The free `decodedImage(fromData:...)`
+    /// helper isn't actor-isolated; `nonisolated` here just makes that
+    /// contract explicit for callers.
+    nonisolated static func decode(data: Data, maxPixel: Int) -> NSImage? {
+        decodedImage(fromData: data, maxPixel: maxPixel)
+    }
+
+    /// Pixel caps exposed for callers that decode off-MainActor (the
+    /// snapshot builder). Mirror the file-private constants below.
+    static let imageBubbleMaxPixelExternal = 720
+    static let videoThumbMaxPixelExternal = 720
+    static let avatarMaxPixelExternal = 200
+
     init() {
-        // F34: flush every cache when the app resigns active. The F31
-        // budgets cap at ~480 MB worst case and routinely held ~1.5 GB
-        // resident even when the user wasn't looking at yawac, which
-        // macOS Activity Monitor flags as significant energy use.
-        // On re-activation the existing on-demand decode path repaints
-        // visible bubbles transparently; off-screen rows weren't using
-        // those NSImages anyway.
+        // F34: flush every cache when the app has been inactive for 5
+        // minutes. Original F34 flushed instantly on
+        // didResignActiveNotification — i.e. the moment the user
+        // Cmd-Tabbed away — which made every return-to-yawac repaint
+        // every visible bubble from a cold decode (all media + avatar
+        // bubbles blinked). The 5-minute idle gate keeps the memory-
+        // reclaim win on genuinely-backgrounded sessions while making
+        // quick app switches free. didBecomeActive cancels the
+        // pending flush so the caches survive across rapid back-and-
+        // forth.
         NotificationCenter.default.addObserver(
             forName: NSApplication.didResignActiveNotification,
             object: nil, queue: .main
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
-                self?.flushAll()
+                self?.scheduleIdleFlush()
             }
+        }
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification,
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.pendingFlush?.cancel()
+                self?.pendingFlush = nil
+            }
+        }
+    }
+
+    /// Coalesced 5-minute idle flush. Cancelled when the app comes
+    /// back to the foreground before the sleep elapses.
+    @ObservationIgnored private var pendingFlush: Task<Void, Never>?
+
+    private func scheduleIdleFlush() {
+        pendingFlush?.cancel()
+        pendingFlush = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(5 * 60))
+            guard let self else { return }
+            if Task.isCancelled { return }
+            self.pendingFlush = nil
+            self.flushAll()
         }
     }
 
@@ -104,10 +148,13 @@ final class ThumbnailCache {
         avatarNegative.removeAll()
         mapInflight.removeAll()
         mapNegative.removeAll()
-        // Bump revision so any observer that's currently in foreground
-        // (rare during a resignActive flush, but possible) re-evaluates
-        // and kicks fresh decodes.
-        revision &+= 1
+        // Bump every revision so any observer that's currently in
+        // foreground (rare during a resignActive flush, but possible)
+        // re-evaluates and kicks fresh decodes regardless of which
+        // cache its body subscribed to.
+        imageRevision &+= 1
+        videoRevision &+= 1
+        avatarRevision &+= 1
     }
 
     private let cache: NSCache<NSString, NSImage> = {
@@ -142,16 +189,31 @@ final class ThumbnailCache {
     // ObservationRegistrar.willSet). Only `revision` should be observed.
     @ObservationIgnored private var inflight: Set<String> = []
     @ObservationIgnored private var videoInflight: Set<String> = []
-    /// Bumped whenever a burst of decoded images settles. Views that read
-    /// this participate in observation and will re-render when new images
-    /// arrive. Coalesced via `scheduleRevisionBump()` so N near-simultaneous
-    /// decodes produce a single re-render instead of N. Shared between the
-    /// image and video caches so an image OR a video landing wakes every
-    /// observer at once — same body re-eval covers both bubble kinds.
-    private(set) var revision: Int = 0
-    /// In-flight 50ms coalescing task. `@ObservationIgnored` keeps it out
-    /// of the observation graph — touching it must not invalidate views.
-    @ObservationIgnored private var pendingBump: Task<Void, Never>?
+    /// Per-cache-type revisions, bumped when a burst of decoded
+    /// images settles in that cache. Views that read one of these
+    /// participate in observation and re-render when new images of
+    /// that kind arrive. Split (was a single shared `revision` until
+    /// F39+) so an avatar landing doesn't wake every image bubble
+    /// (and vice versa) — previously every decode of any kind
+    /// re-evaluated every cache-aware body, which on a chat with
+    /// 100+ visible rows + active avatar fetches showed up as full
+    /// re-paint storms (the "all media bubbles blink" symptom).
+    /// Coalesced via `scheduleBump(_:)` so N near-simultaneous
+    /// decodes of the same kind produce a single re-render.
+    private(set) var imageRevision: Int = 0
+    private(set) var videoRevision: Int = 0
+    private(set) var avatarRevision: Int = 0
+    /// In-flight 50ms coalescing tasks per cache type.
+    /// `@ObservationIgnored` keeps these out of the observation
+    /// graph — touching them must not invalidate views (per the
+    /// `@Observable var` trap: any tracked `var` mutated during a
+    /// body eval triggers willSet → invalidate → re-body → ...
+    /// runaway loop).
+    @ObservationIgnored private var pendingImageBump: Task<Void, Never>?
+    @ObservationIgnored private var pendingVideoBump: Task<Void, Never>?
+    @ObservationIgnored private var pendingAvatarBump: Task<Void, Never>?
+
+    private enum Bumper { case image, video, avatar }
 
     /// Returns a cached `NSImage` for `path` if present.
     /// On miss, schedules a detached background decode and returns `nil`;
@@ -190,33 +252,33 @@ final class ThumbnailCache {
         return nil
     }
 
-    /// Synchronously decode and store raw file `Data` → `NSImage` entries.
-    /// Called by `ConversationViewModel.applyHistorySnapshot` to warm the
-    /// cache for the visible bottom window of messages BEFORE the
-    /// LazyVStack starts laying out. No revision bump — preheat happens
+    /// Store already-decoded `NSImage` entries keyed by absolute file
+    /// path. Called by `ConversationViewModel.applyHistorySnapshot` to
+    /// warm the cache for the visible bottom window of messages BEFORE
+    /// the LazyVStack starts laying out. Decode happens off-MainActor
+    /// inside `buildHistorySnapshot` (the prior version called the
+    /// ImageIO downsample synchronously here on main, freezing the UI
+    /// 600-1200ms on chat switch). No revision bump — preheat happens
     /// before `self.messages` is assigned, so the first body eval sees
     /// the cache populated and the implicit observation read is enough.
-    func preheat(_ pairs: [String: Data]) {
-        for (path, data) in pairs {
+    func preheat(_ pairs: [String: PreheatImage]) {
+        for (path, holder) in pairs {
             if cache.object(forKey: path as NSString) != nil { continue }
-            guard let img = decodedImage(fromData: data, maxPixel: imageBubbleMaxPixel)
-            else { continue }
+            let img = holder.image
             let cost = Int(img.size.width * img.size.height * 4)
             cache.setObject(img, forKey: path as NSString, cost: cost)
         }
     }
 
-    /// Synchronously decode and store SHA-disk-cache PNG `Data` → NSImage
-    /// entries into the video thumbnail cache, keyed by SOURCE video path
-    /// (not the SHA PNG path). Same no-revision-bump contract as
-    /// `preheat(_:)`: called from `applyHistorySnapshot` BEFORE
-    /// `self.messages` lands, so the first body eval of every
-    /// VideoThumbnailView sees the cache already populated.
-    func preheatVideo(_ pairs: [String: Data]) {
-        for (path, data) in pairs {
+    /// Store pre-decoded video thumbnail `NSImage` entries into the
+    /// video cache, keyed by SOURCE video path (not the SHA PNG
+    /// path). Same no-revision-bump contract as `preheat(_:)`: called
+    /// from `applyHistorySnapshot` BEFORE `self.messages` lands.
+    /// Decode runs off-MainActor in the snapshot builder.
+    func preheatVideo(_ pairs: [String: PreheatImage]) {
+        for (path, holder) in pairs {
             if videoCache.object(forKey: path as NSString) != nil { continue }
-            guard let img = decodedImage(fromData: data, maxPixel: videoThumbMaxPixel)
-            else { continue }
+            let img = holder.image
             let cost = Int(img.size.width * img.size.height * 4)
             videoCache.setObject(img, forKey: path as NSString, cost: cost)
         }
@@ -230,7 +292,7 @@ final class ThumbnailCache {
         // by countLimit in any case.
         let cost = Int(image.size.width * image.size.height * 4)
         cache.setObject(image, forKey: path as NSString, cost: cost)
-        scheduleRevisionBump()
+        scheduleBump(.image)
     }
 
     private func storeVideo(path: String, image: NSImage?) {
@@ -238,21 +300,41 @@ final class ThumbnailCache {
         guard let image else { return }
         let cost = Int(image.size.width * image.size.height * 4)
         videoCache.setObject(image, forKey: path as NSString, cost: cost)
-        scheduleRevisionBump()
+        scheduleBump(.video)
     }
 
-    /// Coalesces decode-completion notifications into a single 50ms-debounced
-    /// `revision &+= 1`. Without this, N visible bubbles each fire a separate
-    /// decode → N revision bumps → N re-renders spread across successive
-    /// frames = flicker as images pop in one-by-one. With this, sub-50ms
-    /// bursts settle into a single re-render and bubbles populate together.
-    private func scheduleRevisionBump() {
-        guard pendingBump == nil else { return }
-        pendingBump = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .milliseconds(50))
-            guard let self else { return }
-            self.pendingBump = nil
-            self.revision &+= 1
+    /// Coalesces decode-completion notifications into a single 50ms-
+    /// debounced bump of the matching per-type revision. Without
+    /// debounce, N visible bubbles each fire a separate decode → N
+    /// revision bumps → N re-renders spread across successive frames
+    /// = flicker as images pop in one-by-one. With debounce, sub-50ms
+    /// bursts settle into one re-render and bubbles populate together.
+    private func scheduleBump(_ which: Bumper) {
+        switch which {
+        case .image:
+            guard pendingImageBump == nil else { return }
+            pendingImageBump = Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .milliseconds(50))
+                guard let self else { return }
+                self.pendingImageBump = nil
+                self.imageRevision &+= 1
+            }
+        case .video:
+            guard pendingVideoBump == nil else { return }
+            pendingVideoBump = Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .milliseconds(50))
+                guard let self else { return }
+                self.pendingVideoBump = nil
+                self.videoRevision &+= 1
+            }
+        case .avatar:
+            guard pendingAvatarBump == nil else { return }
+            pendingAvatarBump = Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .milliseconds(50))
+                guard let self else { return }
+                self.pendingAvatarBump = nil
+                self.avatarRevision &+= 1
+            }
         }
     }
 
@@ -334,7 +416,7 @@ final class ThumbnailCache {
         }
         let cost = Int(image.size.width * image.size.height * 4)
         avatarCache.setObject(image, forKey: key as NSString, cost: cost)
-        scheduleRevisionBump()
+        scheduleBump(.avatar)
     }
 
     /// Drop the cached avatar for `key` so the next body eval misses
@@ -344,18 +426,18 @@ final class ThumbnailCache {
         avatarCache.removeObject(forKey: key as NSString)
         avatarInflight.remove(key)
         avatarNegative.remove(key)
-        scheduleRevisionBump()
+        scheduleBump(.avatar)
     }
 
-    /// Synchronously decode + store raw avatar file `Data` → `NSImage`
-    /// entries keyed by canonical JID cache key. Called by
-    /// `applyHistorySnapshot` before `self.messages` lands so every
-    /// `AvatarView`'s first body eval hits the in-memory cache.
-    func preheatAvatar(_ pairs: [String: Data]) {
-        for (key, data) in pairs {
+    /// Store pre-decoded avatar `NSImage` entries keyed by canonical
+    /// JID cache key. Called by `applyHistorySnapshot` before
+    /// `self.messages` lands so every `AvatarView`'s first body eval
+    /// hits the in-memory cache. Decode runs off-MainActor in the
+    /// snapshot builder.
+    func preheatAvatar(_ pairs: [String: PreheatImage]) {
+        for (key, holder) in pairs {
             if avatarCache.object(forKey: key as NSString) != nil { continue }
-            guard let img = decodedImage(fromData: data, maxPixel: avatarMaxPixel)
-            else { continue }
+            let img = holder.image
             let cost = Int(img.size.width * img.size.height * 4)
             avatarCache.setObject(img, forKey: key as NSString, cost: cost)
         }
@@ -411,6 +493,9 @@ final class ThumbnailCache {
         }
         let cost = Int(image.size.width * image.size.height * 4)
         mapCache.setObject(image, forKey: key as NSString, cost: cost)
-        scheduleRevisionBump()
+        // Map snapshots ride the image revision — no observer reads
+        // a dedicated map revision and the map cache landings are
+        // rare enough that piggybacking on imageRevision is fine.
+        scheduleBump(.image)
     }
 }

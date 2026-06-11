@@ -4,6 +4,12 @@ import SwiftData
 @Model
 final class PersistedMessage {
     @Attribute(.unique) var id: String
+    // chatJID + timestamp b-tree indices live at the bottom of the
+    // class via the `#Index<T>(...)` macro. Every chat-scoped fetch
+    // predicates on chatJID, often paired with timestamp ranges
+    // (rewindowAround / requestOlderHistory / refreshPollTallies);
+    // without these indices SQLite full-table-scans the entire
+    // message store on every chat switch.
     var chatJID: String
     var senderJID: String
     var fromMe: Bool
@@ -162,6 +168,8 @@ final class PersistedMessage {
         self.mediaWidth = mediaWidth
         self.mediaHeight = mediaHeight
     }
+
+    #Index<PersistedMessage>([\.chatJID], [\.timestamp], [\.chatJID, \.timestamp])
 }
 
 @Model
@@ -170,6 +178,7 @@ final class PersistedReaction {
     /// upsert via SwiftData's @Attribute(.unique) without combining two
     /// columns.
     @Attribute(.unique) var compositeKey: String
+    // See PersistedMessage note on indexing — same constraint.
     var chatJID: String
     var targetMessageID: String
     var senderJID: String
@@ -185,6 +194,8 @@ final class PersistedReaction {
         self.emoji = emoji
         self.timestamp = timestamp
     }
+
+    #Index<PersistedReaction>([\.chatJID], [\.targetMessageID], [\.timestamp])
 }
 
 /// Last known vote from a voter on a specific poll. Composite key
@@ -194,6 +205,7 @@ final class PersistedReaction {
 @Model
 final class PersistedPollVote {
     @Attribute(.unique) var compositeKey: String
+    // See PersistedMessage note on indexing — same constraint.
     var chatJID: String
     var pollMessageID: String
     var voterJID: String
@@ -211,6 +223,8 @@ final class PersistedPollVote {
         self.optionHashesJSON = optionHashesJSON
         self.timestamp = timestamp
     }
+
+    #Index<PersistedPollVote>([\.chatJID], [\.pollMessageID], [\.timestamp])
 }
 
 @Model
