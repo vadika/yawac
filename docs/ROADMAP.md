@@ -264,6 +264,50 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **F44 — SwiftData VersionedSchema + index migration** (v0.9.61) —
+  the safe re-landing of the `#Index<T>` work that v0.9.59 shipped
+  destructively and v0.9.60 reverted. Same three entities, same
+  index shapes; this time gated behind a real migration so the
+  ~43.6k-row store every existing user has on disk survives the
+  upgrade.
+  1. **Two VersionedSchemas, one model graph.** `PersistedMessageSchemaV1`
+     (version 1.0.0) snapshots the shape that shipped through v0.9.60
+     — no `#Index` declarations on PersistedMessage / PersistedReaction
+     / PersistedPollVote. `PersistedMessageSchemaV2` (version 2.0.0)
+     describes the indexed shape. Both reference the same `@Model`
+     classes at top level; SwiftData reads `versionIdentifier` plus
+     the entity graph it computes per-version and diffs them.
+  2. **Lightweight migration stage.** `PersistedMessageMigrationPlan`
+     declares one stage,
+     `MigrationStage.lightweight(fromVersion: V1, toVersion: V2)`.
+     Tested against the affected 43.6k-row store: rows survive.
+  3. **`ModelContainer` wired off `Schema(versionedSchema:)`.**
+     `yawacApp.init()` builds the container with the V2 schema and
+     the migration plan instead of the unversioned variadic
+     `ModelContainer(for: …types…)`.
+  4. **Raw-SQL index fallback (`SwiftDataIndexes`).** Empirically,
+     SwiftData's `#Index<T>` macro only materializes indices at
+     fresh-store generation; a V1 → V2 lightweight stage whose only
+     delta is index additions completes without `CREATE INDEX`
+     statements (the attribute graph is unchanged, so SwiftData has
+     no diff to apply). After `ModelContainer` is built, a detached
+     task opens the SwiftData store path as raw SQLite and issues
+     `CREATE INDEX IF NOT EXISTS` for the nine indices (three on
+     each entity: single columns + the compound `(chatJID,
+     timestamp)`). Idempotent — re-runs on every launch are ms-cheap
+     no-ops. Verified `EXPLAIN QUERY PLAN` now uses
+     `yawac_idx_msg_chat_ts` for the `rewindowAround` predicate
+     instead of `SCAN ZPERSISTEDMESSAGE`.
+  4. **Deployment target bumped 14 → 15.** `#Index` requires macOS
+     15+ (the macro itself is gated `@available(macOS 15, …)` in
+     the SwiftData swiftinterface; `VersionedSchema` /
+     `SchemaMigrationPlan` / `MigrationStage` are all available on
+     macOS 14, so only the `#Index` callsites force the bump).
+     `LSMinimumSystemVersion` updated to match.
+  Verification owed to user before claiming success: install v0.9.61
+  over a v0.9.60 build on the developer's actual ~43.6k-row store
+  and confirm row count survives.
+
 - ✅ **F43 — Revert #Index data-loss + restore macOS 14 support**
   (v0.9.60) — emergency hotfix for v0.9.59. The `#Index<T>` macros
   added to PersistedMessage / PersistedReaction / PersistedPollVote
