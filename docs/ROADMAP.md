@@ -264,6 +264,23 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **F48 — Added-contact name reverting to JID** (v0.9.64) — after
+  user added a contact via the "Add to contacts…" sheet, the
+  sidebar row updated to the chosen name immediately, but the
+  conversation header + inspector pane kept showing the raw phone
+  JID. Two bugs in `SessionViewModel.ingestContacts`:
+  1. **Unconditional empty-name overwrite.** `contactNames[c.jid] =
+     c.name` ran for every contact returned by `client.listContacts()`
+     during the F19 history-sync reconcile. For freshly-added
+     contacts whatsmeow hasn't echoed the locally-set name back from
+     the server yet, so the bridge contact row's `name` field is
+     empty — overwriting the `applyIncomingContact`-deposited
+     "Boris Tobotras" with `""`. Now guards on `!c.name.isEmpty`.
+  2. **Missing bare-key normalization.** Write path used
+     `contactNames[c.jid]`; read path (`displayName(for:)`) uses
+     `contactNames[bare]`. For device-suffixed sender JIDs the keys
+     never collided. Both sides now go through `JIDNormalize.bare`.
+
 - ✅ **F46-F47 — Sidebar freeze + fresh-pair UX + sync-burst beachball**
   (v0.9.63) — bundle of perf/UX fixes targeting Boris's
   splitter-during-sync freeze and three fresh-install bugs

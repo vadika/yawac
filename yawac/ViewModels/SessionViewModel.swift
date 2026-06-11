@@ -245,12 +245,27 @@ final class SessionViewModel {
 
     func ingestContacts(_ cs: [BridgeContact]) {
         for c in cs {
-            contactNames[c.jid] = c.name
+            // F48: skip empty names + bare-normalize the key.
+            // 1. Empty `c.name` arrives during the first few seconds
+            //    after `addContact` — whatsmeow hasn't echoed the
+            //    locally-set name back yet. Writing "" here clobbered
+            //    the just-set "Boris Tobotras" that `applyIncomingContact`
+            //    deposited at `contactNames[bare]`, leaving the
+            //    conversation header + inspector pane showing the raw
+            //    JID until the next sync cycle.
+            // 2. `JIDNormalize.bare` must match the read path in
+            //    `displayName(for:)` (line 298) — otherwise a device-
+            //    suffixed sender JID and a bare contact key never
+            //    collide and the lookup falls through to the prefix.
+            let bare = JIDNormalize.bare(c.jid)
+            if !c.name.isEmpty {
+                contactNames[bare] = c.name
+            }
             // A non-empty FullName means a saved address-book contact (vs a
             // push-name-only acquaintance). Drives the "Add to contacts…" vs
             // "Edit name…" menu label.
             if let full = c.fullName, !full.isEmpty {
-                savedContactJIDs.insert(JIDNormalize.bare(c.jid))
+                savedContactJIDs.insert(bare)
             }
         }
     }
