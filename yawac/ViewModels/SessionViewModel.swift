@@ -314,10 +314,24 @@ final class SessionViewModel {
         if let n = contactNames[bare] { return n }
         let canonical = JIDNormalize.canonical(jid, client: client)
         if canonical != bare, let n = contactNames[canonical] { return n }
-        if let at = bare.firstIndex(of: "@") {
-            return String(bare[..<at])
+        // F60: protocol-limit fallback. For @lid senders with a known
+        // LID→PN mapping but no push-name anywhere (silent group
+        // member, no prior interaction with this account — whatsmeow's
+        // Contacts row exists but with empty name fields, and the
+        // server has no API to fetch push-names for arbitrary JIDs),
+        // prefer the PN prefix over the random 15-digit @lid number.
+        // "+3725060015" reads as a recognizable phone number; the
+        // @lid form looks like garbage.
+        let fallbackJID = (canonical != bare) ? canonical : bare
+        if let at = fallbackJID.firstIndex(of: "@") {
+            let prefix = String(fallbackJID[..<at])
+            if fallbackJID.hasSuffix("@s.whatsapp.net"),
+               prefix.allSatisfy(\.isNumber) {
+                return "+" + prefix
+            }
+            return prefix
         }
-        return bare
+        return fallbackJID
     }
 
     /// True when `jid` resolves to the paired account's own JID (i.e. the

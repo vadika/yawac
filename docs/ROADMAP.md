@@ -264,6 +264,25 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **F60 — Recognizable fallback for unresolved @lid senders**
+  (v0.10.0) — group participants without any name source (no
+  push-name in PersistedMessage, no entry in
+  `whatsmeow_contacts`, not delivered by any PUSH_NAME chunk) used
+  to render as raw 15-digit `@lid` numbers in the inspector
+  participants list — confused users into thinking yawac dropped
+  data. The 4-phase systematic-debug investigation confirmed those
+  rows ARE in `whatsmeow_contacts` but with all name fields empty,
+  and there's no companion-device API that fetches push-names for
+  arbitrary JIDs from the server (phone WhatsApp learns names from
+  message activity older than what ships to companion).
+  `SessionViewModel.displayName(for:)` now uses the LID→PN
+  canonical form for the fallback prefix when available, so an
+  unresolved `202512137232447@lid` renders as `+3725060015`
+  instead of the random LID number. Names still fill in
+  retroactively as: (a) the participant sends a new message
+  (push-name carried on the live event), (b) a future PUSH_NAME
+  chunk includes them, (c) the user saves the contact manually.
+
 - ✅ **F57-F59 — Sync beachball + group-sender JID resolution**
   (v0.9.67) — followups to v0.9.66's deep-history fix.
   - **F57 — Dynamic ingest debounce during full sync.**
