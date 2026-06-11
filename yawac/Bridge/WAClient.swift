@@ -169,9 +169,13 @@ class WAClient: PhoneValidating, LIDResolving {
         return (try? String(data: JSONEncoder().encode(mentionedJIDs), encoding: .utf8)) ?? ""
     }
 
-    func sendText(_ chatJID: String, _ body: String,
-                  mentionedJIDs: [String] = [],
-                  ephemeralSeconds: Int32 = 0) throws -> BridgeSendResult {
+    // Nonisolated to match sendTextReply — the CGo round-trip blocks
+    // for ~50-200ms and used to peg MainActor, leaving the composer
+    // text "stuck" in the input until the call returned. Callable from
+    // a detached task so the UI runloop keeps painting.
+    nonisolated func sendText(_ chatJID: String, _ body: String,
+                              mentionedJIDs: [String] = [],
+                              ephemeralSeconds: Int32 = 0) throws -> BridgeSendResult {
         var err: NSError?
         let json = go.sendText(chatJID, body: body,
                                mentionedJIDsJSON: encodeMentionsJSON(mentionedJIDs),

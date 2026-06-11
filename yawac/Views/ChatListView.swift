@@ -181,28 +181,62 @@ struct ChatListView: View {
             }
         }
 
-        if (s == .all || s == .communities) && !communities.isEmpty {
-            out.append(.section(id: "communities", label: "Communities",
-                                count: communities.count))
-            for parent in communities {
-                out.append(.chat(parent, indent: 0))
-                for sub in subsByParent[parent.jid] ?? [] {
-                    out.append(.chat(sub, indent: 16))
+        if s == .all {
+            // F50: All scope renders one timeline-sorted list (matches the
+            // native WhatsApp client) instead of segregating by type. The
+            // previous bucketed layout pushed fresh direct messages below
+            // every group, so a new DM never bubbled to the top of All —
+            // only Direct showed it on top. Communities still keep their
+            // parent+sub-group indented grouping, but each community
+            // parent shows up at its own recency position rather than
+            // collected into a Communities section.
+            var interleaved: [Chat] = []
+            interleaved.reserveCapacity(communities.count
+                                         + standaloneGroups.count
+                                         + directChats.count)
+            interleaved.append(contentsOf: communities)
+            interleaved.append(contentsOf: standaloneGroups)
+            interleaved.append(contentsOf: directChats)
+            // The source `chats` array is already sorted by recency
+            // (sortChats() runs after every ingest flush); preserve that
+            // ordering when merging the three buckets.
+            interleaved.sort { $0.lastTimestamp > $1.lastTimestamp }
+            if !interleaved.isEmpty {
+                out.append(.section(id: "chats", label: "Chats",
+                                    count: interleaved.count))
+                for c in interleaved {
+                    out.append(.chat(c, indent: 0))
+                    if c.isCommunityParent {
+                        for sub in subsByParent[c.jid] ?? [] {
+                            out.append(.chat(sub, indent: 16))
+                        }
+                    }
                 }
             }
-        }
-        if (s == .all || s == .groups) && !standaloneGroups.isEmpty {
-            out.append(.section(id: "groups", label: "Groups",
-                                count: standaloneGroups.count))
-            for g in standaloneGroups {
-                out.append(.chat(g, indent: 0))
+        } else {
+            if s == .communities && !communities.isEmpty {
+                out.append(.section(id: "communities", label: "Communities",
+                                    count: communities.count))
+                for parent in communities {
+                    out.append(.chat(parent, indent: 0))
+                    for sub in subsByParent[parent.jid] ?? [] {
+                        out.append(.chat(sub, indent: 16))
+                    }
+                }
             }
-        }
-        if (s == .all || s == .chats) && !directChats.isEmpty {
-            out.append(.section(id: "direct", label: "Direct",
-                                count: directChats.count))
-            for c in directChats {
-                out.append(.chat(c, indent: 0))
+            if s == .groups && !standaloneGroups.isEmpty {
+                out.append(.section(id: "groups", label: "Groups",
+                                    count: standaloneGroups.count))
+                for g in standaloneGroups {
+                    out.append(.chat(g, indent: 0))
+                }
+            }
+            if s == .chats && !directChats.isEmpty {
+                out.append(.section(id: "direct", label: "Direct",
+                                    count: directChats.count))
+                for c in directChats {
+                    out.append(.chat(c, indent: 0))
+                }
             }
         }
 

@@ -582,6 +582,17 @@ final class ChatListViewModel {
                                     message: BridgeMessage,
                                     canonJID: String,
                                     alreadySeen: Bool) {
+        // F53: never let a system / protocol envelope advance the chat
+        // preview or timestamp. The bridge emits these for encryption-key
+        // changes, disappearing-timer changes, group meta-events etc.
+        // with a non-empty `text` payload ("Encryption key with
+        // X@lid changed."), so the previous order — text check first,
+        // kind switch second — let those strings replace the real last
+        // message in the sidebar. The chat row still persists to history
+        // via the writer pipeline; only the preview is skipped here.
+        if message.kind == "system" || message.kind == "protocol" {
+            return
+        }
         let chatJID = canonJID
         let rawPreview: String
         if let text = message.text, !text.isEmpty {
@@ -595,7 +606,6 @@ final class ChatListViewModel {
             case "sticker":  rawPreview = "Sticker"
             case "location": rawPreview = "📍 Location"
             case "poll":     rawPreview = "📊 \(message.poll?.question ?? "Poll")"
-            case "protocol", "system": rawPreview = ""  // hide
             default:         rawPreview = "[\(message.kind)]"
             }
         }

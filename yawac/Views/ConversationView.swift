@@ -478,7 +478,15 @@ struct ConversationView: View {
                                 }
                             }
                             .padding(.horizontal, 26)
-                            .padding(.vertical, 8)
+                            .padding(.top, 8)
+                            // F49: when the typing indicator is visible below
+                            // the ScrollView, the ScrollView's frame shrinks
+                            // by the indicator's height. Without extra
+                            // bottom padding on the content, the last message
+                            // bubble sat under the new frame edge and looked
+                            // clipped. Reserve the indicator's height inline
+                            // so the bottom row stays visible.
+                            .padding(.bottom, vm.peerTyping ? 32 : 8)
                         }
                         .defaultScrollAnchor(.bottom)
                         .background(Theme.bg)
@@ -536,6 +544,16 @@ struct ConversationView: View {
                                 proxy.scrollTo(last.id, anchor: .bottom)
                                 lastSeenCount = newCount
                             }
+                        }
+                        .onChange(of: vm.timelineGeneration) { _, _ in
+                            // F54: keep the chat pinned to the bottom when
+                            // the content height grows from a non-count
+                            // change (reactions, edits, status footer, etc).
+                            // Only fires when the user was already at the
+                            // bottom — won't yank them back if they scrolled
+                            // up to read older history.
+                            guard atBottom, let last = vm.messages.last else { return }
+                            proxy.scrollTo(last.id, anchor: .bottom)
                         }
                         .onChange(of: vm.pendingScrollToID) { _, id in
                             guard let id else { return }

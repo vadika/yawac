@@ -264,6 +264,60 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **F48-F54 — Live-test bug bundle** (v0.9.64) — fresh-pair
+  testing surfaced seven independent bugs; bundled into one release
+  to keep cadence sane.
+  - **F49 — Typing indicator clipping the bottom message.** When
+    the "typing…" indicator appeared below the ScrollView, the
+    ScrollView's frame shrank and the last bubble sat under the
+    new edge. Reserve the indicator's height inline via
+    `.padding(.bottom, vm.peerTyping ? 32 : 8)` on the LazyVStack
+    so the last row stays visible.
+  - **F50 — "All" scope segregating directs below groups.** Fresh
+    direct messages never bubbled to the top of the All tab
+    because the scope rendered Pinned → Communities → Groups →
+    Direct as fixed sections; a brand-new DM landed at the top of
+    the Direct *section*, far below all the groups. All now
+    renders a single timeline-sorted "Chats" section (matches the
+    native client). Community parents keep their sub-group
+    indented grouping inline. Direct / Groups / Communities
+    scopes still segregate by type.
+  - **F51 — Optimistic send.** Native WhatsApp paints the
+    outgoing bubble + clears the composer the instant you press
+    Enter; yawac stalled until the synchronous CGo bridge call
+    returned. Composer is now cleared first; a placeholder
+    UIMessage (id `local:<UUID>`) is appended + `receiptStatus =
+    .sent` so the bubble paints instantly; the bridge call runs
+    inside `Task.detached`. When it returns, the temp row is
+    replaced with one carrying the real bridge-assigned messageID
+    so future receipts route correctly. Errors roll back the
+    optimistic row + restore composer state. `WAClient.sendText`
+    made `nonisolated` to match `sendTextReply`.
+  - **F52 — Receipt-batch debounce.** Every inbound receipt event
+    wrote `receiptStatus[id] = status` per messageID, and the
+    SwiftData / Observation graph invalidates every observer of
+    the dict on every subscript write. During sync bursts that
+    pegged main with body re-evals. Now pending receipts queue
+    into a 50ms flush window that collapses to one merged write
+    per id (sent→delivered→read upgrades resolved before commit).
+  - **F53 — System / protocol envelopes overwriting chat
+    preview.** Bridge emits encryption-key-changed events with
+    non-empty `text` ("Encryption key with X@lid changed.") and
+    `kind == "system"`. Preview path checked text first, so the
+    sidebar last-message line filled with churny system text
+    instead of the real last message. `applyChatRowUpdate` now
+    early-returns for `kind == "system" || "protocol"` — preview,
+    timestamp, and unread bookkeeping all skip. History still
+    persists these rows via the writer pipeline.
+  - **F54 — Auto-scroll on reaction.** Adding an emoji reaction
+    extended a message bubble's content (reaction strip below the
+    bubble) but didn't bump `messages.count`, so the existing
+    `.onChange(of: vm.messages.count)` scroll-to-bottom hook
+    never fired. `applyReaction` now calls `invalidateTimeline`,
+    and ConversationView watches `vm.timelineGeneration` —
+    re-anchors to bottom only if the user was already at the
+    bottom (won't yank them back if scrolled up reading history).
+
 - ✅ **F48 — Added-contact name reverting to JID** (v0.9.64) — after
   user added a contact via the "Add to contacts…" sheet, the
   sidebar row updated to the chosen name immediately, but the

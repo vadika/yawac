@@ -1803,24 +1803,63 @@ final class ConversationViewModel {
         let replyTo = replyTarget
         replyTarget = nil
 
+        // F51: optimistic send. Paint the outgoing bubble immediately with
+        // a temporary local ID; dispatch the CGo bridge call off MainActor;
+        // when it returns, REPLACE the temp row with one keyed by the real
+        // bridge-assigned messageID so future receipts route correctly.
+        // The previous path ran the synchronous bridge call inline on
+        // MainActor, which blocked the runloop ~50-200ms — the composer
+        // text stayed visible (still selected) until the bridge returned,
+        // then the bubble suddenly appeared.
+        let tempID = "local:" + UUID().uuidString
+        var optimistic = UIMessage(
+            id: tempID,
+            chatJID: chatJID,
+            senderJID: "me",
+            fromMe: true,
+            timestamp: .now,
+            body: .text(body))
+        if let q = replyTo {
+            optimistic.quotedMessageID = q.id
+            optimistic.quotedSenderJID = q.senderJID
+            optimistic.quotedFromMe = q.fromMe
+            optimistic.quotedKind = Self.quotedKind(of: q)
+            optimistic.quotedTextSnippet = Self.quotedSnippet(of: q)
+        }
+        messages.append(optimistic)
+        messageIDs.insert(tempID)
+        invalidateTimeline()
+        receiptStatus[tempID] = .sent
+
+        let client = self.client
+        let cjid = chatJID
+        let eph = ephemeralExpirationSeconds
+        // Precompute MainActor-isolated quote-field helpers before the
+        // detached task so the closure stays nonisolated.
+        let quotedKindStr = replyTo.map { Self.quotedKind(of: $0) }
+        let quotedSnippetStr = replyTo.map { Self.quotedSnippet(of: $0) }
+
         do {
-            let res: BridgeSendResult
-            if let q = replyTo {
-                res = try client.sendTextReply(
-                    chatJID, body,
-                    quotedID: q.id,
-                    quotedSenderJID: q.senderJID,
-                    quotedFromMe: q.fromMe,
-                    quotedKind: Self.quotedKind(of: q),
-                    quotedSnippet: Self.quotedSnippet(of: q),
+            let res: BridgeSendResult = try await Task.detached(
+                priority: .userInitiated
+            ) { () -> BridgeSendResult in
+                if let q = replyTo {
+                    return try client.sendTextReply(
+                        cjid, body,
+                        quotedID: q.id,
+                        quotedSenderJID: q.senderJID,
+                        quotedFromMe: q.fromMe,
+                        quotedKind: quotedKindStr ?? "",
+                        quotedSnippet: quotedSnippetStr ?? "",
+                        mentionedJIDs: mentionedJIDs,
+                        ephemeralSeconds: eph)
+                }
+                return try client.sendText(
+                    cjid, body,
                     mentionedJIDs: mentionedJIDs,
-                    ephemeralSeconds: ephemeralExpirationSeconds)
-            } else {
-                res = try client.sendText(chatJID, body,
-                                          mentionedJIDs: mentionedJIDs,
-                                          ephemeralSeconds: ephemeralExpirationSeconds)
-            }
-            var m = UIMessage(
+                    ephemeralSeconds: eph)
+            }.value
+            var real = UIMessage(
                 id: res.messageID,
                 chatJID: chatJID,
                 senderJID: "me",
@@ -1828,18 +1867,29 @@ final class ConversationViewModel {
                 timestamp: Date(timeIntervalSince1970: TimeInterval(res.timestamp)),
                 body: .text(body))
             if let q = replyTo {
-                m.quotedMessageID = q.id
-                m.quotedSenderJID = q.senderJID
-                m.quotedFromMe = q.fromMe
-                m.quotedKind = Self.quotedKind(of: q)
-                m.quotedTextSnippet = Self.quotedSnippet(of: q)
+                real.quotedMessageID = q.id
+                real.quotedSenderJID = q.senderJID
+                real.quotedFromMe = q.fromMe
+                real.quotedKind = Self.quotedKind(of: q)
+                real.quotedTextSnippet = Self.quotedSnippet(of: q)
             }
-            messages.append(m)
-            messageIDs.insert(m.id)
+            if let idx = messages.firstIndex(where: { $0.id == tempID }) {
+                messages[idx] = real
+            } else {
+                messages.append(real)
+            }
+            messageIDs.remove(tempID)
+            messageIDs.insert(real.id)
+            receiptStatus[tempID] = nil
+            receiptStatus[real.id] = .sent
             invalidateTimeline()
-            receiptStatus[m.id] = .sent
-            persistOutgoing(m, kind: "text", text: body)
+            persistOutgoing(real, kind: "text", text: body)
         } catch {
+            // Roll back optimistic append; restore composer state.
+            messages.removeAll { $0.id == tempID }
+            messageIDs.remove(tempID)
+            receiptStatus[tempID] = nil
+            invalidateTimeline()
             replyTarget = replyTo
             draft = raw
             activeMentions = mentionsSnapshot
@@ -3022,7 +3072,25 @@ final class ConversationViewModel {
         } else {
             reactionsBySender[r.targetMessageID] = byMsg
         }
+        // F54: reactions extend a message bubble's content (reaction strip
+        // below the bubble) but don't change `messages.count`, so the
+        // ConversationView's `.onChange(of: vm.messages.count)` auto-scroll
+        // hook never fires. Bumping the timeline generation lets the view
+        // observe a single "content might have moved" signal and reapply
+        // the scroll-to-bottom-if-atBottom logic.
+        invalidateTimeline()
     }
+
+    // F52: pending receipt queue + 50ms debounce. Previously every
+    // .receipt event from the bridge ran `receiptStatus[id] = status`
+    // immediately, and a single multi-ID receipt did N subscript
+    // writes — each one invalidates every observer of receiptStatus
+    // (SwiftUI Observation cannot track per-key Dict reads). During
+    // sync bursts that translated into 10s-100s of body re-evals per
+    // second on every visible MessageRow. Batch into a single flush
+    // window so a burst lands as one merged write.
+    @ObservationIgnored private var pendingReceipts: [(id: String, status: UIMessage.Status)] = []
+    @ObservationIgnored private var pendingReceiptFlush: Task<Void, Never>?
 
     func applyReceipt(_ r: BridgeReceipt) {
         let status: UIMessage.Status
@@ -3033,7 +3101,33 @@ final class ConversationViewModel {
         default:          status = .sent
         }
         for id in r.messageIDs {
-            // Only downgrade-prevent: read > delivered > sent
+            pendingReceipts.append((id, status))
+        }
+        guard pendingReceiptFlush == nil else { return }
+        pendingReceiptFlush = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(50))
+            guard let self else { return }
+            self.flushReceipts()
+        }
+    }
+
+    @MainActor
+    private func flushReceipts() {
+        let batch = pendingReceipts
+        pendingReceipts.removeAll(keepingCapacity: true)
+        pendingReceiptFlush = nil
+        if batch.isEmpty { return }
+        // Resolve to final-status-per-id before writing so a burst that
+        // bumps sent→delivered→read collapses to one subscript write.
+        var resolved: [String: UIMessage.Status] = [:]
+        for (id, status) in batch {
+            if let existing = resolved[id] {
+                if rank(status) > rank(existing) { resolved[id] = status }
+            } else {
+                resolved[id] = status
+            }
+        }
+        for (id, status) in resolved {
             if let existing = receiptStatus[id] {
                 if rank(status) > rank(existing) {
                     receiptStatus[id] = status
