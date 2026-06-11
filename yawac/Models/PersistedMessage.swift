@@ -4,19 +4,20 @@ import SwiftData
 @Model
 final class PersistedMessage {
     @Attribute(.unique) var id: String
-    // F44 (v0.9.61): re-add the `#Index<T>` declarations dropped in
-    // v0.9.60. v0.9.59's bare addition silently destroyed every row
-    // on the three indexed entities because SwiftData saw a new
-    // schema hash with no migration plan to bridge V1 → V2. The
-    // safe version of this lives behind a VersionedSchema +
-    // SchemaMigrationPlan (`PersistedMessageSchemaV1` /
-    // `PersistedMessageSchemaV2` /
-    // `PersistedMessageMigrationPlan.migrateV1toV2`); the lightweight
-    // stage tells SwiftData "same entities, just add the indices",
-    // which preserves rows. Indices target the chat-scoped fetch
-    // predicates (chatJID + timestamp) that drive rewindowAround /
-    // requestOlderHistory / refreshPollTallies. Requires macOS 15 —
-    // deployment target bumped back from 14 to 15 in this fix.
+    // F45 (v0.9.62): the SQLite indices that back chat-scoped fetch
+    // predicates (chatJID + timestamp on PersistedMessage /
+    // PersistedReaction / PersistedPollVote) are NOT declared via the
+    // `#Index<T>` macro and live entirely outside SwiftData's schema
+    // graph. v0.9.59 added `#Index` bare and SwiftData silently
+    // destroyed every indexed-entity row on existing stores; v0.9.61
+    // wrapped that in a VersionedSchema V1 → V2 lightweight migration,
+    // which crashed at launch with `NSInvalidArgumentException:
+    // Duplicate version checksums detected` because index declarations
+    // never enter the entity attribute graph so V1 and V2 produce the
+    // same checksum, which CoreData rejects. The working path lives in
+    // `SwiftDataIndexes.ensure(at:)` — raw `CREATE INDEX IF NOT EXISTS`
+    // statements run against the store on launch. Idempotent, works on
+    // fresh and existing installs alike, no schema-version dance.
     var chatJID: String
     var senderJID: String
     var fromMe: Bool
@@ -175,12 +176,6 @@ final class PersistedMessage {
         self.mediaWidth = mediaWidth
         self.mediaHeight = mediaHeight
     }
-
-    // F44 — chat-scoped fetches (rewindowAround, requestOlderHistory)
-    // all filter by chatJID and sort by timestamp; the compound
-    // (chatJID, timestamp) index turns these from a 43k-row table scan
-    // into a B-tree range probe.
-    #Index<PersistedMessage>([\.chatJID], [\.timestamp], [\.chatJID, \.timestamp])
 }
 
 @Model
@@ -205,10 +200,6 @@ final class PersistedReaction {
         self.timestamp = timestamp
     }
 
-    // F44 — reactions are looked up by (chatJID), by targetMessageID
-    // (when assembling the reactions strip for one message), and by
-    // timestamp when paging through history.
-    #Index<PersistedReaction>([\.chatJID], [\.targetMessageID], [\.timestamp])
 }
 
 /// Last known vote from a voter on a specific poll. Composite key
@@ -236,10 +227,6 @@ final class PersistedPollVote {
         self.timestamp = timestamp
     }
 
-    // F44 — poll-vote rebuild (refreshPollTallies) reads every vote
-    // for a (chatJID, pollMessageID) pair; index on both for the
-    // common path plus timestamp for paging.
-    #Index<PersistedPollVote>([\.chatJID], [\.pollMessageID], [\.timestamp])
 }
 
 @Model

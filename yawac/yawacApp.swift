@@ -37,30 +37,24 @@ struct YawacApp: App {
 
     init() {
         do {
-            // F44: build the container off the V2 versioned schema and
-            // wire in the V1 → V2 migration plan. The schema's model
-            // graph still references the same four `@Model` classes,
-            // but SwiftData now knows the bumped schema version (2.0.0)
-            // came from a lightweight migration of the (1.0.0) store
-            // every existing user has on disk — rows survive instead of
-            // being silently dropped the way v0.9.59 dropped them.
-            let schema = Schema(versionedSchema: PersistedMessageSchemaV2.self)
-            let config = ModelConfiguration(schema: schema)
             self.container = try ModelContainer(
-                for: schema,
-                migrationPlan: PersistedMessageMigrationPlan.self,
-                configurations: [config])
+                for: PersistedMessage.self,
+                PersistedChat.self,
+                PersistedReaction.self,
+                PersistedPollVote.self)
         } catch {
             fatalError("ModelContainer: \(error)")
         }
-        // F44 follow-up: SwiftData's `#Index<T>` macro creates indices
-        // only on first store generation. The VersionedSchema V1 → V2
-        // lightweight stage doesn't materialize index additions because
-        // the entity attribute graph is unchanged. Drop to raw SQLite
-        // and `CREATE INDEX IF NOT EXISTS` for the chat-scoped
-        // predicates that take the full-table-scan hit otherwise.
-        // Idempotent + best-effort; runs on a background task so it
-        // doesn't push first-paint.
+        // F45: chat-scoped fetches need a B-tree index on
+        // (chatJID, timestamp) etc. SwiftData's `#Index<T>` macro is
+        // not used — adding it changes nothing in the entity attribute
+        // graph (v0.9.61 shipped it inside a VersionedSchema migration
+        // and CoreData rejected the launch with "Duplicate version
+        // checksums detected"). Indices are managed via raw SQL
+        // instead: open the store path as SQLite and run
+        // `CREATE INDEX IF NOT EXISTS` for each predicate column. Runs
+        // on a background task so it doesn't push first-paint;
+        // idempotent so re-launches are ms-cheap no-ops.
         Task.detached(priority: .utility) {
             if let url = SwiftDataIndexes.defaultStoreURL {
                 SwiftDataIndexes.ensure(at: url)
