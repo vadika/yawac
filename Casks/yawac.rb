@@ -1,6 +1,6 @@
 cask "yawac" do
-  version "0.10.0"
-  sha256 "41bced67636675323a68b8061dc87f28dac00c4e52dd5d1583f352bf205fcfc5"
+  version "0.10.1"
+  sha256 "814c7bf3a1fc4637aeb1946648d3ee0c1505eb2a4bc740cf772ad3db226b653b"
 
   url "https://github.com/vadika/yawac/releases/download/v#{version}/yawac-#{version}.zip"
   name "yawac"
