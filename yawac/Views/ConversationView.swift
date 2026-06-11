@@ -478,17 +478,45 @@ struct ConversationView: View {
                                 }
                             }
                             .padding(.horizontal, 26)
-                            .padding(.top, 8)
-                            // F49: when the typing indicator is visible below
-                            // the ScrollView, the ScrollView's frame shrinks
-                            // by the indicator's height. Without extra
-                            // bottom padding on the content, the last message
-                            // bubble sat under the new frame edge and looked
-                            // clipped. Reserve the indicator's height inline
-                            // so the bottom row stays visible.
-                            .padding(.bottom, vm.peerTyping ? 32 : 8)
+                            .padding(.vertical, 8)
                         }
                         .defaultScrollAnchor(.bottom)
+                        // F49v2: typing indicator rendered via
+                        // safeAreaInset(edge: .bottom) so SwiftUI shifts the
+                        // ScrollView's content inset to match. Earlier
+                        // F49 attempt added .padding(.bottom) on the
+                        // LazyVStack AND kept the typing indicator as a
+                        // sibling outside the ScrollView — both shifted
+                        // independently, double-spacing the bottom and
+                        // breaking BottomVisibilityTracker (chevron-down
+                        // stuck visible even when last message was on
+                        // screen). safeAreaInset is the SwiftUI-native
+                        // pattern for "below-scroll" overlays.
+                        .safeAreaInset(edge: .bottom, spacing: 0) {
+                            if vm.peerTyping {
+                                HStack(spacing: 8) {
+                                    HStack(spacing: 3) {
+                                        ForEach(0..<3) { _ in
+                                            Circle().fill(Theme.textMuted.opacity(0.6))
+                                                .frame(width: 5, height: 5)
+                                        }
+                                    }
+                                    .padding(.horizontal, 9).padding(.vertical, 5)
+                                    .background(Theme.otherBubble,
+                                                in: RoundedRectangle(cornerRadius: Theme.bubbleRadius))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: Theme.bubbleRadius)
+                                            .stroke(Theme.otherBorder, lineWidth: 1)
+                                    )
+                                    Text("typing…")
+                                        .scaledUI(12)
+                                        .foregroundStyle(Theme.textFaint)
+                                    Spacer()
+                                }
+                                .padding(.horizontal, 26).padding(.bottom, 4)
+                                .background(Theme.bg)
+                            }
+                        }
                         .background(Theme.bg)
                         .overlay(alignment: .bottomTrailing) {
                             if !atBottom, let last = vm.messages.last {
@@ -543,6 +571,17 @@ struct ConversationView: View {
                             } else if newCount > lastSeenCount, let last = vm.messages.last {
                                 proxy.scrollTo(last.id, anchor: .bottom)
                                 lastSeenCount = newCount
+                                // F55: BottomVisibilityTracker swaps its
+                                // onAppear/onDisappear modifier branches
+                                // when `isLast` flips on the new tail row.
+                                // In a LazyVStack the new last row's
+                                // onAppear is unreliable (often skipped if
+                                // the row was offscreen at append time),
+                                // leaving atBottom stuck false → chevron
+                                // visible even when scrollTo just put the
+                                // row dead-center in the viewport. Force
+                                // it explicitly here.
+                                atBottom = true
                             }
                         }
                         .onChange(of: vm.timelineGeneration) { _, _ in
@@ -554,6 +593,7 @@ struct ConversationView: View {
                             // up to read older history.
                             guard atBottom, let last = vm.messages.last else { return }
                             proxy.scrollTo(last.id, anchor: .bottom)
+                            atBottom = true
                         }
                         .onChange(of: vm.pendingScrollToID) { _, id in
                             guard let id else { return }
@@ -593,28 +633,6 @@ struct ConversationView: View {
                             session.pendingJumpMessageID = nil
                             session.pendingJumpChatJID = nil
                         }
-                    }
-                    if vm.peerTyping {
-                        HStack(spacing: 8) {
-                            HStack(spacing: 3) {
-                                ForEach(0..<3) { _ in
-                                    Circle().fill(Theme.textMuted.opacity(0.6))
-                                        .frame(width: 5, height: 5)
-                                }
-                            }
-                            .padding(.horizontal, 9).padding(.vertical, 5)
-                            .background(Theme.otherBubble,
-                                        in: RoundedRectangle(cornerRadius: Theme.bubbleRadius))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: Theme.bubbleRadius)
-                                    .stroke(Theme.otherBorder, lineWidth: 1)
-                            )
-                            Text("typing…")
-                                .scaledUI(12)
-                                .foregroundStyle(Theme.textFaint)
-                            Spacer()
-                        }
-                        .padding(.horizontal, 26).padding(.bottom, 4)
                     }
                     if vm.forwardSelecting {
                         forwardBar(vm)

@@ -264,6 +264,29 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **F49v2 + F55 — Typing-inset + chevron stuck visible**
+  (v0.9.65) — followups to the v0.9.64 typing-indicator + reaction
+  scroll fixes.
+  - **F49v2** — original F49 reserved bottom padding on the
+    LazyVStack AND kept the typing indicator as a sibling outside
+    the ScrollView. The two shifts compounded: ~30pt of empty
+    space appeared between the last message and the typing
+    indicator, and `BottomVisibilityTracker`'s
+    `onAppear/onDisappear` semantics on the last row broke
+    (chevron-down stuck visible). Moved the typing indicator into
+    a `safeAreaInset(edge: .bottom)` on the ScrollView; SwiftUI
+    handles the content inset automatically. No more
+    double-spacing.
+  - **F55** — `BottomVisibilityTracker` swaps its branches when
+    `isLast` flips on a new tail row. In a LazyVStack the new
+    last row's `onAppear` is unreliable (often skipped if the row
+    was offscreen at append time), so even after `proxy.scrollTo`
+    put the row in the viewport, `atBottom` could stay `false` →
+    chevron-down visible despite the user actually being at the
+    bottom. Both auto-scroll paths (`messages.count` and
+    `timelineGeneration` follows) now explicitly set
+    `atBottom = true` after their `scrollTo`.
+
 - ✅ **F48-F54 — Live-test bug bundle** (v0.9.64) — fresh-pair
   testing surfaced seven independent bugs; bundled into one release
   to keep cadence sane.
