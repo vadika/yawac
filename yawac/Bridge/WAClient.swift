@@ -81,6 +81,11 @@ class WAClient: PhoneValidating, LIDResolving {
         case chatDeleted(chatJID: String, timestamp: Int64)
         case contactUpdated(jid: String, fullName: String, firstName: String)
         case blocklistChanged(action: String, changes: [(jid: String, action: String)])
+        /// PUSH_NAME chunk from HistorySync. Each entry's JID is the
+        /// exact form whatsmeow received (often `@lid`), so the Swift
+        /// side can key `contactNames` at that form directly without
+        /// depending on the local LID→PN map.
+        case pushNames(names: [(jid: String, name: String)])
         case unknown(kind: String, payload: String)
     }
 
@@ -1312,6 +1317,12 @@ class WAClient: PhoneValidating, LIDResolving {
                     allMembersCanAdd: m.allMembersCanAdd,
                     actorJID: m.actorJID ?? "",
                     timestamp: m.timestamp)
+            }
+        case "push_names":
+            struct Entry: Codable { let jid: String; let name: String }
+            struct Batch: Codable { let names: [Entry] }
+            if let b = try? dec.decode(Batch.self, from: data) {
+                return .pushNames(names: b.names.map { ($0.jid, $0.name) })
             }
         case "EphemeralTimerChanged":
             struct E: Codable {

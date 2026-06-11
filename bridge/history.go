@@ -23,7 +23,14 @@ func (c *Client) applyHistorySync(evt *events.HistorySync) {
 	}
 	ctx := context.Background()
 
-	// Push names — persist to local contact store so listContacts() picks them up.
+	// Push names — persist to local contact store so listContacts() picks
+	// them up, AND emit one batched "push_names" event so Swift can key
+	// contactNames at the exact JID form the server shipped (typically
+	// `@lid` for group senders whose LID→PN map entry is missing).
+	// PutPushName normalizes to `@s.whatsapp.net`, which is why the Swift
+	// `displayName(for:)` lookup at the bare `@lid` key still misses for
+	// those senders — see project_yawac_lid_push_name notes.
+	pushBatch := make([]JPushName, 0, len(evt.Data.GetPushnames()))
 	if c.wa != nil && c.wa.Store != nil && c.wa.Store.Contacts != nil {
 		for _, pn := range evt.Data.GetPushnames() {
 			jidStr := pn.GetID()
@@ -35,8 +42,13 @@ func (c *Client) applyHistorySync(evt *events.HistorySync) {
 			if err != nil {
 				continue
 			}
+			pushBatch = append(pushBatch, JPushName{JID: jidStr, Name: name})
 			_, _, _ = c.wa.Store.Contacts.PutPushName(ctx, jid, name)
 		}
+	}
+	if len(pushBatch) > 0 {
+		b, _ := json.Marshal(JPushNameBatch{Names: pushBatch})
+		c.dispatch("push_names", string(b))
 	}
 
 	// Conversations — names + message backfill.

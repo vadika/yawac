@@ -303,6 +303,16 @@ struct ContentView: View {
                     let canonical = JIDNormalize.canonical(chatJID, client: client)
                     vm.applyGroupMemberAddMode(chatJID: canonical,
                                                allMembersCanAdd: allMembersCanAdd)
+                case .pushNames(let names):
+                    // HistorySync PUSH_NAME chunk — key contactNames at
+                    // the JID form whatsmeow received (typically `@lid`
+                    // for group senders whose LID→PN mapping is missing),
+                    // so MessageRow's displayName lookup hits without
+                    // needing the local LID map. Complements the chat-
+                    // list reconcile path that runs off `.historySync`.
+                    for (jid, name) in names {
+                        session.ingestPushName(jid: jid, name: name)
+                    }
                 case .ephemeralTimerChanged(let chatJID, let seconds, _, _):
                     // Server-side timer change (either side of a 1:1 or a
                     // group admin). Refresh the in-memory Chat row so the

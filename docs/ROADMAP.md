@@ -264,6 +264,41 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **F57-F59 — Sync beachball + group-sender JID resolution**
+  (v0.9.67) — followups to v0.9.66's deep-history fix.
+  - **F57 — Dynamic ingest debounce during full sync.**
+    `ConversationViewModel.ingest` flushed every 250ms regardless
+    of sync state. With a full-history sync floor delivering
+    bursts of messages into a chat the user has open, every flush
+    re-evaluated the entire visible MessageRow set; the
+    `TimelineItem.id.getter` × N + `RightClickCatcher.updateNSView`
+    × visible-rows cost beachballed the UI. Now `chatList?
+    .session?.fullSync.inFlight` gates the debounce: 250ms during
+    normal traffic, 2000ms during sync. Open conversation gets
+    one big batch update per 2s window instead of constant
+    dribble.
+  - **F58 — Push-name ingest on history load.**
+    `buildHistorySnapshot` now extracts each PersistedMessage's
+    `senderPushName` into a `pushNames: [String: String]` field
+    on `ConversationHistorySnapshot`.
+    `applyHistorySnapshot` ingests them into
+    `session.contactNames` via `ingestPushName(jid:name:)`. Group
+    senders whose push-names landed at message intake time but
+    never made it into `contactNames` (history loaded before the
+    sender's message arrived in the live stream) now resolve on
+    chat open.
+  - **F59 — PUSH_NAME chunk → Swift event ingest.** PUSH_NAME
+    history-sync chunks carry batches of `{jid → pushname}` pairs
+    that bridge persisted to whatsmeow's local Contacts store but
+    never told Swift about. Names became visible only after a
+    `listContacts()` reconcile, and even then only at @s.whatsapp
+    .net form — `@lid`-sender lookups missed when the LID→PN map
+    had no entry. New bridge dispatch `"push_names"` event emits
+    each chunk's `[(jid, name)]` batch verbatim;
+    `ContentView.swift` calls `session.ingestPushName` per pair
+    so names land at the exact JID form whatsmeow received
+    (typically the same `@lid` form the senderJID will use).
+
 - ✅ **F56 — Deep-history backfill skipped on fresh install**
   (v0.9.66) — pair fresh, see only the INITIAL_BOOTSTRAP chunk's
   messages, never the years of history the phone has. Root cause:

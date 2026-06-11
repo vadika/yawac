@@ -62,6 +62,12 @@ struct ConversationHistorySnapshot: Sendable {
     let downloadErrors: [String: String]
     /// Messages whose media is server-expired (auto-refetch candidates).
     let expiredOnLoad: [ExpiredEntry]
+    /// F58: per-sender push-names extracted from loaded PersistedMessage
+    /// rows. Ingested on MainActor in `applyHistorySnapshot` so the
+    /// `displayName(for:)` lookup hits for `@lid`-form senders in
+    /// historical group messages instead of falling through to the
+    /// raw-JID prefix.
+    let pushNames: [String: String]
     /// Diagnostic ms timings for `perfLog`.
     let timings: Timings
 

@@ -253,3 +253,18 @@ type JBlocklistChanged struct {
 	Action  string         `json:"action"`
 	Changes []JBlockChange `json:"changes"`
 }
+
+// JPushName carries a single PUSH_NAME chunk entry. The JID is the exact
+// form whatsmeow shipped (often `@lid` for group senders whose LID→PN
+// mapping is missing), so the Swift side can key contactNames at that
+// form directly without depending on the local LID map.
+type JPushName struct {
+	JID  string `json:"jid"`
+	Name string `json:"name"`
+}
+
+// JPushNameBatch is the payload of a "push_names" event — one event per
+// PUSH_NAME HistorySync chunk.
+type JPushNameBatch struct {
+	Names []JPushName `json:"names"`
+}

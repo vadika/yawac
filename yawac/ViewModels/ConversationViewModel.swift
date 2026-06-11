@@ -776,6 +776,13 @@ final class ConversationViewModel {
         // the in-memory cache fills from disk. Decode ran off-MainActor
         // in the snapshot builder (F12).
         ThumbnailCache.shared.preheatAvatar(snap.preheatAvatars)
+        // F58: ingest per-sender push-names from loaded history so
+        // group senders resolve to a name instead of raw @lid prefix.
+        if let session = chatList?.session {
+            for (jid, name) in snap.pushNames {
+                session.ingestPushName(jid: jid, name: name)
+            }
+        }
         let snapIDs = Set(snap.messages.map { $0.id })
         let lateArrivals = self.messages.filter { !snapIDs.contains($0.id) }
         if lateArrivals.isEmpty {
@@ -972,6 +979,19 @@ final class ConversationViewModel {
             case "played":    receiptStatus[p.id] = .played
             case "read":      receiptStatus[p.id] = .read
             default:          receiptStatus[p.id] = .sent
+            }
+        }
+
+        // F58: extract per-sender push-names so group senders resolve
+        // their display names instead of falling through to raw JID
+        // prefixes. Real-time messages already ingest push-names via
+        // ContentView's event stream, but historical loads (full-history
+        // sync, app restart) skip that path; the contactNames dict
+        // never got populated for senders the user hasn't saved.
+        var pushNames: [String: String] = [:]
+        for p in displayable where !p.fromMe {
+            if let push = p.senderPushName, !push.isEmpty {
+                pushNames[p.senderJID] = push
             }
         }
 
@@ -1197,6 +1217,7 @@ final class ConversationViewModel {
             downloadTargets: downloadTargets,
             downloadErrors: downloadErrors,
             expiredOnLoad: expiredOnLoad,
+            pushNames: pushNames,
             timings: .init(
                 scrubMs: (t1 - t0) * 1000,
                 fetchMs: (t2 - t1) * 1000,
@@ -1914,14 +1935,21 @@ final class ConversationViewModel {
         pendingIngestIDs.insert(b.id)
         pendingIngest.append(b)
         guard pendingIngestFlush == nil else { return }
-        // F47: 50ms was tight enough to feel real-time on a single
-        // incoming message but during initial-sync burst the row-render
-        // cost (RightClickCatcher.updateNSView + receipt-dict observation
-        // cascades) saturated MainActor. 250ms cuts re-render rate 5×
-        // while still feeling instant for normal traffic. Live-chat
-        // latency is bounded by network anyway.
+        // F47 / F57: ingest coalesce.
+        // Normal traffic — 250ms, near-real-time. During an active
+        // full-history sync (chatList → session → fullSync.inFlight)
+        // the row-render cost (1000+ TimelineItem id-getter calls per
+        // body re-eval + RightClickCatcher.updateNSView per visible
+        // bubble + receipt-dict observation cascades) saturated
+        // MainActor under the original 50ms / 250ms windows; the user
+        // beachballed when browsing the open conversation mid-sync.
+        // Bump to 2s during sync so the open conversation gets ONE
+        // big batch update per 2-second window instead of constant
+        // dribble.
+        let inSync = chatList?.session?.fullSync.inFlight ?? false
+        let debounceMs: UInt64 = inSync ? 2000 : 250
         pendingIngestFlush = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .milliseconds(250))
+            try? await Task.sleep(for: .milliseconds(debounceMs))
             guard let self else { return }
             self.flushIngest()
         }
