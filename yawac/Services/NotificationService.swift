@@ -16,12 +16,32 @@ enum NotificationService {
     /// notifications are attributed to yawac rather than "Script Editor".
     private static var unGranted: Bool = false
 
+    /// F64: notification category id used for incoming chat messages.
+    /// Carries the inline Reply text-input action so the user can send
+    /// a reply from the banner without bringing yawac to the front.
+    static let messageCategoryID = "MESSAGE"
+
     static func requestAuthorization() async {
         let center = UNUserNotificationCenter.current()
         let granted = (try? await center.requestAuthorization(
             options: [.alert, .sound, .badge])) ?? false
         unGranted = granted
         NSLog("[yawac/notify] UN authorization granted=%d", granted ? 1 : 0)
+        // F64: register the Reply text-input action regardless of grant
+        // state — the category survives across launches and is needed
+        // the moment the user grants authorization.
+        let replyAction = UNTextInputNotificationAction(
+            identifier: "REPLY",
+            title: "Reply",
+            options: [],
+            textInputButtonTitle: "Send",
+            textInputPlaceholder: "Reply…")
+        let category = UNNotificationCategory(
+            identifier: messageCategoryID,
+            actions: [replyAction],
+            intentIdentifiers: [],
+            options: [])
+        center.setNotificationCategories([category])
     }
 
     static func notify(
@@ -47,6 +67,9 @@ enum NotificationService {
         content.body = resolvedBody
         content.sound = .default
         content.userInfo = ["chatJID": chatJID]
+        // F64: wire the message category so the banner shows the inline
+        // Reply action.
+        content.categoryIdentifier = Self.messageCategoryID
         let req = UNNotificationRequest(
             identifier: UUID().uuidString,
             content: content,
@@ -116,6 +139,33 @@ final class NotificationRouter: NSObject, UNUserNotificationCenterDelegate {
     ) {
         let userInfo = response.notification.request.content.userInfo
         let chatJID = userInfo["chatJID"] as? String
+        // F64: inline Reply path. Send the text via the bridge without
+        // bringing yawac to the front; surface the outgoing message in
+        // the open conversation if the user happens to have it open.
+        if let textResponse = response as? UNTextInputNotificationResponse,
+           response.actionIdentifier == "REPLY",
+           let jid = chatJID, !jid.isEmpty {
+            let text = textResponse.userText
+            Task { @MainActor in
+                guard let session = self.session,
+                      let client = session.client,
+                      !text.isEmpty else {
+                    completionHandler()
+                    return
+                }
+                let cjid = JIDNormalize.canonical(jid, client: client)
+                // sendText is nonisolated (F51) — run off MainActor so the
+                // notification handler returns quickly. The bridge call
+                // echoes back via the normal .message event stream, which
+                // updates the open conversation + sidebar through the
+                // existing ingest pipeline.
+                _ = try? await Task.detached(priority: .userInitiated) {
+                    try client.sendText(cjid, text)
+                }.value
+                completionHandler()
+            }
+            return
+        }
         Task { @MainActor in
             if let jid = chatJID, !jid.isEmpty {
                 self.session?.pendingChatSelection = jid
