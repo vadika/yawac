@@ -248,6 +248,21 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **F63 — File drag-drop into composer sent the link, not the
+  file** (v0.10.3) — dragging an image from Finder onto the
+  conversation pasted the `file://...` URL into the message body
+  instead of staging the image as an attachment. Root cause:
+  ConversationView mounted `.onDrop(of: [.fileURL])` on the outer
+  pane, but SwiftUI's `TextField` (NSTextField under the hood)
+  has an AppKit-level `NSDraggingDestination` that consumes URL
+  drops first and inserts the URL as text. The SwiftUI drop
+  modifier never fired. Fix: mount `.onDrop(of: [.fileURL])` on
+  the composer's outer `VStack` (the parent of the TextField) so
+  the drop is caught before AppKit's NSTextField handler. The
+  drop routes through the same `vm.stageAttachment(at:)` the
+  paperclip button uses, so image / video / audio / document
+  classification falls out of `attachmentKind` automatically.
+
 - ✅ **F62 — Kill RightClickCatcher per-row updateNSView storm**
   (v0.10.2) — Plan B from the stability/debt wave. Samples during
   full-history-sync showed `RightClickCatcher.updateNSView` +

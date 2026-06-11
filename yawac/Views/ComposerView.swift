@@ -87,6 +87,25 @@ struct ComposerView: View {
         .padding(.horizontal, 22)
         .padding(.vertical, 12)
         .background(Theme.bg)
+        // F63: file drops on the composer area used to fall through to
+        // SwiftUI's TextField (NSTextField on macOS), which has a
+        // built-in NSDraggingDestination that inserts the dropped
+        // URL as text — so dragging an image from Finder pasted
+        // the file:// link into the message body instead of staging
+        // the image as an attachment. The ConversationView-level
+        // `.onDrop` never fired because AppKit handled it locally.
+        // Mounting `.onDrop` on the composer's outer VStack catches
+        // the drop before it reaches the TextField.
+        .onDrop(of: [.fileURL], isTargeted: nil) { providers in
+            for p in providers {
+                _ = p.loadObject(ofClass: URL.self) { url, _ in
+                    if let url {
+                        Task { @MainActor in vm.stageAttachment(at: url) }
+                    }
+                }
+            }
+            return true
+        }
         .onChange(of: vm.editTarget?.id) { _, _ in
             // Pre-fill draft when an edit starts; reset when it ends.
             if let m = vm.editTarget {
