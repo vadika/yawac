@@ -628,7 +628,10 @@ class WAClient: PhoneValidating, LIDResolving {
         return result
     }
 
-    func listGroups() throws -> [BridgeGroupModel] {
+    // Nonisolated to match listContacts — scheduleHistorySyncReconcile
+    // runs the CGo round-trip + JSON decode off MainActor during the
+    // burst of HistorySync events at initial sync.
+    nonisolated func listGroups() throws -> [BridgeGroupModel] {
         var err: NSError?
         let json = go.listGroups(&err)
         if let err { throw err }

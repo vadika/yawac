@@ -388,9 +388,18 @@ final class SessionViewModel {
                 () -> [BridgeContact] in
                 (try? client.listContacts()) ?? []
             }.value
+            // Groups list lands incomplete on initial app-state sync; re-fetch
+            // during the coalesced reconcile so JID-stubbed chats get their
+            // real names + community flags.
+            let groups = await Task.detached(priority: .userInitiated) {
+                () -> [BridgeGroupModel] in
+                (try? client.listGroups()) ?? []
+            }.value
             vm.resolveNames(contacts)
             vm.mergeContacts(contacts)
             self.ingestContacts(contacts)
+            vm.mergeGroups(groups)
+            self.ingestGroups(groups)
             vm.reconcilePinsWithStore()
             vm.reconcileMutedWithStore()
             vm.reconcileLIDDuplicates()

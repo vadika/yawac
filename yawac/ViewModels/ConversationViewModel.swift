@@ -1864,8 +1864,14 @@ final class ConversationViewModel {
         pendingIngestIDs.insert(b.id)
         pendingIngest.append(b)
         guard pendingIngestFlush == nil else { return }
+        // F47: 50ms was tight enough to feel real-time on a single
+        // incoming message but during initial-sync burst the row-render
+        // cost (RightClickCatcher.updateNSView + receipt-dict observation
+        // cascades) saturated MainActor. 250ms cuts re-render rate 5×
+        // while still feeling instant for normal traffic. Live-chat
+        // latency is bounded by network anyway.
         pendingIngestFlush = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .milliseconds(50))
+            try? await Task.sleep(for: .milliseconds(250))
             guard let self else { return }
             self.flushIngest()
         }

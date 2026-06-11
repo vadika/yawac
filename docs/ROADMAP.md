@@ -264,6 +264,58 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **F46-F47 — Sidebar freeze + fresh-pair UX + sync-burst beachball**
+  (v0.9.63) — bundle of perf/UX fixes targeting Boris's
+  splitter-during-sync freeze and three fresh-install bugs
+  observed during paired-from-scratch testing. Original freeze
+  report (RU): «Запускаю yawac, появляется баннер „Syncing
+  history", тащу разделитель сайдбара вправо — всё подвисает
+  намертво».
+  1. **Memoize chat-list display rows.** `ChatListView.body` used
+     to call an O(C) filter/sort/group builder on every body
+     eval. During a splitter drag SwiftUI re-evals body at
+     gesture-event rate; with 1.5k chats the per-frame O(C) pass
+     pegged main. Renamed to `rebuildDisplayRows()` and cached
+     output in `@State cachedRows`. Rebuild fires from `.onChange`
+     wires on every input (`vm.chats`, `vm.inviteLinkPreview`,
+     `search.query`, `search.filteredChats`, `search.suggestion`,
+     `search.messageHits`, `search.filters`,
+     `search.globalChatFilter`, `archivedExpanded`, `scopeRaw`)
+     plus a `.task` for initial population. Splitter drags now
+     touch zero builder work.
+  2. **NavigationSplitView sidebar width default.** Fresh installs
+     opened with a too-narrow sidebar (~150pt) that truncated
+     chat names to "Yritin s..." / "PINN...". Added
+     `.navigationSplitViewColumnWidth(min: 240, ideal: 300, max:
+     420)` to the sidebar column. macOS persists user-resized
+     width per-window after first launch.
+  3. **Groups re-fetch in history-sync reconcile.** Fresh paired
+     accounts showed raw JIDs (`358407236636-1495133272@g.us`)
+     in the chat list because the initial app-state sync hadn't
+     completed by the time `groups.refresh()` ran once at
+     pairing. Added a second `client.listGroups()` off-MainActor
+     fetch inside `SessionViewModel.scheduleHistorySyncReconcile`
+     (the 250ms/5s-debounced reconcile pass that already
+     re-fetches contacts). `mergeGroups` updates existing chats
+     in place — names land, `isCommunityParent` flag lands, so
+     the Communities scope tab populates too. Also marked
+     `WAClient.listGroups()` `nonisolated` to match
+     `listContacts()` so it can run off MainActor.
+  4. **Conversation ingest debounce 50ms → 250ms.** Opening a
+     chat during heavy initial-sync ingest beachballed the UI:
+     every batched `messages.append` re-evaluated every visible
+     `MessageRow`, and each row's `RightClickCatcher`
+     NSViewRepresentable ran `updateNSView` at sync-event rate
+     (~600 calls/s). Bumping the existing ingest-flush coalesce
+     window from 50ms to 250ms cuts re-render rate 5× during
+     burst sync while feeling instant for normal traffic
+     (network latency dwarfs the extra 200ms anyway).
+  Note on what was tried + reverted: an explicit
+  `.frame(height: row.fixedHeight)` on each chat-list row caused
+  SwiftUI to enter a recursive `StackLayout.placeChildren` loop
+  that hard-froze the app on cold start. Reverted; LazyVStack
+  measures intrinsic row size for now.
+
 - ✅ **F45 — drop VersionedSchema, manage indices via raw SQL only**
   (v0.9.62) — emergency hotfix for v0.9.61. The VersionedSchema +
   lightweight migration approach from F44 crashed at launch on

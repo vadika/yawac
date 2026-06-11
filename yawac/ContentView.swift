@@ -55,8 +55,12 @@ struct ContentView: View {
                 ChatListView(selection: selectedChat)
                     .environment(chatList)
                     .environment(chatSearch)
+                    // Fresh install lands with a 300pt sidebar; macOS
+                    // persists user resize in window state thereafter.
+                    .navigationSplitViewColumnWidth(min: 240, ideal: 300, max: 420)
             } else {
                 ProgressView()
+                    .navigationSplitViewColumnWidth(min: 240, ideal: 300, max: 420)
             }
         } detail: {
             if let id = session.nav.currentJID {

@@ -14,6 +14,14 @@ struct ChatListView: View {
     @Binding var selection: Chat.ID?
     @AppStorage("yawac.chatListScope") private var scopeRaw: String = Scope.all.rawValue
 
+    /// F46 — memoized `displayRows()` output. Body re-evals during a
+    /// splitter drag fire at gesture-event rate; recomputing the O(C)
+    /// filter/sort/group pass per frame pegged main on 1.5k-chat
+    /// accounts. The state is rebuilt only when one of the inputs in
+    /// `rebuildDisplayRows()` actually changes (see the `.onChange`
+    /// wires at the bottom of `body`).
+    @State private var cachedRows: [Row] = []
+
     enum Scope: String, CaseIterable, Identifiable {
         case all, chats, groups, communities
         var id: String { rawValue }
@@ -59,6 +67,25 @@ struct ChatListView: View {
             case .invitePreview:         return "sec:invite-preview"
             }
         }
+
+        /// F46 — fixed per-variant heights so `LazyVStack` doesn't
+        /// measure each visible row's intrinsic size on every layout
+        /// pass. During a sidebar splitter drag this measurement
+        /// dominated the main thread on large chat lists. All variants
+        /// already use `.lineLimit(1)` (or `.lineLimit(2)` for message
+        /// hits) so clipping risk is bounded.
+        var fixedHeight: CGFloat {
+            switch self {
+            case .chat:              return 60   // avatar 36 + 2 lines + vpad 9*2
+            case .suggestion:        return 56
+            case .messageHit:        return 60   // 2-line snippet
+            case .section:           return 36   // .top 14 + label + .bottom 4
+            case .archivedHeader:    return 36
+            case .messageSection:    return 36
+            case .messageFilterChips: return 44
+            case .invitePreview:     return 56
+            }
+        }
     }
 
     /// Builds the flat display list in a single pass over `vm.chats`.
@@ -66,7 +93,12 @@ struct ChatListView: View {
     /// `subGroups(for:)` once per community parent — O(C×N) on every
     /// body re-evaluation, which made scope switches stall for several
     /// seconds on large accounts.
-    private func displayRows() -> [Row] {
+    ///
+    /// F46 — renamed from `displayRows()` and now called only from
+    /// `.onChange` handlers / `.task`. Body reads `cachedRows` instead,
+    /// so splitter drags (which re-eval body at gesture-event rate)
+    /// no longer trigger this O(C) pass per frame.
+    private func rebuildDisplayRows() -> [Row] {
         let chats = search.query.isEmpty ? vm.chats : search.filteredChats
         var out: [Row] = []
         if vm.inviteLinkPreview != nil {
@@ -322,7 +354,7 @@ struct ChatListView: View {
             } else {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 1) {
-                    ForEach(displayRows()) { row in
+                    ForEach(cachedRows) { row in
                         switch row {
                         case .section(_, let label, let count):
                             sectionLabel(label, count: count)
@@ -411,6 +443,38 @@ struct ChatListView: View {
         // to a tombstone after a delete) which leave count unchanged.
         .onChange(of: vm.chats) { _, _ in
             if !search.query.isEmpty { search.refresh() }
+            cachedRows = rebuildDisplayRows()
+        }
+        // F46 — rebuild the memoized row list when any input to
+        // `rebuildDisplayRows()` changes. Body itself no longer calls
+        // the O(C) builder, so splitter drags stay cheap.
+        .task { cachedRows = rebuildDisplayRows() }
+        .onChange(of: vm.inviteLinkPreview) { _, _ in
+            cachedRows = rebuildDisplayRows()
+        }
+        .onChange(of: search.query) { _, _ in
+            cachedRows = rebuildDisplayRows()
+        }
+        .onChange(of: search.filteredChats) { _, _ in
+            cachedRows = rebuildDisplayRows()
+        }
+        .onChange(of: search.suggestion) { _, _ in
+            cachedRows = rebuildDisplayRows()
+        }
+        .onChange(of: search.messageHits) { _, _ in
+            cachedRows = rebuildDisplayRows()
+        }
+        .onChange(of: search.filters) { _, _ in
+            cachedRows = rebuildDisplayRows()
+        }
+        .onChange(of: search.globalChatFilter) { _, _ in
+            cachedRows = rebuildDisplayRows()
+        }
+        .onChange(of: archivedExpanded) { _, _ in
+            cachedRows = rebuildDisplayRows()
+        }
+        .onChange(of: scopeRaw) { _, _ in
+            cachedRows = rebuildDisplayRows()
         }
     }
 
