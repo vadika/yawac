@@ -981,31 +981,42 @@ final class SessionViewModel {
     func requestHistoryBackfillIfNeeded() async {
         guard !historyBackfillCompleted else { return }
         guard let client else { return }
-        guard let context = modelContext else { return }
-        var d = FetchDescriptor<PersistedMessage>(
-            sortBy: [SortDescriptor(\.timestamp, order: .forward)])
-        d.fetchLimit = 1
-        let oldest = (try? context.fetch(d))?.first
-        guard let oldest else {
-            // First-ever launch — no anchor exists, so an IQ would have
-            // nothing to seek before. Mark complete so the next boot
-            // doesn't waste an IQ once a message arrives.
-            historyBackfillCompleted = true
-            return
+        // F56: previously this guarded on an existing oldest persisted
+        // message and early-returned (flipping the one-shot flag) when
+        // no anchor row existed yet — i.e. on every fresh-install
+        // pair. The type-6 FULL_HISTORY_SYNC_ON_DEMAND request doesn't
+        // use an anchor (bridge sets HistoryFromTimestamp = now +
+        // HistoryDurationDays = count), so the anchor fields exist
+        // only for source compatibility. Sending the request with
+        // empty anchors is harmless and is the ONLY way to pull deep
+        // history into a fresh install after the initial bootstrap
+        // chunk lands. The previous behavior left fresh users with
+        // only whatever messages the INITIAL_BOOTSTRAP shipped.
+        let context = modelContext
+        var oldestChatJID = ""
+        var oldestMsgID = ""
+        var oldestFromMe = false
+        var oldestTSUnix: Int64 = 0
+        if let context {
+            var d = FetchDescriptor<PersistedMessage>(
+                sortBy: [SortDescriptor(\.timestamp, order: .forward)])
+            d.fetchLimit = 1
+            if let oldest = (try? context.fetch(d))?.first {
+                oldestChatJID = oldest.chatJID
+                oldestMsgID = oldest.id
+                oldestFromMe = oldest.fromMe
+                oldestTSUnix = Int64(oldest.timestamp.timeIntervalSince1970)
+            }
         }
-        let chatJID = oldest.chatJID
-        let msgID = oldest.id
-        let fromMe = oldest.fromMe
-        let tsUnix = Int64(oldest.timestamp.timeIntervalSince1970)
         do {
             NSLog("[yawac/backfill] sending FULL_HISTORY_SYNC_ON_DEMAND chat=%@ msg=%@ ts=%lld count=100000",
-                  chatJID, msgID, tsUnix)
+                  oldestChatJID, oldestMsgID, oldestTSUnix)
             try await Task.detached { [client] in
                 try client.requestFullHistorySync(
-                    beforeChatJID: chatJID,
-                    beforeMsgID: msgID,
-                    beforeFromMe: fromMe,
-                    beforeTSUnix: tsUnix,
+                    beforeChatJID: oldestChatJID,
+                    beforeMsgID: oldestMsgID,
+                    beforeFromMe: oldestFromMe,
+                    beforeTSUnix: oldestTSUnix,
                     count: 100_000)
             }.value
             NSLog("[yawac/backfill] SendPeerMessage returned ok — waiting for HistorySync chunks")

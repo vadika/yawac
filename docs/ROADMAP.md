@@ -264,6 +264,21 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **F56 — Deep-history backfill skipped on fresh install**
+  (v0.9.66) — pair fresh, see only the INITIAL_BOOTSTRAP chunk's
+  messages, never the years of history the phone has. Root cause:
+  `requestHistoryBackfillIfNeeded` guarded on an existing oldest
+  PersistedMessage row to use as an anchor; with zero messages
+  the function flipped `historyBackfillCompleted = true` and
+  early-returned without sending the request. But the type-6
+  `FULL_HISTORY_SYNC_ON_DEMAND` packet doesn't use an anchor —
+  bridge sets `HistoryFromTimestamp = now` +
+  `HistoryDurationDays = count`. Anchor fields exist only for
+  source-compat. Fix: always send the request after the one-shot
+  gate, passing empty anchor strings when no persisted row exists.
+  Fresh users now get the deep history pull (up to 10 years) on
+  first reconnect after pair, same as existing installs.
+
 - ✅ **F49v2 + F55 — Typing-inset + chevron stuck visible**
   (v0.9.65) — followups to the v0.9.64 typing-indicator + reaction
   scroll fixes.
