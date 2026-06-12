@@ -66,6 +66,18 @@ final class SessionViewModel {
 
     /// Observable so the Settings row redraws on each chunk.
     private(set) var fullSync: FullSyncState = .init()
+
+    /// F67: process-lifetime dedupe set for media-retry IQ requests.
+    /// Previously `ConversationViewModel.retriesRequested` lived per-CVM
+    /// and got wiped on every chat-switch, so the same expired/broken
+    /// message issued a fresh `requestMediaRetry` IQ each time the user
+    /// re-opened its chat. Counter evidence (875 retries in one session,
+    /// ~17 chat-opens × ~50 broken media per chat) confirmed the
+    /// pattern. Lives on the session so all CVMs share the same set
+    /// for the process's lifetime; persisting across launches would
+    /// require SwiftData and isn't worth the complexity yet.
+    @ObservationIgnored var mediaRetryAttempted: Set<String> = []
+
     /// Watchdog cleared 60s after the last chunk arrives.
     @ObservationIgnored private var fullSyncTimeoutTask: Task<Void, Never>?
     /// Throttle for `didBecomeActive` refresh fan-out (30s).

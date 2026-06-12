@@ -525,6 +525,18 @@ func (c *Client) dispatchMessage(evt *events.Message) {
 		jm.Text = inner.GetConversation()
 	case inner.GetExtendedTextMessage() != nil:
 		jm.Text = inner.GetExtendedTextMessage().GetText()
+	case inner.GetInteractiveMessage() != nil,
+		inner.GetInteractiveResponseMessage() != nil,
+		inner.GetTemplateMessage() != nil,
+		inner.GetTemplateButtonReplyMessage() != nil,
+		inner.GetButtonsMessage() != nil,
+		inner.GetButtonsResponseMessage() != nil,
+		inner.GetListMessage() != nil,
+		inner.GetListResponseMessage() != nil,
+		inner.GetOrderMessage() != nil,
+		inner.GetProductMessage() != nil,
+		inner.GetHighlyStructuredMessage() != nil:
+		jm.Text = bestEffortBusinessText(inner)
 	}
 	if ctx := contextInfoFromMessage(inner); ctx != nil && ctx.GetStanzaID() != "" {
 		qKind, _, _, _, _ := classifyMessage(ctx.GetQuotedMessage())
@@ -661,6 +673,35 @@ func classifyKindUnwrapped(m *waE2E.Message) string {
 		return "poll_vote"
 	case m.GetProtocolMessage() != nil:
 		return "protocol"
+	// WhatsApp Business message types (interactive, template, buttons,
+	// list, order, product, …) carry human-readable body text but no
+	// classic Conversation/ExtendedTextMessage payload. Without these
+	// cases they fall through to "system" and get dropped at the
+	// history/dispatch sink — see history.go's protocol||system skip.
+	// Map them all to "text" so they render as normal bubbles; the
+	// body is extracted via bestEffortBusinessText().
+	case m.GetInteractiveMessage() != nil:
+		return "text"
+	case m.GetInteractiveResponseMessage() != nil:
+		return "text"
+	case m.GetTemplateMessage() != nil:
+		return "text"
+	case m.GetTemplateButtonReplyMessage() != nil:
+		return "text"
+	case m.GetButtonsMessage() != nil:
+		return "text"
+	case m.GetButtonsResponseMessage() != nil:
+		return "text"
+	case m.GetListMessage() != nil:
+		return "text"
+	case m.GetListResponseMessage() != nil:
+		return "text"
+	case m.GetOrderMessage() != nil:
+		return "text"
+	case m.GetProductMessage() != nil:
+		return "text"
+	case m.GetHighlyStructuredMessage() != nil:
+		return "text"
 	default:
 		return "system"
 	}
@@ -714,7 +755,131 @@ func extractText(m *waE2E.Message) string {
 		return t
 	}
 	if e := m.GetExtendedTextMessage(); e != nil {
-		return e.GetText()
+		if t := e.GetText(); t != "" {
+			return t
+		}
+	}
+	// Business message types — surface edited bodies the same way the
+	// live dispatch path does.
+	if t := bestEffortBusinessText(m); t != "" {
+		return t
+	}
+	return ""
+}
+
+// bestEffortBusinessText probes the WhatsApp Business message types and
+// returns the best human-readable body string it can find. Empty when
+// none of the probed types is set, "[business message]" when a type is
+// set but carries no usable text (e.g. an order with no title). Method
+// names match the whatsmeow waE2E generated bindings — drop branches
+// here if the upstream proto changes.
+func bestEffortBusinessText(m *waE2E.Message) string {
+	if m == nil {
+		return ""
+	}
+	probed := false
+	if im := m.GetInteractiveMessage(); im != nil {
+		probed = true
+		if body := im.GetBody(); body != nil {
+			if t := body.GetText(); t != "" {
+				return t
+			}
+		}
+		if header := im.GetHeader(); header != nil {
+			if t := header.GetTitle(); t != "" {
+				return t
+			}
+		}
+	}
+	if tm := m.GetTemplateMessage(); tm != nil {
+		probed = true
+		if h := tm.GetHydratedTemplate(); h != nil {
+			if t := h.GetHydratedContentText(); t != "" {
+				return t
+			}
+			if t := h.GetHydratedTitleText(); t != "" {
+				return t
+			}
+		}
+	}
+	if bm := m.GetButtonsMessage(); bm != nil {
+		probed = true
+		if t := bm.GetContentText(); t != "" {
+			return t
+		}
+		// ButtonsMessage's text-typed header is the GetText() oneof
+		// branch, not a separate GetHeaderText().
+		if t := bm.GetText(); t != "" {
+			return t
+		}
+	}
+	if br := m.GetButtonsResponseMessage(); br != nil {
+		probed = true
+		if t := br.GetSelectedDisplayText(); t != "" {
+			return t
+		}
+	}
+	if lm := m.GetListMessage(); lm != nil {
+		probed = true
+		if t := lm.GetDescription(); t != "" {
+			return t
+		}
+		if t := lm.GetTitle(); t != "" {
+			return t
+		}
+	}
+	if om := m.GetOrderMessage(); om != nil {
+		probed = true
+		if t := om.GetOrderTitle(); t != "" {
+			return t
+		}
+		if t := om.GetMessage(); t != "" {
+			return t
+		}
+	}
+	if pm := m.GetProductMessage(); pm != nil {
+		probed = true
+		// ProductMessage.Body is a plain string in this proto version,
+		// not the InteractiveMessage_Body struct.
+		if t := pm.GetBody(); t != "" {
+			return t
+		}
+	}
+	if ir := m.GetInteractiveResponseMessage(); ir != nil {
+		probed = true
+		if b := ir.GetBody(); b != nil {
+			if t := b.GetText(); t != "" {
+				return t
+			}
+		}
+	}
+	if lr := m.GetListResponseMessage(); lr != nil {
+		probed = true
+		if t := lr.GetTitle(); t != "" {
+			return t
+		}
+		if t := lr.GetDescription(); t != "" {
+			return t
+		}
+	}
+	if tb := m.GetTemplateButtonReplyMessage(); tb != nil {
+		probed = true
+		if t := tb.GetSelectedDisplayText(); t != "" {
+			return t
+		}
+	}
+	if hs := m.GetHighlyStructuredMessage(); hs != nil {
+		probed = true
+		// HSM carries no direct body text; the hydrated TemplateMessage
+		// is the only renderable surface.
+		if t := bestEffortBusinessText(&waE2E.Message{
+			TemplateMessage: hs.GetHydratedHsm(),
+		}); t != "" {
+			return t
+		}
+	}
+	if probed {
+		return "[business message]"
 	}
 	return ""
 }

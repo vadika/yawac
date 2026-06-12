@@ -1,5 +1,6 @@
 import SwiftUI
 import SQLite3
+import AppKit
 
 /// Settings → Diagnostics. Read-only inspector for stability / debt
 /// work. Nothing here mutates app state — every section is a probe.
@@ -11,18 +12,97 @@ struct DiagnosticsPanel: View {
     @State private var probeInput: String = ""
     @State private var indexStatus: [(name: String, present: Bool)] = []
     @State private var historyStats: HistoryStats?
+    @State private var callCountsCache: [String: Int] = [:]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 26) {
+            toolbarSection
             syncStateSection
             jidLookupSection
             indicesSection
             historySection
+            bridgeCallCountsSection
         }
-        .onAppear {
-            computeIndexStatus()
-            computeHistoryStats()
+        .onAppear { refreshAll() }
+    }
+
+    // MARK: - Toolbar (global actions)
+
+    /// F66: single top-of-panel control strip replacing per-section
+    /// refresh/reset buttons. Refresh re-runs every probe, Reset clears
+    /// the bridge call counters (the only mutable surface), Copy as JSON
+    /// dumps every section's current state to the clipboard for paste-
+    /// into-bug-report. Saves the user from clicking refresh on every
+    /// card.
+    private var toolbarSection: some View {
+        SettingsCard {
+            SettingsRow(label: "Actions") {
+                HStack(spacing: 8) {
+                    SettingsPillButton("Refresh all", style: .neutral) {
+                        refreshAll()
+                    }
+                    SettingsPillButton("Reset counters", style: .neutral) {
+                        session.client?.resetCallCounts()
+                        refreshCallCounts()
+                    }
+                    SettingsPillButton("Copy as JSON", style: .neutral) {
+                        copyAsJSON()
+                    }
+                }
+            }
         }
+    }
+
+    private func refreshAll() {
+        computeIndexStatus()
+        computeHistoryStats()
+        refreshCallCounts()
+    }
+
+    private func copyAsJSON() {
+        var root: [String: Any] = [:]
+        root["sync_state"] = [
+            "full_sync_in_flight": session.fullSync.inFlight,
+            "attempted_this_session": session.fullSync.attempted,
+            "progress_pct": session.fullSync.progress,
+            "chunks_landed": session.fullSync.chunks,
+            "fresh_messages": session.fullSync.fresh,
+            "dupe_messages": session.fullSync.dupe,
+            "history_backfill_completed": UserDefaults.standard.bool(forKey: "historyBackfillCompleted"),
+            "connection": connectionLabel(session.connection),
+            "syncing_banner": session.syncing,
+        ]
+        root["indices"] = indexStatus.map {
+            ["name": $0.name, "present": $0.present]
+        }
+        if let s = historyStats {
+            root["history_stats"] = [
+                "total_messages": s.totalMessages,
+                "distinct_chats": s.distinctChats,
+                "oldest": s.oldestMacEpoch.map { formatTimestamp($0) } ?? "—",
+                "newest": s.newestMacEpoch.map { formatTimestamp($0) } ?? "—",
+                "distinct_senders": s.distinctSenders,
+                "senders_with_push_name": s.sendersWithPushName,
+                "push_name_coverage_pct": pushCoverageLabel(s),
+            ]
+        }
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime]
+        var bridgeBlock: [String: Any] = [
+            "snapshot_at": iso.string(from: Date()),
+            "counts": callCountsCache,
+        ]
+        if let started = session.client?.callCountsStartedAt() {
+            bridgeBlock["window_started_at"] = iso.string(from: started)
+            bridgeBlock["window_seconds"] = Int(Date().timeIntervalSince(started))
+        }
+        root["bridge_calls"] = bridgeBlock
+        guard let data = try? JSONSerialization.data(
+                withJSONObject: root,
+                options: [.prettyPrinted, .sortedKeys]),
+              let str = String(data: data, encoding: .utf8) else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(str, forType: .string)
     }
 
     // MARK: - Sync state
@@ -122,11 +202,6 @@ struct DiagnosticsPanel: View {
                     kvRow("Distinct senders", "\(s.distinctSenders)")
                     kvRow("Senders w/ push-name", "\(s.sendersWithPushName)")
                     kvRow("Push-name coverage", pushCoverageLabel(s))
-                    SettingsRow(label: "Refresh") {
-                        SettingsPillButton("Refresh", style: .neutral) {
-                            computeHistoryStats()
-                        }
-                    }
                 } else {
                     SettingsRow(label: "Store") {
                         Text("unavailable")
@@ -136,6 +211,54 @@ struct DiagnosticsPanel: View {
                 }
             }
         }
+    }
+
+    // MARK: - Bridge call counts
+
+    // F65: shows per-method WAClient invocation totals so we can spot
+    // bridge methods firing too often (suspected source of phone-side
+    // battery drain via repeated IQ traffic). Sorted descending so heavy
+    // hitters surface first.
+    private var bridgeCallCountsSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            SettingsSectionLabel("Bridge call counts")
+            SettingsCard {
+                SettingsRow(label: "Total calls") {
+                    Text("\(callCountsTotal)")
+                        .foregroundStyle(.secondary)
+                        .font(.system(.body, design: .monospaced))
+                }
+            }
+            SettingsCard {
+                if sortedCallCounts.isEmpty {
+                    SettingsRow(label: "Calls") {
+                        Text("none")
+                            .foregroundStyle(.secondary)
+                            .font(.system(.body, design: .monospaced))
+                    }
+                } else {
+                    ForEach(sortedCallCounts, id: \.key) { entry in
+                        SettingsRow(label: entry.key) {
+                            Text("\(entry.value)")
+                                .foregroundStyle(.secondary)
+                                .font(.system(.body, design: .monospaced))
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private var sortedCallCounts: [(key: String, value: Int)] {
+        callCountsCache.sorted { $0.value > $1.value }
+    }
+
+    private var callCountsTotal: Int {
+        callCountsCache.values.reduce(0, +)
+    }
+
+    private func refreshCallCounts() {
+        callCountsCache = session.client?.callCountsSnapshot() ?? [:]
     }
 
     private func pushCoverageLabel(_ s: HistoryStats) -> String {

@@ -248,6 +248,59 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **F64-F71 — Bundle: notif reply + IQ instrumentation +
+  battery-drain fixes + business chats** (v0.10.5) — large bundle
+  out of one investigation session driven by user-reported phone
+  battery drain + invisible WhatsApp Business chats.
+  - **F64 — Reply from native notification.** Banner exposes
+    inline Reply text-input action; typing + Send dispatches via
+    bridge without bringing yawac front. UNNotificationCategory
+    "MESSAGE" + UNTextInputNotificationAction, handler routes to
+    `client.sendText` in `Task.detached`.
+  - **F65 — Bridge call-count instrumentation.** Per-method
+    invocation counter on `WAClient` (NSLock-protected, nonisolated
+    bump); exposed via `callCountsSnapshot()`. Powered the F67-F70
+    investigations.
+  - **F66 — Diagnostics panel UX.** Replaced per-section refresh /
+    reset buttons with a single top-of-panel toolbar (Refresh all
+    / Reset counters / Copy as JSON). JSON dump for paste-into-
+    bug-report. Includes window_started_at + window_seconds so
+    counts come with a measurement window.
+  - **F67 — Session-wide media-retry dedupe.** Same broken
+    message no longer re-issues `requestMediaRetry` IQ on every
+    chat-switch (set lived per-CVM, wiped on swap; now lives on
+    SessionViewModel for process lifetime). Cut retries 875 → 331
+    in same session.
+  - **F68 — Always-mark-expired on retry failure.** Previously
+    only specific error strings ("phone retry returned no path",
+    "403/404/410", "sha mismatch") flipped `mediaExpired`; all
+    other failures left the flag unset so the next chat-open
+    re-tried. Phone has already said no — mark it regardless.
+  - **F69 — Snapshot `downloadTargets` cap (12 newest media).**
+    Each chat-open used to kick a download for every media-
+    bearing message in the visible window; most failed (server
+    aged the bytes out), each kicked a retry IQ. Cap at 12;
+    older media surfaces a "tap to load" state via downloadErrors
+    + the existing per-row retry button.
+  - **F70 — `autoRefetchExpiredBatch` cap (12 newest expired).**
+    Mirror of F69 for the expired-refetch path that fires once
+    per chat-open after the requestOlderHistory anchor returns.
+    Combined effect: 875 → 86 retries in equivalent sessions
+    (~90% cut; phone banner blink + battery drain proportional).
+  - **F71 — WhatsApp Business message classification.** Bridge
+    `classifyKindUnwrapped` returned `"system"` for any unhandled
+    type, and `history.go` drops `"system"` rows before persist
+    — so InteractiveMessage / TemplateMessage / ButtonsMessage /
+    ListMessage / OrderMessage / ProductMessage / InteractiveResponse
+    / ListResponse / TemplateButtonReply / ButtonsResponse /
+    HighlyStructured ALL got dropped silently. Business chats
+    looked empty (PersistedChat shells with zero
+    ZPERSISTEDMESSAGE rows). Added classifier cases mapping all
+    11 to `"text"` + `bestEffortBusinessText(...)` helper that
+    pulls the best human-readable body via the per-type
+    accessors. Business chats now appear with their actual
+    message content.
+
 - ✅ **F63 — File drag-drop into composer sent the link, not the
   file** (v0.10.3) — dragging an image from Finder onto the
   conversation pasted the `file://...` URL into the message body

@@ -100,6 +100,42 @@ class WAClient: PhoneValidating, LIDResolving {
     nonisolated(unsafe) private let go: BridgeClient
     private let bus = WAEventBus()
 
+    // F65: per-method invocation counters for the Diagnostics panel.
+    // Used to track which bridge methods fire too often (suspected
+    // cause of phone-side battery drain via repeated IQ traffic).
+    // nonisolated(unsafe) + NSLock so nonisolated methods can bump
+    // from off-MainActor without main-thread hops.
+    nonisolated(unsafe) private var _callCounts: [String: Int] = [:]
+    nonisolated(unsafe) private var _callCountsStartedAt: Date = Date()
+    nonisolated private let callCountsLock = NSLock()
+
+    nonisolated private func bump(_ name: String) {
+        callCountsLock.lock()
+        _callCounts[name, default: 0] += 1
+        callCountsLock.unlock()
+    }
+
+    nonisolated func callCountsSnapshot() -> [String: Int] {
+        callCountsLock.lock(); defer { callCountsLock.unlock() }
+        return _callCounts
+    }
+
+    /// Start of the current measurement window — the timestamp of the
+    /// last `resetCallCounts()` call, or process start if never reset.
+    /// Surfaced in the Diagnostics JSON so bug reports include the
+    /// window the counters cover.
+    nonisolated func callCountsStartedAt() -> Date {
+        callCountsLock.lock(); defer { callCountsLock.unlock() }
+        return _callCountsStartedAt
+    }
+
+    nonisolated func resetCallCounts() {
+        callCountsLock.lock()
+        _callCounts.removeAll()
+        _callCountsStartedAt = Date()
+        callCountsLock.unlock()
+    }
+
     // MARK: - Event pump (off-main)
     //
     // Subscribers are read+written from the detached pump Task as well as
@@ -160,8 +196,14 @@ class WAClient: PhoneValidating, LIDResolving {
     /// pairing or before app-state has settled.
     var ownPushName: String { go.ownPushName() }
 
-    func connect() throws { try go.connect() }
-    func logout() throws { try go.logout() }
+    func connect() throws {
+        bump("connect")
+        try go.connect()
+    }
+    func logout() throws {
+        bump("logout")
+        try go.logout()
+    }
 
     /// Encode @-mention JIDs as a JSON-string param for the Go bridge.
     /// gomobile silently drops methods whose signatures contain `[]string`,
@@ -181,6 +223,7 @@ class WAClient: PhoneValidating, LIDResolving {
     nonisolated func sendText(_ chatJID: String, _ body: String,
                               mentionedJIDs: [String] = [],
                               ephemeralSeconds: Int32 = 0) throws -> BridgeSendResult {
+        bump("sendText")
         var err: NSError?
         let json = go.sendText(chatJID, body: body,
                                mentionedJIDsJSON: encodeMentionsJSON(mentionedJIDs),
@@ -193,6 +236,7 @@ class WAClient: PhoneValidating, LIDResolving {
     func sendImage(_ chatJID: String, path: String, caption: String,
                    ephemeralSeconds: Int32 = 0,
                    viewOnce: Bool = false) throws -> BridgeSendResult {
+        bump("sendImage")
         var err: NSError?
         let json = go.sendImage(chatJID, filePath: path, caption: caption,
                                 ephemeralSec: ephemeralSeconds,
@@ -205,6 +249,7 @@ class WAClient: PhoneValidating, LIDResolving {
     func sendVideo(_ chatJID: String, path: String, caption: String,
                    ephemeralSeconds: Int32 = 0,
                    viewOnce: Bool = false) throws -> BridgeSendResult {
+        bump("sendVideo")
         var err: NSError?
         let json = go.sendVideo(chatJID, filePath: path, caption: caption,
                                 ephemeralSec: ephemeralSeconds,
@@ -216,6 +261,7 @@ class WAClient: PhoneValidating, LIDResolving {
 
     func sendAudio(_ chatJID: String, path: String,
                    ephemeralSeconds: Int32 = 0) throws -> BridgeSendResult {
+        bump("sendAudio")
         var err: NSError?
         let json = go.sendAudio(chatJID, filePath: path,
                                 ephemeralSec: ephemeralSeconds,
@@ -229,6 +275,7 @@ class WAClient: PhoneValidating, LIDResolving {
                        duration: Int32,
                        waveform: Data,
                        ephemeralSeconds: Int32 = 0) throws -> BridgeSendResult {
+        bump("sendVoiceNote")
         var err: NSError?
         let json = go.sendVoiceNote(chatJID,
                                     filePath: path,
@@ -242,6 +289,7 @@ class WAClient: PhoneValidating, LIDResolving {
 
     func sendDocument(_ chatJID: String, path: String, caption: String,
                       ephemeralSeconds: Int32 = 0) throws -> BridgeSendResult {
+        bump("sendDocument")
         var err: NSError?
         let json = go.sendDocument(chatJID, filePath: path, caption: caption,
                                    ephemeralSec: ephemeralSeconds,
@@ -256,6 +304,7 @@ class WAClient: PhoneValidating, LIDResolving {
                                   name: String,
                                   address: String,
                                   ephemeralSeconds: Int32 = 0) throws -> BridgeSendResult {
+        bump("sendLocation")
         var err: NSError?
         let json = go.sendLocation(chatJID,
                                    lat: latitude,
@@ -272,6 +321,7 @@ class WAClient: PhoneValidating, LIDResolving {
                                  vcard: String,
                                  displayName: String,
                                  ephemeralSeconds: Int32 = 0) throws -> BridgeSendResult {
+        bump("sendContact")
         var err: NSError?
         let json = go.sendContact(chatJID,
                                   vcard: vcard,
@@ -283,6 +333,7 @@ class WAClient: PhoneValidating, LIDResolving {
     }
 
     nonisolated func setDisappearingTimer(chatJID: String, seconds: Int32) throws {
+        bump("setDisappearingTimer")
         try go.setDisappearingTimer(chatJID, seconds: seconds)
     }
 
@@ -292,6 +343,7 @@ class WAClient: PhoneValidating, LIDResolving {
                                   targetFromMe: Bool,
                                   emoji: String,
                                   ephemeralSeconds: Int32 = 0) throws -> BridgeSendResult {
+        bump("sendReaction")
         var err: NSError?
         let json = go.sendReaction(
             chatJID,
@@ -311,6 +363,7 @@ class WAClient: PhoneValidating, LIDResolving {
                                    quotedSnippet: String,
                                    mentionedJIDs: [String] = [],
                                    ephemeralSeconds: Int32 = 0) throws -> BridgeSendResult {
+        bump("sendTextReply")
         var err: NSError?
         let json = go.sendTextReply(
             chatJID, body: body,
@@ -326,6 +379,7 @@ class WAClient: PhoneValidating, LIDResolving {
 
     nonisolated func forwardText(_ chatJID: String, text: String,
                                  ephemeralSeconds: Int32 = 0) throws -> BridgeSendResult {
+        bump("forwardText")
         var err: NSError?
         let json = go.forwardText(chatJID, text: text,
                                   ephemeralSec: ephemeralSeconds,
@@ -337,6 +391,7 @@ class WAClient: PhoneValidating, LIDResolving {
     nonisolated func forwardMedia(_ chatJID: String, refJSON: String,
                                   caption: String, fileName: String,
                                   ephemeralSeconds: Int32 = 0) throws -> BridgeSendResult {
+        bump("forwardMedia")
         var err: NSError?
         let json = go.forwardMedia(chatJID, refJSON: refJSON,
                                    caption: caption, fileName: fileName,
@@ -349,6 +404,7 @@ class WAClient: PhoneValidating, LIDResolving {
     nonisolated func editText(_ chatJID: String, _ msgID: String, _ newBody: String,
                               mentionedJIDs: [String] = [],
                               ephemeralSeconds: Int32 = 0) throws -> BridgeSendResult {
+        bump("editText")
         var err: NSError?
         let json = go.editText(chatJID, msgID: msgID, newBody: newBody,
                                mentionedJIDsJSON: encodeMentionsJSON(mentionedJIDs),
@@ -360,6 +416,7 @@ class WAClient: PhoneValidating, LIDResolving {
 
     func revokeMessage(_ chatJID: String, _ msgID: String,
                        _ targetSenderJID: String, _ targetFromMe: Bool) throws -> BridgeSendResult {
+        bump("revokeMessage")
         var err: NSError?
         let json = go.revokeMessage(chatJID, msgID: msgID,
                                     targetSenderJID: targetSenderJID,
@@ -373,6 +430,7 @@ class WAClient: PhoneValidating, LIDResolving {
                      targetSenderJID: String,
                      targetFromMe: Bool,
                      starred: Bool) throws {
+        bump("starMessage")
         try go.starMessage(chatJID,
                            targetMsgID: targetMsgID,
                            targetSenderJID: targetSenderJID,
@@ -381,10 +439,12 @@ class WAClient: PhoneValidating, LIDResolving {
     }
 
     func pinChat(chatJID: String, pinned: Bool) throws {
+        bump("pinChat")
         try go.pinChat(chatJID, pinned: pinned)
     }
 
     func muteChat(chatJID: String, mute: Bool, mutedUntilMs: Int64) throws {
+        bump("muteChat")
         try go.muteChat(chatJID, mute: mute, mutedUntilUnixMs: mutedUntilMs)
     }
 
@@ -393,6 +453,7 @@ class WAClient: PhoneValidating, LIDResolving {
                           targetSenderJID: String,
                           targetFromMe: Bool,
                           pinned: Bool) throws -> BridgeSendResult {
+        bump("pinMessageInChat")
         var err: NSError?
         let json = go.pinMessage(inChat: chatJID,
                                  targetMsgID: targetMsgID,
@@ -406,32 +467,39 @@ class WAClient: PhoneValidating, LIDResolving {
 
     func archiveChat(chatJID: String, archived: Bool,
                      lastTS: Int64, lastMsgID: String, fromMe: Bool) throws {
+        bump("archiveChat")
         try go.archiveChat(chatJID, archived: archived,
                            lastTS: lastTS, lastMsgID: lastMsgID, fromMe: fromMe)
     }
 
     func setGroupName(chatJID: String, name: String) throws {
+        bump("setGroupName")
         try go.setGroupName(chatJID, name: name)
     }
 
     func setGroupDescription(chatJID: String, description: String) throws {
+        bump("setGroupDescription")
         try go.setGroupDescription(chatJID, description: description)
     }
 
     func deleteChat(chatJID: String, lastTS: Int64,
                     lastMsgID: String, fromMe: Bool) throws {
+        bump("deleteChat")
         try go.deleteChat(chatJID, lastTS: lastTS, lastMsgID: lastMsgID, fromMe: fromMe)
     }
 
     func setContactName(jid: String, fullName: String, firstName: String) throws {
+        bump("setContactName")
         try go.setContactName(jid, fullName: fullName, firstName: firstName)
     }
 
     nonisolated func setBlocked(jid: String, blocked: Bool) throws {
+        bump("setBlocked")
         try go.setBlocked(jid, blocked: blocked)
     }
 
     nonisolated func listBlocked() throws -> [String] {
+        bump("listBlocked")
         var err: NSError?
         let json = go.listBlocked(&err)
         if let err { throw err }
@@ -443,6 +511,7 @@ class WAClient: PhoneValidating, LIDResolving {
     /// the bare own JID. nonisolated so the LinkedDevicesSheet can dispatch
     /// the IQ off the main actor.
     nonisolated func listLinkedDevices() throws -> [BridgeLinkedDevice] {
+        bump("listLinkedDevices")
         var err: NSError?
         let json = go.listLinkedDevices(&err)
         if let err { throw err }
@@ -456,6 +525,7 @@ class WAClient: PhoneValidating, LIDResolving {
     /// nonisolated so PrivacySettingsSheet can dispatch off the main
     /// actor.
     nonisolated func getPrivacySettings() throws -> BridgePrivacySettings {
+        bump("getPrivacySettings")
         var err: NSError?
         let json = go.getPrivacySettings(&err)
         if let err { throw err }
@@ -469,6 +539,7 @@ class WAClient: PhoneValidating, LIDResolving {
     /// readreceipts only accepts "all" / "none" (whatsmeow rejects the
     /// others server-side, so the UI must not offer them).
     nonisolated func setPrivacySetting(name: String, value: String) throws {
+        bump("setPrivacySetting")
         try go.setPrivacySetting(name, value: value)
     }
 
@@ -476,6 +547,7 @@ class WAClient: PhoneValidating, LIDResolving {
     /// store currently marks as pinned. Used to reconcile the sidebar
     /// at startup since events.Pin isn't re-emitted on reconnect.
     func listPinnedChats(jids: [String]) throws -> [String] {
+        bump("listPinnedChats")
         let jidsJSON = (try? JSONEncoder().encode(jids))
             .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
         var err: NSError?
@@ -490,6 +562,7 @@ class WAClient: PhoneValidating, LIDResolving {
     /// the sidebar at startup since events.Mute isn't re-emitted on
     /// reconnect.
     func listMutedChats(jids: [String]) throws -> [(jid: String, mutedUntilMs: Int64)] {
+        bump("listMutedChats")
         let jidsJSON = (try? JSONEncoder().encode(jids))
             .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
         var err: NSError?
@@ -512,6 +585,7 @@ class WAClient: PhoneValidating, LIDResolving {
                           options: [String],
                           selectableCount: Int,
                           ephemeralSeconds: Int32 = 0) throws -> BridgeSendPollResult {
+        bump("sendPollCreation")
         let optsJSON = (try? JSONEncoder().encode(options))
             .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
         var err: NSError?
@@ -534,6 +608,7 @@ class WAClient: PhoneValidating, LIDResolving {
                                   optionHashes: [String],
                                   pollOptions: [BridgePollOption],
                                   ephemeralSeconds: Int32 = 0) throws -> BridgeSendResult {
+        bump("sendPollVote")
         let hashesJSON = (try? JSONEncoder().encode(optionHashes))
             .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
         let optionsJSON = (try? JSONEncoder().encode(pollOptions))
@@ -553,6 +628,7 @@ class WAClient: PhoneValidating, LIDResolving {
     }
 
     nonisolated func downloadMedia(_ refJSON: String, to outPath: String) throws -> String {
+        bump("downloadMedia")
         var err: NSError?
         let out = go.downloadMedia(refJSON, outPath: outPath, error: &err)
         if let err { throw err }
@@ -563,6 +639,7 @@ class WAClient: PhoneValidating, LIDResolving {
     /// Use only when the strict download fails with integrity errors and the
     /// user has opted in.
     nonisolated func downloadMediaForce(_ refJSON: String, to outPath: String) throws -> String {
+        bump("downloadMediaForce")
         var err: NSError?
         let out = go.downloadMediaForce(refJSON, outPath: outPath, error: &err)
         if let err { throw err }
@@ -570,6 +647,7 @@ class WAClient: PhoneValidating, LIDResolving {
     }
 
     nonisolated func requestMediaRetry(chatJID: String, senderJID: String, msgID: String, fromMe: Bool, refJSON: String) throws {
+        bump("requestMediaRetry")
         try go.requestMediaRetry(chatJID, senderJID: senderJID, msgID: msgID, fromMe: fromMe, refJSON: refJSON)
     }
 
@@ -600,6 +678,7 @@ class WAClient: PhoneValidating, LIDResolving {
                                          oldestFromMe: Bool,
                                          oldestTimestampSec: Int64,
                                          count: Int) throws {
+        bump("requestOlderHistory")
         try go.requestOlderHistory(
             chatJID,
             oldestMsgID: oldestMsgID,
@@ -614,6 +693,7 @@ class WAClient: PhoneValidating, LIDResolving {
                                             beforeFromMe: Bool,
                                             beforeTSUnix: Int64,
                                             count: Int32) throws {
+        bump("requestFullHistorySync")
         try go.requestFullHistorySync(beforeChatJID,
                                       beforeMsgID: beforeMsgID,
                                       beforeFromMe: beforeFromMe,
@@ -625,12 +705,14 @@ class WAClient: PhoneValidating, LIDResolving {
     /// JID of the message author (chat peer for 1:1, participant for groups).
     nonisolated func markRead(chatJID: String, senderJID: String, messageIDs: [String]) throws {
         guard !messageIDs.isEmpty else { return }
+        bump("markRead")
         let idsJSON = (try? JSONEncoder().encode(messageIDs))
             .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
         try go.markRead(chatJID, senderJID: senderJID, msgIDsJSON: idsJSON)
     }
 
     nonisolated func fetchProfilePicture(jid: String, outPath: String) throws -> String {
+        bump("fetchProfilePicture")
         var err: NSError?
         let result = go.fetchProfilePicture(jid, outPath: outPath, error: &err)
         if let err { throw err }
@@ -641,6 +723,7 @@ class WAClient: PhoneValidating, LIDResolving {
     // runs the CGo round-trip + JSON decode off MainActor during the
     // burst of HistorySync events at initial sync.
     nonisolated func listGroups() throws -> [BridgeGroupModel] {
+        bump("listGroups")
         var err: NSError?
         let json = go.listGroups(&err)
         if let err { throw err }
@@ -648,6 +731,7 @@ class WAClient: PhoneValidating, LIDResolving {
     }
 
     func getGroupInfo(jid: String) throws -> BridgeGroupModel {
+        bump("getGroupInfo")
         var err: NSError?
         let json = go.getGroupInfo(jid, error: &err)
         if let err { throw err }
@@ -657,6 +741,7 @@ class WAClient: PhoneValidating, LIDResolving {
     /// Returns every sub-group linked under `parentJID` (a community
     /// parent), joined or not. Cheap directory listing.
     func listSubGroups(parentJID: String) throws -> [BridgeSubGroup] {
+        bump("listSubGroups")
         var err: NSError?
         let json = go.listSubGroups(parentJID, error: &err)
         if let err { throw err }
@@ -668,6 +753,7 @@ class WAClient: PhoneValidating, LIDResolving {
     /// JID. Throws the bridge error (forbidden / not-in-community)
     /// verbatim when the server rejects the call.
     func joinSubGroup(subJID: String) throws -> String {
+        bump("joinSubGroup")
         var err: NSError?
         let result = go.joinSubGroup(subJID, error: &err)
         if let err { throw err }
@@ -678,6 +764,7 @@ class WAClient: PhoneValidating, LIDResolving {
     // (F19) can run the CGo round-trip + array marshal off MainActor
     // during the burst of HistorySync events at initial sync.
     nonisolated func listContacts() throws -> [BridgeContact] {
+        bump("listContacts")
         var err: NSError?
         let json = go.listContacts(&err)
         if let err { throw err }
@@ -685,6 +772,7 @@ class WAClient: PhoneValidating, LIDResolving {
     }
 
     nonisolated func getUserInfo(jid: String) throws -> BridgeUserInfo {
+        bump("getUserInfo")
         var err: NSError?
         let json = go.getUserInfo(jid, error: &err)
         if let err { throw err }
@@ -692,6 +780,7 @@ class WAClient: PhoneValidating, LIDResolving {
     }
 
     nonisolated func checkOnWhatsApp(_ phone: String) throws -> PhoneCheckResult {
+        bump("checkOnWhatsApp")
         var err: NSError?
         let json = go.check(onWhatsApp: phone, error: &err)
         if let err { throw err }
@@ -702,6 +791,7 @@ class WAClient: PhoneValidating, LIDResolving {
     /// — the bridge call is synchronous and a multi-second create round-trip
     /// must not block the main actor.
     nonisolated func createGroup(name: String, participantJIDs: [String]) throws -> String {
+        bump("createGroup")
         let jids = try JSONEncoder().encode(participantJIDs)
         let jidsString = String(data: jids, encoding: .utf8) ?? "[]"
         var err: NSError?
@@ -718,6 +808,7 @@ class WAClient: PhoneValidating, LIDResolving {
     /// task — the bridge call is synchronous and the create round-trip must
     /// not block the main actor.
     nonisolated func createCommunity(name: String) throws -> String {
+        bump("createCommunity")
         var err: NSError?
         let out = go.createCommunity(name, error: &err)
         if let err { throw err }
@@ -734,6 +825,7 @@ class WAClient: PhoneValidating, LIDResolving {
     nonisolated func createSubGroup(parentJID: String,
                                     name: String,
                                     participantJIDs: [String]) throws -> String {
+        bump("createSubGroup")
         let jids = try JSONEncoder().encode(participantJIDs)
         let jidsString = String(data: jids, encoding: .utf8) ?? "[]"
         var err: NSError?
@@ -748,6 +840,7 @@ class WAClient: PhoneValidating, LIDResolving {
     /// Attaches a child group to a community parent. Both JIDs must be
     /// admin-controlled. Surfaces whatsmeow errors verbatim.
     nonisolated func linkSubGroup(parentJID: String, subJID: String) throws {
+        bump("linkSubGroup")
         try go.linkSubGroup(parentJID, subJIDStr: subJID)
     }
 
@@ -755,6 +848,7 @@ class WAClient: PhoneValidating, LIDResolving {
     /// isDefaultSubGroup; server accepts the IQ even on the default
     /// sub-group but it breaks the community.
     nonisolated func unlinkSubGroup(parentJID: String, subJID: String) throws {
+        bump("unlinkSubGroup")
         try go.unlinkSubGroup(parentJID, subJIDStr: subJID)
     }
 
@@ -765,6 +859,7 @@ class WAClient: PhoneValidating, LIDResolving {
     /// Nonisolated so `JoinRequestStore` can drive it from a detached
     /// task without hopping back to the main actor for every group.
     nonisolated func getGroupJoinRequests(chatJID: String) throws -> [BridgeJoinRequest] {
+        bump("getGroupJoinRequests")
         var err: NSError?
         let json = go.getGroupJoinRequests(chatJID, error: &err)
         if let err { throw err }
@@ -781,6 +876,7 @@ class WAClient: PhoneValidating, LIDResolving {
     nonisolated func updateGroupJoinRequests(chatJID: String,
                                              action: String,
                                              jids: [String]) throws -> [BridgeJoinRequestResult] {
+        bump("updateGroupJoinRequests")
         let encoded = try JSONEncoder().encode(jids)
         let jidsString = String(data: encoded, encoding: .utf8) ?? "[]"
         var err: NSError?
@@ -796,12 +892,14 @@ class WAClient: PhoneValidating, LIDResolving {
     /// Flips the require-admin-approval gate on a group on or off.
     /// Admin only.
     nonisolated func setGroupJoinApprovalMode(chatJID: String, on: Bool) throws {
+        bump("setGroupJoinApprovalMode")
         try go.setGroupJoinApprovalMode(chatJID, on: on)
     }
 
     /// Toggles announcement-mode on a group. When on, only admins may post.
     /// Admin only.
     nonisolated func setGroupAnnounce(chatJID: String, on: Bool) throws {
+        bump("setGroupAnnounce")
         try go.setGroupAnnounce(chatJID, on: on)
     }
 
@@ -809,6 +907,7 @@ class WAClient: PhoneValidating, LIDResolving {
     /// group info (name / description / icon).
     /// Admin only.
     nonisolated func setGroupLocked(chatJID: String, on: Bool) throws {
+        bump("setGroupLocked")
         try go.setGroupLocked(chatJID, on: on)
     }
 
@@ -817,28 +916,34 @@ class WAClient: PhoneValidating, LIDResolving {
     /// default "admin_add". Admin only — server returns 403 otherwise.
     nonisolated func setGroupMemberAddMode(chatJID: String,
                                            allMembersCanAdd: Bool) throws {
+        bump("setGroupMemberAddMode")
         try go.setGroupMemberAddMode(chatJID, allMembersCanAdd: allMembersCanAdd)
     }
 
     nonisolated func leaveGroup(jid: String) throws {
+        bump("leaveGroup")
         try go.leaveGroup(jid)
     }
 
     func sendTyping(_ chatJID: String, _ typing: Bool) throws {
+        bump("sendTyping")
         try go.sendTyping(chatJID, typing: typing)
     }
 
     func subscribePresence(_ jid: String) throws {
+        bump("subscribePresence")
         try go.subscribePresence(jid)
     }
 
     func sendPresence(available: Bool) throws {
+        bump("sendPresence")
         try go.sendPresence(available)
     }
 
     /// Forces a clean socket cycle on the Go side. nonisolated so the
     /// blocking gomobile call runs off the main actor.
     nonisolated func forceReconnect() {
+        bump("forceReconnect")
         try? go.reconnect()
     }
 
@@ -903,6 +1008,7 @@ class WAClient: PhoneValidating, LIDResolving {
                                  action: String,
                                  participantJIDs: [String])
         throws -> [BridgeParticipantModel] {
+        bump("updateGroupParticipants")
         let jids = try JSONEncoder().encode(participantJIDs)
         let jidsString = String(data: jids, encoding: .utf8) ?? "[]"
         var err: NSError?
@@ -916,6 +1022,7 @@ class WAClient: PhoneValidating, LIDResolving {
     }
 
     func setGroupPhoto(chatJID: String, jpeg: Data) throws -> String {
+        bump("setGroupPhoto")
         var err: NSError?
         let pictureID = go.setGroupPhoto(chatJID, jpeg: jpeg, error: &err)
         if let err { throw err }
@@ -923,22 +1030,27 @@ class WAClient: PhoneValidating, LIDResolving {
     }
 
     nonisolated func removeGroupPhoto(chatJID: String) throws {
+        bump("removeGroupPhoto")
         try go.removeGroupPhoto(chatJID)
     }
 
     nonisolated func setSelfAvatar(jpegBytes: Data) throws {
+        bump("setSelfAvatar")
         try go.setSelfAvatar(jpegBytes)
     }
 
     nonisolated func removeSelfAvatar() throws {
+        bump("removeSelfAvatar")
         try go.removeSelfAvatar()
     }
 
     nonisolated func setSelfAbout(_ message: String) throws {
+        bump("setSelfAbout")
         try go.setSelfAbout(message)
     }
 
     func getGroupInviteLink(chatJID: String, reset: Bool) throws -> String {
+        bump("getGroupInviteLink")
         var err: NSError?
         let link = go.getGroupInviteLink(chatJID, reset: reset, error: &err)
         if let err { throw err }
@@ -946,6 +1058,7 @@ class WAClient: PhoneValidating, LIDResolving {
     }
 
     func groupInfoFromLink(code: String) throws -> BridgeGroupModel {
+        bump("groupInfoFromLink")
         var err: NSError?
         let json = go.groupInfo(fromLink: code, error: &err)
         if let err { throw err }
@@ -954,6 +1067,7 @@ class WAClient: PhoneValidating, LIDResolving {
     }
 
     func joinGroupViaLink(code: String) throws -> String {
+        bump("joinGroupViaLink")
         var err: NSError?
         let jid = go.joinGroup(viaLink: code, error: &err)
         if let err { throw err }

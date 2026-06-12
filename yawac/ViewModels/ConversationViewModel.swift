@@ -833,8 +833,18 @@ final class ConversationViewModel {
                let row = try? context.fetch(
                 FetchDescriptor<PersistedMessage>(
                     predicate: #Predicate { $0.id == anchorID })).first {
-                let ids = snap.expiredOnLoad.map { $0.id }
-                autoRefetchExpiredBatch(anchor: row, allIDs: ids)
+                // F70: cap auto-refetch to the most-recent 12 expired
+                // messages per chat-open. Previously every expired id in
+                // the visible window got a fresh download attempt after
+                // the requestOlderHistory anchor returned; each failure
+                // re-fired `requestMediaRetry` (phone IQ → banner blink
+                // → battery drain). User can still manually refetch the
+                // older expired entries via the per-row retry button.
+                let recent = snap.expiredOnLoad
+                    .sorted { $0.timestamp > $1.timestamp }
+                    .prefix(12)
+                    .map { $0.id }
+                autoRefetchExpiredBatch(anchor: row, allIDs: Array(recent))
             }
         }
         let t = snap.timings
@@ -1072,6 +1082,27 @@ final class ConversationViewModel {
             }
             downloadTargets.append(
                 .init(id: p.id, kind: p.kind, refJSON: refJSON))
+        }
+
+        // F69: cap auto-downloads per chat-open. Each download that
+        // fails fires a `requestMediaRetry` IQ that wakes the phone
+        // (banner blink + battery drain). Counter evidence showed
+        // ~30-50 retries per chat-open across the visible history
+        // window — a chat with 30 image bubbles auto-tried 30 down-
+        // loads, most failed (old media's server bytes are gone),
+        // each kicked a phone IQ. Cap the auto-download batch to
+        // the newest N media-bearing messages; older ones surface
+        // a "tap to load" state via downloadErrors, so the user can
+        // still fetch them on demand. `rows` is ascending so
+        // `suffix(...)` keeps the freshest.
+        let maxAutoDownloads = 12
+        if downloadTargets.count > maxAutoDownloads {
+            let trimmed = Array(downloadTargets.suffix(maxAutoDownloads))
+            let skipped = downloadTargets.dropLast(maxAutoDownloads)
+            for t in skipped {
+                downloadErrors[t.id] = "tap to load"
+            }
+            downloadTargets = trimmed
         }
 
         // Pick initial scroll anchor: if there are unread inbound
@@ -1732,6 +1763,14 @@ final class ConversationViewModel {
 
     private func tryRequestMediaRetry(messageID: String, reason: String) {
         guard !retriesRequested.contains(messageID) else { return }
+        // F67: session-wide dedupe — `retriesRequested` is per-CVM and
+        // got reset on every chat-switch, so the same broken message
+        // re-issued a `requestMediaRetry` IQ each time the user
+        // re-opened its chat. Each IQ wakes the phone (banner blink +
+        // battery drain). Session set keeps the dedupe alive across
+        // CVM lifetimes for the process.
+        let session = chatList?.session
+        if let s = session, s.mediaRetryAttempted.contains(messageID) { return }
         let lower = reason.lowercased()
         let triggers = ["403", "404", "410",
                         "hash of media ciphertext",
@@ -1743,6 +1782,7 @@ final class ConversationViewModel {
         guard let row = try? context.fetch(descriptor).first,
               let refJSON = row.mediaRefJSON else { return }
         retriesRequested.insert(messageID)
+        session?.mediaRetryAttempted.insert(messageID)
         do {
             try client.requestMediaRetry(
                 chatJID: row.chatJID,
@@ -1760,11 +1800,16 @@ final class ConversationViewModel {
         guard let container = context?.container else { return }
         if !ok {
             let reason = "phone retry failed: \(error ?? "?")"
-            if looksLikeExpiredError(reason) {
-                markMediaExpired(messageID, reason: reason)
-            } else {
-                downloadErrors[messageID] = reason
-            }
+            // F68: always mark expired on retry failure. Previously only
+            // specific error strings ("phone retry returned no path",
+            // "403/404/410", "sha mismatch") flipped `mediaExpired`;
+            // other failures left the flag unset, so the next chat-open
+            // re-issued `requestMediaRetry` for the same id. Phone has
+            // already said no — there's nothing useful to re-ask for.
+            // Manual refetch via the Refetch-expired path (anchored
+            // history-sync IQ) is still available if the user wants to
+            // force-try later.
+            markMediaExpired(messageID, reason: reason)
             return
         }
         guard let newPath = newDirectPath, !newPath.isEmpty else {

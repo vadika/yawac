@@ -272,6 +272,18 @@ func (c *Client) dispatchWebMessage(chatJID string, wm *waWeb.WebMessageInfo) {
 		jm.Text = inner.GetConversation()
 	case inner.GetExtendedTextMessage() != nil:
 		jm.Text = inner.GetExtendedTextMessage().GetText()
+	case inner.GetInteractiveMessage() != nil,
+		inner.GetInteractiveResponseMessage() != nil,
+		inner.GetTemplateMessage() != nil,
+		inner.GetTemplateButtonReplyMessage() != nil,
+		inner.GetButtonsMessage() != nil,
+		inner.GetButtonsResponseMessage() != nil,
+		inner.GetListMessage() != nil,
+		inner.GetListResponseMessage() != nil,
+		inner.GetOrderMessage() != nil,
+		inner.GetProductMessage() != nil,
+		inner.GetHighlyStructuredMessage() != nil:
+		jm.Text = bestEffortBusinessText(inner)
 	}
 	if ctx := contextInfoFromMessage(inner); ctx != nil && ctx.GetStanzaID() != "" {
 		qKind, _, _, _, _ := classifyMessage(ctx.GetQuotedMessage())
