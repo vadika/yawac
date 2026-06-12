@@ -344,6 +344,7 @@ final class ChatListViewModel {
                     lastMessage: rawPreview,
                     lastTimestamp: Int64(ts.isFinite ? ts : 0),
                     unread: row.unread,
+                    bellEnabled: row.bellEnabled,
                     isCommunityParent: row.isCommunityParent,
                     communityParentJID: row.communityParentJID,
                     isDefaultSubGroup: row.isDefaultSubGroup,
@@ -1031,6 +1032,7 @@ final class ChatListViewModel {
             existing.pinnedAt = c.pinnedAt
             existing.archivedAt = c.archivedAt
             existing.mutedUntil = c.mutedUntil
+            existing.bellEnabled = c.bellEnabled
             existing.groupDescription = c.groupDescription
             if let preview { existing.lastMessageText = preview }
         } else {
@@ -1047,6 +1049,7 @@ final class ChatListViewModel {
                 archivedAt: c.archivedAt,
                 mutedUntil: c.mutedUntil,
                 groupDescription: c.groupDescription)
+            row.bellEnabled = c.bellEnabled
             context.insert(row)
         }
         try? context.save()
