@@ -2,6 +2,16 @@ import Foundation
 import UserNotifications
 import AppKit
 
+/// F73-F74: pure-function inputs for `buildNotificationContent`.
+/// All side-channel state (per-chat bell, global toggles) is passed
+/// in so the builder is testable without `UserDefaults` mocking.
+struct NotificationPrefs {
+    let enabled: Bool
+    let preview: Bool
+    let soundName: String  // "Default" / "Pop" / "Glass" / "None"
+    let bellEnabled: Bool
+}
+
 /// Surface a banner notification.
 ///
 /// On signed builds we'd use `UNUserNotificationCenter`. Ad-hoc/dev builds
@@ -44,32 +54,65 @@ enum NotificationService {
         center.setNotificationCategories([category])
     }
 
+    /// F73-F74: pure builder. Returns `nil` when the notification is fully
+    /// suppressed (master notifications-enabled toggle is off). Caller
+    /// short-circuits without scheduling a `UNNotificationRequest` or
+    /// firing the osascript fallback.
+    static func buildNotificationContent(
+        title: String,
+        subtitle: String?,
+        body: String,
+        chatJID: String,
+        prefs: NotificationPrefs
+    ) -> UNMutableNotificationContent? {
+        guard prefs.enabled else { return nil }
+        let content = UNMutableNotificationContent()
+        content.title = title
+        if let subtitle, !subtitle.isEmpty { content.subtitle = subtitle }
+        content.body = prefs.preview ? body : ""
+        content.userInfo = ["chatJID": chatJID]
+        // F64: wire the message category so the banner shows the inline
+        // Reply action.
+        content.categoryIdentifier = Self.messageCategoryID
+        if prefs.bellEnabled {
+            switch prefs.soundName {
+            case "Default": content.sound = .default
+            case "Pop":     content.sound = UNNotificationSound(named: UNNotificationSoundName("Pop.aiff"))
+            case "Glass":   content.sound = UNNotificationSound(named: UNNotificationSoundName("Glass.aiff"))
+            case "None":    content.sound = nil
+            default:        content.sound = .default
+            }
+        } else {
+            content.sound = nil
+        }
+        return content
+    }
+
     static func notify(
         title: String,
         body: String,
         chatJID: String,
         subtitle: String? = nil,
-        resolveMentions: ((String) -> String)? = nil
+        resolveMentions: ((String) -> String)? = nil,
+        bellEnabled: Bool = true
     ) {
-        let resolvedBody: String
-        if let resolveMentions {
-            resolvedBody = resolveMentionsText(body, resolver: resolveMentions)
-        } else {
-            resolvedBody = body
-        }
-
+        let resolvedBody: String = resolveMentions.map { resolver in
+            resolveMentionsText(body, resolver: resolver)
+        } ?? body
+        // `UserDefaults.standard.object(forKey:) as? Bool ?? true` honors
+        // @AppStorage default-true semantics when the key has never been
+        // written.
+        let prefs = NotificationPrefs(
+            enabled: UserDefaults.standard.object(forKey: "yawac.notifications.enabled") as? Bool ?? true,
+            preview: UserDefaults.standard.object(forKey: "yawac.notifications.preview") as? Bool ?? true,
+            soundName: UserDefaults.standard.string(forKey: "yawac.notifications.sound") ?? "Default",
+            bellEnabled: bellEnabled
+        )
+        guard let content = buildNotificationContent(
+            title: title, subtitle: subtitle, body: resolvedBody,
+            chatJID: chatJID, prefs: prefs
+        ) else { return }
         // Path A: official user-notification (works only on signed builds)
-        let content = UNMutableNotificationContent()
-        content.title = title
-        if let subtitle, !subtitle.isEmpty {
-            content.subtitle = subtitle
-        }
-        content.body = resolvedBody
-        content.sound = .default
-        content.userInfo = ["chatJID": chatJID]
-        // F64: wire the message category so the banner shows the inline
-        // Reply action.
-        content.categoryIdentifier = Self.messageCategoryID
         let req = UNNotificationRequest(
             identifier: UUID().uuidString,
             content: content,

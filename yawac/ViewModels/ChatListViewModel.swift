@@ -703,12 +703,17 @@ final class ChatListViewModel {
             if isMutedForNotification(chatJID: chatJID, message: message) {
                 // Suppressed by mute (unless mention pierces).
             } else {
+                // F73-F74: per-chat bell gate. Default to true when the
+                // row hasn't been resolved yet so we don't accidentally
+                // silence chats during cold-start.
+                let bell = chats.first(where: { $0.jid == chatJID })?.bellEnabled ?? true
                 NotificationService.notify(
                     title: title,
                     body: preview,
                     chatJID: chatJID,
                     subtitle: subtitle,
-                    resolveMentions: { [weak session] jid in session?.displayName(for: jid) ?? jid })
+                    resolveMentions: { [weak session] jid in session?.displayName(for: jid) ?? jid },
+                    bellEnabled: bell)
             }
         }
     }
@@ -791,12 +796,15 @@ final class ChatListViewModel {
         if isMuted(canonChat, now: Date()) {
             // Reaction notifications suppressed for muted chats.
         } else {
+            // F73-F74: per-chat bell gate (see message notification above).
+            let bell = chats.first(where: { $0.jid == canonChat })?.bellEnabled ?? true
             NotificationService.notify(
                 title: chatName,
                 body: "\(r.emoji) reacted to your message",
                 chatJID: canonChat,
                 subtitle: reactSubtitle,
-                resolveMentions: { [weak session] jid in session?.displayName(for: jid) ?? jid })
+                resolveMentions: { [weak session] jid in session?.displayName(for: jid) ?? jid },
+                bellEnabled: bell)
         }
     }
 
