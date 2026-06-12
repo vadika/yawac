@@ -6,6 +6,7 @@ struct Chat: Identifiable, Hashable {
     var lastMessage: String
     var lastTimestamp: Int64
     var unread: Int
+    var bellEnabled: Bool = true
     var isGroup: Bool { jid.hasSuffix("@g.us") }
     // Community linkage (zero/empty for normal chats):
     var isCommunityParent: Bool = false

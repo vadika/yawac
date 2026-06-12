@@ -250,6 +250,13 @@ final class PersistedChat {
     /// restart keeps the draft. Local to this device — WhatsApp drafts
     /// are not synced cross-device.
     var draft: String? = nil
+    /// F74: per-chat notification-sound suppression. Default `true` so
+    /// existing rows lightweight-migrate transparently. Independent of
+    /// `mutedUntil` — bell off keeps the banner but silences the sound;
+    /// mute suppresses the banner entirely. Not added to `init(...)`
+    /// because the default-value path keeps every existing call site
+    /// compiling; upsertPersisted assigns it explicitly.
+    var bellEnabled: Bool = true
 
     init(jid: String, name: String,
          lastMessageText: String? = nil,
