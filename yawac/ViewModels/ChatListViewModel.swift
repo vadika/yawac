@@ -1249,6 +1249,15 @@ final class ChatListViewModel {
         }
     }
 
+    /// F74: flip the per-chat bell. Local-only state — phone does not
+    /// see this preference. Persists via the existing `upsertPersisted`
+    /// round-trip (which copies `bellEnabled` from Chat → PersistedChat).
+    func setBellEnabled(chatJID: String, enabled: Bool) {
+        guard let idx = chats.firstIndex(where: { $0.jid == chatJID }) else { return }
+        chats[idx].bellEnabled = enabled
+        upsertPersisted(chats[idx])
+    }
+
     /// Cold-start reconcile: pull whatsmeow's local muted-chats list
     /// and align our rows. whatsmeow doesn't re-emit events.Mute for
     /// already-synced patches on reconnect.

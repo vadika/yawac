@@ -771,6 +771,10 @@ struct ChatInfoView: View {
             }
         }
 
+        // F74: NOTIFICATIONS — per-chat Sound toggle. Local-only; not
+        // synced to phone. Off + chat NOT muted → silent banner.
+        notificationsSection
+
         starredSection
         sharedMediaSection
         filesSection
@@ -1199,6 +1203,9 @@ struct ChatInfoView: View {
                   destructive: true, action: { confirmLeave = true }),
         ])
 
+        // F74: NOTIFICATIONS — per-chat Sound toggle (mirrors userBody).
+        notificationsSection
+
         starredSection
         sharedMediaSection
         filesSection
@@ -1300,6 +1307,42 @@ struct ChatInfoView: View {
                     subGroupRow(sub)
                     Rectangle().fill(Theme.hairline).frame(height: 1)
                 }
+            }
+        }
+    }
+
+    // ─── Notifications (F74) ─────────────────────────────────────────
+    // Per-chat Sound toggle. Local-only — does not round-trip to the
+    // phone. Persisted via `setBellEnabled` → `upsertPersisted` which
+    // copies `bellEnabled` into PersistedChat. Notification path reads
+    // `Chat.bellEnabled` in ChatListViewModel.ingest to decide between
+    // a default-sound banner and a silent banner.
+    @ViewBuilder
+    private var notificationsSection: some View {
+        let bell: Bool = session.chatList?.chats
+            .first(where: { $0.jid == chatJID })?
+            .bellEnabled ?? true
+        sectionCard(label: "NOTIFICATIONS") {
+            HStack(alignment: .top, spacing: 8) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Sound")
+                        .scaledUI(13)
+                        .foregroundStyle(Theme.text)
+                    Text("Play a sound with incoming-message banners.")
+                        .scaledUI(11)
+                        .foregroundStyle(Theme.textMuted)
+                }
+                Spacer()
+                Toggle("", isOn: Binding<Bool>(
+                    get: { bell },
+                    set: { newValue in
+                        session.chatList?.setBellEnabled(
+                            chatJID: chatJID, enabled: newValue)
+                    }
+                ))
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .controlSize(.small)
             }
         }
     }
