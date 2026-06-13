@@ -92,6 +92,11 @@ struct ChatInfoView: View {
     /// Transient error from the "Members can add new members" toggle
     /// (member-add mode). Surfaced under the row for ~6s and cleared.
     @State private var memberAddError: String?
+    /// F74: drives the "Until…" custom mute-end popover anchored on the
+    /// MUTE section card. `pickedUntil` is seeded one hour ahead and
+    /// reseeded each time the popover is opened.
+    @State private var showUntilPicker: Bool = false
+    @State private var pickedUntil: Date = Date().addingTimeInterval(3600)
 
     private var isGroup: Bool { chatJID.hasSuffix("@g.us") }
     /// True when this info pane is rendering the user's own self-chat.
@@ -771,6 +776,11 @@ struct ChatInfoView: View {
             }
         }
 
+        // F74: MUTE — preset durations + "Until…" custom date picker.
+        // Wraps `ChatListViewModel.muteChat`; mirrors the chat-row context
+        // menu in ChatListView. Local-only — does not round-trip to phone.
+        muteSection
+
         // F74: NOTIFICATIONS — per-chat Sound toggle. Local-only; not
         // synced to phone. Off + chat NOT muted → silent banner.
         notificationsSection
@@ -1203,6 +1213,9 @@ struct ChatInfoView: View {
                   destructive: true, action: { confirmLeave = true }),
         ])
 
+        // F74: MUTE — presets + "Until…" custom picker (mirrors userBody).
+        muteSection
+
         // F74: NOTIFICATIONS — per-chat Sound toggle (mirrors userBody).
         notificationsSection
 
@@ -1309,6 +1322,114 @@ struct ChatInfoView: View {
                 }
             }
         }
+    }
+
+    // ─── Mute (F74) ──────────────────────────────────────────────────
+    // Presets + "Until…" custom date picker. Wraps
+    // `ChatListViewModel.muteChat`; mirrors the chat-row context menu in
+    // ChatListView. Local-only — does not round-trip to the phone. The
+    // "Until…" affordance opens a popover with a compact DatePicker so
+    // the user can pick an arbitrary mute-end timestamp.
+    @ViewBuilder
+    private var muteSection: some View {
+        let chat: Chat? = session.chatList?.chats
+            .first(where: { $0.jid == chatJID })
+        let mutedUntil: Date? = chat?.mutedUntil
+        let isMuted: Bool = (mutedUntil.map { $0 > Date() }) ?? false
+        sectionCard(label: "MUTE") {
+            HStack(alignment: .top, spacing: 8) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Notifications")
+                        .scaledUI(13)
+                        .foregroundStyle(Theme.text)
+                    Text(muteStatusDescription(mutedUntil: mutedUntil,
+                                               isMuted: isMuted))
+                        .scaledUI(11)
+                        .foregroundStyle(Theme.textMuted)
+                }
+                Spacer()
+                Menu {
+                    Button("Mute for 8 hours") {
+                        muteChat(until: Date().addingTimeInterval(8 * 3600))
+                    }
+                    Button("Mute for 1 week") {
+                        muteChat(until: Date().addingTimeInterval(7 * 86400))
+                    }
+                    Button("Mute always") {
+                        muteChat(until: ChatListViewModel.muteForever)
+                    }
+                    Divider()
+                    Button("Until…") {
+                        // Reseed the picker each open so a stale value
+                        // from a prior session doesn't lurk in the past.
+                        pickedUntil = max(Date().addingTimeInterval(3600),
+                                          mutedUntil ?? .distantPast)
+                        showUntilPicker = true
+                    }
+                    if isMuted {
+                        Divider()
+                        Button("Unmute") { muteChat(until: nil) }
+                    }
+                } label: {
+                    Text(isMuted ? "Muted" : "Mute")
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .controlSize(.small)
+                .popover(isPresented: $showUntilPicker,
+                         arrowEdge: .top) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Mute until")
+                            .scaledUI(13, weight: .semibold)
+                        DatePicker("",
+                                   selection: $pickedUntil,
+                                   in: Date.now...,
+                                   displayedComponents: [.date, .hourAndMinute])
+                            .datePickerStyle(.compact)
+                            .labelsHidden()
+                        HStack {
+                            Spacer()
+                            Button("Cancel") { showUntilPicker = false }
+                            Button("Mute") {
+                                muteChat(until: pickedUntil)
+                                showUntilPicker = false
+                            }
+                            .keyboardShortcut(.defaultAction)
+                        }
+                    }
+                    .padding(16)
+                    .frame(minWidth: 280)
+                }
+            }
+        }
+    }
+
+    /// Human-readable subtitle for the MUTE card: surfaces the current
+    /// state (active duration / forever / off) without leaking the
+    /// year-9999 sentinel to the user.
+    private func muteStatusDescription(mutedUntil: Date?,
+                                       isMuted: Bool) -> String {
+        guard isMuted, let until = mutedUntil else {
+            return "Currently unmuted."
+        }
+        // Treat anything > 100 years out as the "Always" sentinel.
+        if until > Date().addingTimeInterval(100 * 365 * 86_400) {
+            return "Muted forever."
+        }
+        let f = DateFormatter()
+        f.dateStyle = .medium
+        f.timeStyle = .short
+        return "Muted until \(f.string(from: until))."
+    }
+
+    /// Thin wrapper around `ChatListViewModel.muteChat` that resolves the
+    /// current `Chat` snapshot for `chatJID`. Keeps the muteSection body
+    /// readable.
+    private func muteChat(until: Date?) {
+        guard let vm = session.chatList,
+              let chat = vm.chats.first(where: { $0.jid == chatJID })
+        else { return }
+        vm.muteChat(chat, until: until)
     }
 
     // ─── Notifications (F74) ─────────────────────────────────────────
