@@ -44,10 +44,10 @@ struct YawacApp: App {
         } catch {
             fatalError("ModelContainer: \(error)")
         }
-        // F73: respect Settings → General → "Keep in dock" at launch.
-        // Default true (regular app); when off, run as accessory (no dock).
-        let keep = UserDefaults.standard.object(forKey: "yawac.dock.keep") as? Bool ?? true
-        NSApp.setActivationPolicy(keep ? .regular : .accessory)
+        // F73 dock policy moved to .onAppear (NSApp isn't ready in
+        // App.init() — calling setActivationPolicy there triggers a
+        // Swift runtime assertion crash on launch).
+        //
         // F45: chat-scoped fetches need a B-tree index on
         // (chatJID, timestamp) etc. SwiftData's `#Index<T>` macro is
         // not used — adding it changes nothing in the entity attribute
@@ -101,6 +101,11 @@ struct YawacApp: App {
                 .background(Theme.bg)
                 .graphiteWindow()
                 .onAppear {
+                    // F73: apply initial dock policy. Moved here from
+                    // init() because NSApp isn't ready in App.init().
+                    let keep = UserDefaults.standard
+                        .object(forKey: "yawac.dock.keep") as? Bool ?? true
+                    NSApp.setActivationPolicy(keep ? .regular : .accessory)
                     // F73: bind the session every appearance (the
                     // singleton survives WindowGroup teardown), then
                     // reflect the current "Show in menu bar" setting.
