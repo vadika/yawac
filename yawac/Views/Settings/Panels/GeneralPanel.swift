@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 /// Settings → General. Five toggles + one Select grouped into General /
 /// Notifications cards.
@@ -32,6 +33,12 @@ struct GeneralPanel: View {
                     }
                     SettingsRow(label: "Keep in dock") {
                         SettingsSwitch(isOn: $keepInDock)
+                    }
+                }
+                .onChange(of: keepInDock) { _, newValue in
+                    NSApp.setActivationPolicy(newValue ? .regular : .accessory)
+                    if newValue {
+                        WindowToggler.bringToFront()
                     }
                 }
             }

@@ -45,6 +45,10 @@ struct YawacApp: App {
         } catch {
             fatalError("ModelContainer: \(error)")
         }
+        // F73: respect Settings → General → "Keep in dock" at launch.
+        // Default true (regular app); when off, run as accessory (no dock).
+        let keep = UserDefaults.standard.object(forKey: "yawac.dock.keep") as? Bool ?? true
+        NSApp.setActivationPolicy(keep ? .regular : .accessory)
         // F45: chat-scoped fetches need a B-tree index on
         // (chatJID, timestamp) etc. SwiftData's `#Index<T>` macro is
         // not used — adding it changes nothing in the entity attribute
