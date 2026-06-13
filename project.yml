@@ -66,10 +66,18 @@ targets:
         NSLocationWhenInUseUsageDescription: yawac uses your location only when you choose Send current location.
         LSMinimumSystemVersion: "14.0"
         CFBundleDisplayName: yawac
-        CFBundleShortVersionString: "0.10.5"
-        CFBundleVersion: "88"
+        CFBundleShortVersionString: "0.10.6"
+        CFBundleVersion: "89"
         ATSApplicationFontsPath: Fonts
         CFBundleIconName: AppIcon
+        # F72: prevent macOS from spawning a second yawac instance when
+        # the user taps a notification banner. Launch Services routes
+        # notification activation to whichever yawac.app bundle it
+        # picked for the bundle id (multiple bundles register over a
+        # dev's lifetime — build/dd, DerivedData, /Applications/...);
+        # without this flag a fresh process can be spawned even though
+        # the running yawac is the one that posted the notification.
+        LSMultipleInstancesProhibited: true
         SUFeedURL: https://github.com/vadika/yawac/releases/latest/download/appcast.xml
         SUPublicEDKey: YnHi982nr0r5CHtPBFeDiVttVsizvUQKlgH1TMeM0DE=
         SUEnableInstallerLauncherService: false

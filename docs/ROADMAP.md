@@ -248,6 +248,38 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **F72-F75 — Single-instance + settings wiring + per-chat mute**
+  (v0.10.6) — bundle.
+  - **F72** — `LSMultipleInstancesProhibited = true`. Stops macOS
+    from spawning a second yawac process when the user taps a
+    notification and Launch Services routes activation to a stale
+    bundle path (5+ register entries from build artifacts over
+    the dev's lifetime).
+  - **F73** — four Settings toggles now actually do something:
+    `yawac.notifications.enabled` gates `NotificationService.notify`
+    early-return; `yawac.notifications.preview` blanks the body
+    field but keeps the title; `yawac.notifications.sound` selects
+    Default / Pop / Glass / None via `UNNotificationSound(named:)`;
+    `yawac.dock.keep` flips `NSApp.activationPolicy`; `yawac
+    .menuBar.show` mounts an `NSStatusItem` (click → main window
+    forward — placeholder for future Menu-bar Quick-Send popover);
+    `yawac.launchAtLogin` register/unregister via
+    `SMAppService.mainApp`. `.onAppear` re-syncs the launch-at-
+    login AppStorage value from system truth so a manual
+    System Settings removal doesn't leave the toggle stuck on.
+  - **F74** — per-chat mute customization. `PersistedChat` gained
+    `bellEnabled: Bool = true` (lightweight migration — plain
+    default-value Bool, no `#Index`). ChatInfoView gained a
+    Sound toggle and a Mute → "Until…" `DatePicker` for
+    arbitrary expiry. Existing 8h / 1w / Always presets stay.
+    Bell-off renders banners silent; mute still suppresses
+    banners entirely — independent knobs.
+  - **F75** — `NotificationService.buildNotificationContent`
+    extracted as a pure function taking `NotificationPrefs`. All
+    side-channel state (per-chat bell + global toggles) flows in
+    as parameters so the gating matrix is unit-testable without
+    `UserDefaults` mocking. 8 XCTest cases cover the matrix.
+
 - ✅ **F64-F71 — Bundle: notif reply + IQ instrumentation +
   battery-drain fixes + business chats** (v0.10.5) — large bundle
   out of one investigation session driven by user-reported phone
