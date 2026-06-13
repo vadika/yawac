@@ -8,17 +8,39 @@ import SwiftUI
 ///   - Left-click  → show / hide / unminimize the main window.
 ///   - Right-click → drop the action menu (unread count, Quit, etc).
 ///
-/// `install(session:)` must be called from a SwiftUI lifecycle hook so
-/// `NSApp` is fully wired by the time we touch `NSStatusBar`.
+/// F73: the status item is now optional — `bind(session:)` caches the
+/// session on launch and `setEnabled(_:)` installs / tears down to
+/// follow the `yawac.menuBar.show` preference. `install()` must run
+/// from a SwiftUI lifecycle hook so `NSApp` is fully wired by the time
+/// we touch `NSStatusBar`.
 @MainActor
 final class MenuBarController: NSObject {
+    static let shared = MenuBarController()
+
     private var item: NSStatusItem?
     private weak var session: SessionViewModel?
     private var observationTask: Task<Void, Never>?
 
-    func install(session: SessionViewModel) {
-        guard self.item == nil else { return }
+    override private init() { super.init() }
+
+    /// Cache the session for later install/uninstall cycles driven by
+    /// the Settings toggle. Safe to call multiple times.
+    func bind(session: SessionViewModel) {
         self.session = session
+    }
+
+    /// F73: turn the status item on or off without tearing the cached
+    /// session reference.
+    func setEnabled(_ enabled: Bool) {
+        if enabled {
+            install()
+        } else {
+            tearDown()
+        }
+    }
+
+    private func install() {
+        guard self.item == nil else { return }
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = item.button {
             button.target = self
@@ -28,6 +50,14 @@ final class MenuBarController: NSObject {
         self.item = item
         refreshIcon()
         startObservingUnread()
+    }
+
+    private func tearDown() {
+        guard let item else { return }
+        observationTask?.cancel()
+        observationTask = nil
+        NSStatusBar.system.removeStatusItem(item)
+        self.item = nil
     }
 
     /// Re-arms whenever `session.totalUnread` mutates so the menubar

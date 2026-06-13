@@ -7,7 +7,6 @@ import Sparkle
 @main
 struct YawacApp: App {
     @State private var session = SessionViewModel()
-    @State private var menuBar = MenuBarController()
     @State private var showShortcuts = false
     // F41: Sparkle 2 updater. The controller owns its own Updater
     // instance, reads SUFeedURL + SUPublicEDKey from Info.plist, and
@@ -101,7 +100,15 @@ struct YawacApp: App {
                 .preferredColorScheme(.dark)
                 .background(Theme.bg)
                 .graphiteWindow()
-                .onAppear { menuBar.install(session: session) }
+                .onAppear {
+                    // F73: bind the session every appearance (the
+                    // singleton survives WindowGroup teardown), then
+                    // reflect the current "Show in menu bar" setting.
+                    MenuBarController.shared.bind(session: session)
+                    let show = UserDefaults.standard
+                        .object(forKey: "yawac.menuBar.show") as? Bool ?? false
+                    MenuBarController.shared.setEnabled(show)
+                }
                 .sheet(isPresented: $showShortcuts) {
                     KeyboardShortcutsView()
                 }

@@ -44,6 +44,9 @@ struct GeneralPanel: View {
                 .onChange(of: launchAtLogin) { _, newValue in
                     _ = LaunchAtLoginService.apply(newValue)
                 }
+                .onChange(of: showInMenuBar) { _, newValue in
+                    MenuBarController.shared.setEnabled(newValue)
+                }
                 .onAppear {
                     // System truth wins on first display so a manual System Settings
                     // removal doesn't leave the toggle stuck on.
