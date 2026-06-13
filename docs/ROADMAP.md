@@ -248,6 +248,20 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **F76 — Hotfix: launch crash from F73 dock policy in App.init()**
+  (v0.10.7) — v0.10.6 shipped with `NSApp.setActivationPolicy(...)`
+  called from `YawacApp.init()`. NSApplication isn't ready that
+  early in the SwiftUI lifecycle (App.init() runs before
+  NSApplicationMain has installed `NSApp`), so the call tripped a
+  Swift runtime assertion (`EXC_BREAKPOINT` / `_assertionFailure`)
+  and the process exited immediately on launch. Existing
+  v0.10.5 / v0.10.6 users auto-updating via Sparkle hit a
+  launch-loop until the hotfix lands. Moved the activation-policy
+  read+apply into the `WindowGroup`'s `.onAppear`, alongside the
+  menu-bar bind+enable that already used that pattern for the same
+  reason. Init now only sets up `ModelContainer` + spawns the
+  detached prune/index/etc. tasks, no `NSApp` touch.
+
 - ✅ **F72-F75 — Single-instance + settings wiring + per-chat mute**
   (v0.10.6) — bundle.
   - **F72** — `LSMultipleInstancesProhibited = true`. Stops macOS
