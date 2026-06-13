@@ -41,6 +41,14 @@ struct GeneralPanel: View {
                         WindowToggler.bringToFront()
                     }
                 }
+                .onChange(of: launchAtLogin) { _, newValue in
+                    _ = LaunchAtLoginService.apply(newValue)
+                }
+                .onAppear {
+                    // System truth wins on first display so a manual System Settings
+                    // removal doesn't leave the toggle stuck on.
+                    launchAtLogin = LaunchAtLoginService.isEnabled
+                }
             }
 
             VStack(alignment: .leading, spacing: 10) {
