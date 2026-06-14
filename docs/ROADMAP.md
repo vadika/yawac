@@ -248,6 +248,31 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **F77 — Stale "typing…" indicator after received message**
+  (v0.10.8) — User reported the peer presence dot/bubble would
+  appear after an inbound message arrived even though the sender
+  wasn't typing, and would stay stuck until app relaunch.
+  Root cause: `vm.peerTyping` was set directly from each
+  `.chatPresence` event with no TTL or fallback timer. WhatsApp's
+  protocol expects the sender's client to refresh the `composing`
+  state every ~10s while the peer is actively typing, and to send
+  a `paused` packet on stop. If the `paused` packet is dropped
+  (network blip, sender app backgrounded mid-type, socket
+  reconnect, message + composing bundled together with paused
+  lost) the indicator sticks because no further event resets it.
+  Fresh ConversationViewModel on chat-switch defaulted
+  `peerTyping = false`, which explained the relaunch / chat-swap
+  workaround.
+  Fix: introduced `ConversationViewModel.setPeerTyping(_:)` with
+  a 15s auto-clear `Task` re-armed on every `true` event and
+  cancelled on every `false`. 15s = 1.5× whatsmeow's composing
+  refresh cadence — keeps the indicator alive through a missed
+  refresh from active typing but self-heals dropped `paused`.
+  `peerTyping` is now `private(set)`; the single existing write
+  site in `ConversationView`'s event loop routes through the new
+  setter. Deinit cancels the timer alongside the existing
+  ingest-flush task.
+
 - ✅ **F76 — Hotfix: launch crash from F73 dock policy in App.init()**
   (v0.10.7) — v0.10.6 shipped with `NSApp.setActivationPolicy(...)`
   called from `YawacApp.init()`. NSApplication isn't ready that

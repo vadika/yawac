@@ -744,7 +744,7 @@ struct ConversationView: View {
                     session.ingestPushName(jid: m.senderJID, name: m.senderPushName)
                     vm.ingest(m)
                 case .chatPresence(let chat, _, let typing) where JIDNormalize.canonical(chat, client: client) == chatJID:
-                    vm.peerTyping = typing
+                    vm.setPeerTyping(typing)
                 case .receipt(let r) where Self.receiptMatches(r.chatJID, chat: chatJID, client: client):
                     vm.applyReceipt(r)
                 case .reaction(let r) where JIDNormalize.canonical(r.chatJID, client: client) == chatJID:

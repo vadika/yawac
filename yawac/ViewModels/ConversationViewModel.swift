@@ -38,7 +38,30 @@ final class ConversationViewModel {
     var draft: String = "" {
         didSet { scheduleDraftSave() }
     }
-    var peerTyping: Bool = false
+    private(set) var peerTyping: Bool = false
+    /// Auto-clear timer for `peerTyping`. WhatsApp refreshes the
+    /// `composing` packet ~every 10s while the peer is actively typing;
+    /// if the `paused` packet is dropped (network blip, sender app
+    /// backgrounded mid-type, socket reconnect) the indicator would
+    /// otherwise stick until chat-switch or relaunch.
+    @ObservationIgnored private var peerTypingClearTask: Task<Void, Never>?
+    /// Grace = 1.5× whatsmeow's ~10s composing refresh cadence.
+    static let peerTypingTTL: Duration = .seconds(15)
+
+    /// Apply a typing-state event from the peer. Re-arms a TTL on every
+    /// `true` (so a stream of `composing` refreshes keeps the indicator
+    /// alive) and clears immediately on `false`.
+    func setPeerTyping(_ typing: Bool) {
+        peerTypingClearTask?.cancel()
+        peerTypingClearTask = nil
+        peerTyping = typing
+        guard typing else { return }
+        peerTypingClearTask = Task { [weak self] in
+            try? await Task.sleep(for: Self.peerTypingTTL)
+            guard !Task.isCancelled, let self else { return }
+            self.peerTyping = false
+        }
+    }
     var receiptStatus: [String: UIMessage.Status] = [:]
     var localPaths: [String: String] = [:]
     /// Attachments staged in the composer, awaiting a caption / send.
@@ -681,6 +704,7 @@ final class ConversationViewModel {
         // Cancel the coalescing flush task so it doesn't sleep 50ms holding
         // a stale [weak self] reference after the CVM is gone.
         pendingIngestFlush?.cancel()
+        peerTypingClearTask?.cancel()
     }
 
     /// Hard cap on initial load — large chats freeze SwiftUI's LazyVStack
