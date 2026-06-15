@@ -248,6 +248,56 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **F78-F79 — Chat-switch ~10s beachball on large groups**
+  (v0.10.9) — User-reported "after long idle, switching between large
+  groups is vveeeeeery slow, ~10 seconds". Idle correlation was
+  incidental; the freeze reproduced on any chat-open into a large
+  group with persisted history near the F31v2 10k-row load cap.
+  Two coupled fixes from a `sample`-driven investigation.
+  - **F78 — Stop calling `proxy.scrollTo` on the full 10k-row list.**
+    First sample (PID 84931, pre-fix) showed 5371/8451 samples
+    (~64%) main thread blocked in `ScrollViewProxy.scrollTo` →
+    `LazyStack.firstIndex` → `ForEachState.firstOffset` →
+    AttributeGraph `input_value_ref_slow` walking every preceding
+    row's layout. `ConversationView` had `.defaultScrollAnchor(.bottom)`
+    on the ScrollView since F9 but also called `proxy.scrollTo(last
+    .id, .bottom)` in three places: first-paint when anchor is the
+    last message, count-grew-to-last branch (newCount > lastSeenCount),
+    and timelineGeneration onChange (F54 reaction/edit ride-to-bottom).
+    All three are redundant — `defaultScrollAnchor(.bottom)` lands
+    initial layout at the bottom natively, sticks on append, and
+    preserves user offset when scrolled up reading history. Killed
+    those three scrollTo calls. F54's atBottom guard and F55's
+    explicit atBottom=true post-scroll workaround go away with them.
+    `proxy.scrollTo` remains only for genuine non-bottom jumps
+    (find/quote hit via `pendingScrollToID`; first-paint when the
+    chat has unread or a cached back-pop anchor).
+  - **F79 — Rewindow with `beforeCount: 0` for initial non-bottom
+    scroll.** Second sample (PID 59476, post-F78) showed the
+    beachball had migrated to the F36 rewindow path: 4684/8820
+    samples (~53%) still in `proxy.scrollTo` → `ForEachList
+    .firstOffset` → `DynamicBody.updateValue` → `MessageRow` body
+    → `NSDataDetector.enumerateMatches` (link detection in text
+    bubbles). The unread-anchor path called
+    `rewindowAround(targetID:)` with the default `jumpWindowSize/2 =
+    1250` rows BEFORE the target; `proxy.scrollTo(target, .top)`
+    must lay out every preceding row to compute the target's pixel
+    offset, and each row body runs NSDataDetector synchronously.
+    1250 × NSDataDetector = seconds. Added `beforeCount: Int?`
+    parameter to `rewindowAround`; initial-scroll path passes `0`
+    so the target lands at slice index 0 and `scrollTo(.top)`
+    offset compute is O(0). User sees first-unread at viewport top
+    and scrolls down through unread; "Load earlier" surfaces older
+    rows on demand. Quote / find jumps keep the centered window
+    for scroll-up context.
+  - **Result:** third sample (PID 62372, post-F78+F79) shows
+    scrollTo down to 717/7774 samples (~9%); 3218 samples (~31%)
+    mach_msg idle (event loop responsive). Residual ~1-2s cold-
+    cache freeze on truly cold groups (SwiftData faults +
+    `applejpeg_decode` cold ImageIO) tracked as a separate
+    investigation — different fix surface (preheat tuning, eager
+    contact-map fetch, avatar decode prewarm).
+
 - ✅ **F77 — Stale "typing…" indicator after received message**
   (v0.10.8) — User reported the peer presence dot/bubble would
   appear after an inbound message arrived even though the sender

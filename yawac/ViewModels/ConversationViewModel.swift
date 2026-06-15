@@ -377,10 +377,20 @@ final class ConversationViewModel {
     /// detached background `ModelContext` bound to the shared
     /// container; only the final `messages = …` commit hops back to
     /// MainActor. Keeps the jump from freezing the UI on large chats.
-    private func rewindowAround(targetID: String) async -> Bool {
+    func rewindowAround(targetID: String, beforeCount: Int? = nil) async -> Bool {
         guard let container = context?.container else { return false }
         let jid = chatJID
-        let windowHalf = Self.jumpWindowSize / 2
+        // F79: `beforeCount` controls how many rows BEFORE the target
+        // land in the slice. `proxy.scrollTo(target, .top)` must lay
+        // out every preceding row to compute the target's pixel
+        // offset, and each row's body eval runs NSDataDetector for
+        // link detection — 1250 preceding rows = seconds of beachball
+        // on rarely-opened large groups. Initial-scroll path uses
+        // `beforeCount: 0` so the target lands at position 0 and
+        // scrollTo's offset compute is O(0). Quote/find jumps keep
+        // the centered window for scroll-up context.
+        let beforeHalf = beforeCount ?? (Self.jumpWindowSize / 2)
+        let afterHalf = Self.jumpWindowSize - beforeHalf
         let uiMessages = await Task.detached(priority: .userInitiated) {
             () -> [UIMessage]? in
             let bgCtx = ModelContext(container)
@@ -390,19 +400,22 @@ final class ConversationViewModel {
                 return nil
             }
             let targetTs = target.timestamp
-            var beforeDesc = FetchDescriptor<PersistedMessage>(
-                predicate: #Predicate {
-                    $0.chatJID == jid && $0.timestamp <= targetTs
-                },
-                sortBy: [SortDescriptor(\.timestamp, order: .reverse)])
-            beforeDesc.fetchLimit = windowHalf
+            var beforeRows: [PersistedMessage] = []
+            if beforeHalf > 0 {
+                var beforeDesc = FetchDescriptor<PersistedMessage>(
+                    predicate: #Predicate {
+                        $0.chatJID == jid && $0.timestamp < targetTs
+                    },
+                    sortBy: [SortDescriptor(\.timestamp, order: .reverse)])
+                beforeDesc.fetchLimit = beforeHalf
+                beforeRows = (try? bgCtx.fetch(beforeDesc)) ?? []
+            }
             var afterDesc = FetchDescriptor<PersistedMessage>(
                 predicate: #Predicate {
-                    $0.chatJID == jid && $0.timestamp > targetTs
+                    $0.chatJID == jid && $0.timestamp >= targetTs
                 },
                 sortBy: [SortDescriptor(\.timestamp, order: .forward)])
-            afterDesc.fetchLimit = windowHalf
-            let beforeRows = (try? bgCtx.fetch(beforeDesc)) ?? []
+            afterDesc.fetchLimit = afterHalf
             let afterRows = (try? bgCtx.fetch(afterDesc)) ?? []
             let combined = beforeRows.reversed() + afterRows
             // Build the [UIMessage] array entirely on the bg context —

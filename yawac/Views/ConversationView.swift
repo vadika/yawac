@@ -540,60 +540,66 @@ struct ConversationView: View {
                             }
                         }
                         .onChange(of: vm.messages.count) { _, newCount in
-                            // First population: anchor to initialAnchorID
-                            // (first-unread, or latest if all read).
-                            // Subsequent growth: auto-scroll only if user
-                            // hasn't scrolled away (we just always follow
-                            // for now since we don't track scroll offset).
+                            // F78: defaultScrollAnchor(.bottom) on the
+                            // ScrollView (line ~483) handles initial
+                            // bottom-alignment + auto-stick on append
+                            // natively. Calling `proxy.scrollTo(last.id,
+                            // .bottom)` here used to beachball ~10s on
+                            // large-group chat-switch — sample showed
+                            // 64% main wall in `LazyStack.firstIndex` /
+                            // `ForEachState.firstOffset` / AttributeGraph
+                            // `input_value_ref_slow` walking 10k row ids
+                            // to resolve the target offset. Skip
+                            // scrollTo for the bottom path entirely.
+                            //
+                            // Non-bottom anchors (first-unread chat,
+                            // cached back-pop anchor) still need a
+                            // jump — but rewindow to a 2500-row slice
+                            // first (F36 pattern) so scrollTo walks a
+                            // small list.
                             if !didInitialScroll {
-                                // Restore order on a fresh chat open:
-                                // 1) cached scroll anchor from a prior
-                                //    visit (back-pop into a previously
-                                //    visited chat) — only used when the
-                                //    referenced message is still loaded;
-                                // 2) initialAnchorID (first-unread);
-                                // 3) the latest message.
                                 let cached = session.nav.anchor(jid: chatJID)
                                 let cachedHit = cached.flatMap { id in
                                     vm.messages.contains(where: { $0.id == id }) ? id : nil
                                 }
-                                let anchor = cachedHit
-                                    ?? vm.initialAnchorID
-                                    ?? vm.messages.last?.id
-                                guard let anchor else { return }
-                                let position: UnitPoint =
-                                    anchor == vm.messages.last?.id ? .bottom : .top
-                                DispatchQueue.main.async {
-                                    proxy.scrollTo(anchor, anchor: position)
+                                let nonBottomAnchor: String? = {
+                                    if let hit = cachedHit, hit != vm.messages.last?.id { return hit }
+                                    if let unread = vm.initialAnchorID, unread != vm.messages.last?.id { return unread }
+                                    return nil
+                                }()
+                                if let target = nonBottomAnchor {
+                                    Task { @MainActor in
+                                        // F79: beforeCount=0 puts target at
+                                        // position 0 of the slice — scrollTo
+                                        // offset compute is O(0), no
+                                        // preceding-row layouts. Without
+                                        // this, scrollTo lays out 1250
+                                        // preceding rows × NSDataDetector =
+                                        // seconds of beachball.
+                                        _ = await vm.rewindowAround(targetID: target, beforeCount: 0)
+                                        proxy.scrollTo(target, anchor: .top)
+                                        didInitialScroll = true
+                                        lastSeenCount = vm.messages.count
+                                        atBottom = false
+                                    }
+                                } else {
                                     didInitialScroll = true
                                     lastSeenCount = newCount
+                                    atBottom = true
                                 }
-                            } else if newCount > lastSeenCount, let last = vm.messages.last {
-                                proxy.scrollTo(last.id, anchor: .bottom)
+                            } else if newCount > lastSeenCount {
+                                // defaultScrollAnchor(.bottom) auto-sticks
+                                // to bottom on append when user was at
+                                // bottom, and preserves user offset when
+                                // they're scrolled up reading history.
+                                // No explicit scrollTo needed; old F55
+                                // workaround for unreliable
+                                // BottomVisibilityTracker.onAppear is
+                                // replaced by the explicit atBottom
+                                // tracking driven by user-visible scroll
+                                // state.
                                 lastSeenCount = newCount
-                                // F55: BottomVisibilityTracker swaps its
-                                // onAppear/onDisappear modifier branches
-                                // when `isLast` flips on the new tail row.
-                                // In a LazyVStack the new last row's
-                                // onAppear is unreliable (often skipped if
-                                // the row was offscreen at append time),
-                                // leaving atBottom stuck false → chevron
-                                // visible even when scrollTo just put the
-                                // row dead-center in the viewport. Force
-                                // it explicitly here.
-                                atBottom = true
                             }
-                        }
-                        .onChange(of: vm.timelineGeneration) { _, _ in
-                            // F54: keep the chat pinned to the bottom when
-                            // the content height grows from a non-count
-                            // change (reactions, edits, status footer, etc).
-                            // Only fires when the user was already at the
-                            // bottom — won't yank them back if they scrolled
-                            // up to read older history.
-                            guard atBottom, let last = vm.messages.last else { return }
-                            proxy.scrollTo(last.id, anchor: .bottom)
-                            atBottom = true
                         }
                         .onChange(of: vm.pendingScrollToID) { _, id in
                             guard let id else { return }
