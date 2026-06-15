@@ -45,6 +45,12 @@ struct ConversationView: View {
     /// on `.onDisappear` so a back-pop into this chat restores roughly
     /// the same scroll position rather than snapping to the bottom.
     @State private var lastVisibleMessageID: String?
+    /// F82: drives the macOS 14+ `.scrollPosition(id:anchor:)` modifier.
+    /// Setting this id is O(1) lookup (SwiftUI's scrollPosition path)
+    /// vs `proxy.scrollTo(id, anchor:)` which constructs the entire
+    /// ForEach view list via AttributeGraph → O(N) walk, dominating
+    /// the residual chat-switch beachball on unread-anchor opens.
+    @State private var scrollAnchorID: String?
     @State private var showForwardPicker = false
     @State private var pendingDelete: Chat?
     @State private var pendingBlock: Chat?
@@ -467,7 +473,13 @@ struct ConversationView: View {
                                             isFindCurrent: vm.findHits.indices.contains(vm.findCurrentIdx)
                                                 && vm.findHits[vm.findCurrentIdx].messageID == msg.id
                                         )
-                                        .id(msg.id)
+                                        // F82: explicit .id() removed —
+                                        // ForEach's Identifiable id from
+                                        // TimelineItem is the raw msg.id
+                                        // now, so scrollPosition / scrollTo
+                                        // can resolve targets from data
+                                        // without constructing each row's
+                                        // body to fire its `.id()` modifier.
                                         .modifier(BottomVisibilityTracker(
                                             isLast: msg.id == vm.messages.last?.id,
                                             atBottom: $atBottom))
@@ -481,6 +493,7 @@ struct ConversationView: View {
                             .padding(.vertical, 8)
                         }
                         .defaultScrollAnchor(.bottom)
+                        .scrollPosition(id: $scrollAnchorID, anchor: .top)
                         // F49v2: typing indicator rendered via
                         // safeAreaInset(edge: .bottom) so SwiftUI shifts the
                         // ScrollView's content inset to match. Earlier
@@ -568,19 +581,26 @@ struct ConversationView: View {
                                     return nil
                                 }()
                                 if let target = nonBottomAnchor {
+                                    // F82: flip didInitialScroll synchronously
+                                    // so the messages-publish inside the Task's
+                                    // rewindowAround doesn't re-enter this
+                                    // branch via the next onChange fire.
+                                    didInitialScroll = true
+                                    atBottom = false
                                     Task { @MainActor in
                                         // F79: beforeCount=0 puts target at
-                                        // position 0 of the slice — scrollTo
-                                        // offset compute is O(0), no
-                                        // preceding-row layouts. Without
-                                        // this, scrollTo lays out 1250
-                                        // preceding rows × NSDataDetector =
-                                        // seconds of beachball.
+                                        // slice index 0 so the post-rewindow
+                                        // scrollPosition assignment doesn't
+                                        // need preceding-row layouts.
+                                        // F82: scrollPosition(id:) is O(1)
+                                        // lookup; proxy.scrollTo here used to
+                                        // walk the entire ForEach view list
+                                        // via AttributeGraph regardless of
+                                        // target position (~2s on a 2500-row
+                                        // rewindow slice).
                                         _ = await vm.rewindowAround(targetID: target, beforeCount: 0)
-                                        proxy.scrollTo(target, anchor: .top)
-                                        didInitialScroll = true
+                                        scrollAnchorID = target
                                         lastSeenCount = vm.messages.count
-                                        atBottom = false
                                     }
                                 } else {
                                     didInitialScroll = true
@@ -603,15 +623,16 @@ struct ConversationView: View {
                         }
                         .onChange(of: vm.pendingScrollToID) { _, id in
                             guard let id else { return }
-                            // F36: no withAnimation. LazyVStack with
-                            // 10k rows + animated scrollTo across a
-                            // multi-month gap forces SwiftUI to
-                            // instantiate every intermediate row to
-                            // interpolate. Main thread blocks for
-                            // seconds; the window goes blank during
-                            // the freeze. Instant jump keeps it on
-                            // one rendering pass.
-                            proxy.scrollTo(id, anchor: .center)
+                            // F82: scrollPosition(id:) is the macOS 14+
+                            // O(1) scroll-to-id path; the prior
+                            // proxy.scrollTo here walked the entire
+                            // ForEach view list (~seconds on rewindowed
+                            // jump-to-quoted slices). UX shift: target
+                            // lands at viewport top (modifier anchor)
+                            // instead of centered — find/quote hits are
+                            // still in view, just not vertically
+                            // centered.
+                            scrollAnchorID = id
                             vm.didFinishScroll(to: id)
                             vm.pendingScrollToID = nil
                         }

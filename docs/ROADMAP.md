@@ -248,6 +248,59 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **F80-F82 — Cold-cache chat-switch residual: avatar preheat,
+  preheat budget, raw row id for scrollTo** (v0.10.10) — followups
+  to F78+F79. Investigator-driven scan of the residual ~1-2s
+  cold-cache freeze surfaced three orthogonal fixes; iterative
+  `sample` runs after each landing narrowed the root cause.
+  - **F80 — Dedupe sender JID before `canonicalize` in avatar
+    preheat.** `ConversationViewModel.buildHistorySnapshot` walked
+    the full `messages.reversed()` array calling
+    `canonicalize(m.senderJID)` per row. `canonicalize` lowers to
+    `JIDNormalize.canonical` → `client.resolveLIDToPN` — a sync
+    CGo bridge crossing for every `@lid` sender (~100µs each).
+    Large groups paid 2500+ bridge calls (~250ms) even though only
+    ~60 unique senders ever cleared the existing
+    `seenAvatarKeys` canonical dedupe. Added a raw-JID
+    `seenSenderRaw` Set walked BEFORE `canonicalize`, so the
+    bridge fires at most ~60 times.
+  - **F81 — Trim image+video preheat budget 30 → 20.** Cold
+    ImageIO JPEG decode (`AppleJPEGReadPlugin::decodeImageImp`)
+    appeared 127 times in the F79 sample. Visible bottom window
+    is ~10 rows; 20 covers it with chevron-down headroom while
+    ~halving the cold-decode wall.
+  - **F82 — Drop explicit `.id(msg.id)` modifier; raw `msg.id`
+    in `TimelineItem.id`; migrate jumps to
+    `.scrollPosition(id:anchor:)`.** Post-F79 + F80 + F81 sample
+    showed `proxy.scrollTo` STILL eating 3882/9567 samples
+    (~41%) on unread-anchor chat-opens. Stack chained
+    `ScrollViewProxy.scrollTo` → `LazyStack.firstIndex` →
+    `_ViewList_Node.firstOffset` → `DynamicBody.updateValue` →
+    `ViewBodyAccessor.updateBody` → `MessageRow` body →
+    `NSDataDetector.enumerateMatches`. SwiftUI's
+    `ForEachState.firstOffset` had to construct every row's
+    body to resolve its `.id(msg.id)` explicit modifier value,
+    and each body eval ran NSDataDetector for link detection.
+    `TimelineItem.id` was prefixed (`"m-\(m.id)"`) so dropping
+    the explicit modifier required matching ids — landed
+    together: TimelineItem.id for `.message` returns raw
+    `m.id`, the `.id(msg.id)` modifier inside ForEach is
+    removed, jumps go through a new
+    `@State scrollAnchorID: String?` bound to
+    `.scrollPosition(id: $scrollAnchorID, anchor: .top)` on the
+    ScrollView. Post-fix sample: `ScrollViewProxy.scrollTo` = 1
+    sample / 10231 (~0.01%); main thread 30% idle in
+    `mach_msg`; remaining time is normal SwiftUI layout work
+    (CA::Transaction commit, NSView layoutSubtree, LazyStack
+    placement). Cold-cache chat-switch freeze gone. UX shift:
+    find/quote hits land at viewport top instead of vertically
+    centered — still in view, just not centered.
+  Also raced-fixed in F82: synchronously set
+  `didInitialScroll = true` before the rewindow Task to prevent
+  re-entry of the first-paint branch when the Task's
+  `messages = ...` assignment fires another `onChange(of:
+  vm.messages.count)`.
+
 - ✅ **F78-F79 — Chat-switch ~10s beachball on large groups**
   (v0.10.9) — User-reported "after long idle, switching between large
   groups is vveeeeeery slow, ~10 seconds". Idle correlation was

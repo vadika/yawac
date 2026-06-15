@@ -1192,7 +1192,13 @@ final class ConversationViewModel {
         // Caps: 30 files, 5 MB per file — bounds memory for
         // pathological attachments.
         var preheatThumbs: [String: PreheatImage] = [:]
-        let preheatMaxCount = 30
+        // F81: trimmed image+video preheat budget 30 → 20. Cold ImageIO
+        // JPEG decode dominates the residual ~1-2s freeze on rarely-
+        // opened large groups (~127 main samples in
+        // AppleJPEGReadPlugin::decodeImageImp); typical visible window
+        // is ~10 rows, so 20 covers it with one chevron-down's worth of
+        // headroom while ~halving the cold-decode wall.
+        let preheatMaxCount = 20
         let preheatPerFileCap = 5 * 1024 * 1024
         var preheatRemaining = preheatMaxCount
         // Iterate the persisted rows back-to-front: `displayable` is
@@ -1252,9 +1258,19 @@ final class ConversationViewModel {
         var preheatAvatars: [String: PreheatImage] = [:]
         let avatarPreheatMaxCount = 60
         var avatarPreheatRemaining = avatarPreheatMaxCount
+        // F80: dedupe on the BARE senderJID before invoking canonicalize.
+        // `canonicalize` → `JIDNormalize.canonical` → `client.resolveLIDToPN`
+        // hits the whatsmeow CGo bridge synchronously for every `@lid`
+        // sender (~100µs each). Old loop fired canonicalize per-message
+        // even though only ~60 unique senders ever cleared the canonical
+        // dedupe — a 2500-row group meant 2500 bridge crossings
+        // (~250ms) when the avatar-key dedupe only needed ~60. Walking
+        // raw-JID first short-circuits at the string-compare layer.
+        var seenSenderRaw: Set<String> = []
         var seenAvatarKeys: Set<String> = []
         for m in messages.reversed() {
             if avatarPreheatRemaining == 0 { break }
+            if !seenSenderRaw.insert(m.senderJID).inserted { continue }
             let key = canonicalize(m.senderJID)
             if !seenAvatarKeys.insert(key).inserted { continue }
             guard let url = AvatarCache.cachedURL(for: key),

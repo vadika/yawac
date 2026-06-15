@@ -20,7 +20,15 @@ enum TimelineItem: Identifiable {
     var id: String {
         switch self {
         case .dateHeader(let d): return "h-\(Int(d.timeIntervalSince1970))"
-        case .message(let m):    return "m-\(m.id)"
+        // F82: raw m.id (no "m-" prefix) so ForEach's Identifiable id
+        // matches what `proxy.scrollTo` / `.scrollPosition(id:)` are
+        // called with. Without this, the explicit `.id(msg.id)`
+        // modifier inside the row body had to fire — forcing
+        // ForEachState.firstOffset to construct every row's body to
+        // resolve its scroll-target id. WhatsApp messageIDs are
+        // alphanumeric UUID-shaped — never collide with the "h-" header
+        // prefix.
+        case .message(let m):    return m.id
         }
     }
 }
