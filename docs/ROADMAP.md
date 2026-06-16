@@ -248,6 +248,60 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **F83-F84 — Issue #6: messages received while yawac down stay
+  missing after reconnect** (v0.10.11) — User report (@feedface,
+  GitHub issue #6): "group message does not update if yawac was
+  closed and the message read on iPhone. There seemed to be a sync,
+  but the message is not there." User-confirmed reproduction:
+  yawac down → phone receives message → yawac up → message absent
+  in sidebar + scrollback → "Load earlier" and "Full sync" don't
+  fetch it → re-pair DOES surface it.
+  - **F83 — OfflineSync diagnostic instrumentation.** Added handlers
+    for `*events.OfflineSyncPreview` (fires when server announces
+    offline-buffered counts) and `*events.OfflineSyncCompleted`
+    (fires when drain ends) — bridge/events.go previously had no
+    case for either, silently dropping them. New
+    `bridge/offline_drain.go` tracker records the announced
+    `total/appdata/messages/notifications/receipts` from preview,
+    counts each subsequent `*events.Message` and `*events.Receipt`
+    arriving during the in-flight window, and logs both to
+    `/tmp/yawac-offline.log` so the gap (server said N, got M) is
+    visible. GUI app's stderr is detached by macOS Launch Services,
+    so a stable file path is used as the diagnostic sink.
+    Dispatched as new bridge events `OfflineSyncPreview` /
+    `OfflineSyncCompleted` for future Swift-side surfacing.
+  - **F84 — `busy_timeout=5000` + `synchronous=NORMAL` on
+    whatsmeow's SQLite store.** F83 instrumentation didn't catch
+    OfflineSync events firing in a fresh session — drain wasn't
+    activating because something further upstream was already
+    failing. Inspecting `/tmp/yawac.log` surfaced the actual
+    smoking gun: 52 `[whatsmeow ERROR] Failed to store message
+    secret keys in history sync: database is locked (5)
+    (SQLITE_BUSY)` errors, plus `[whatsmeow ERROR] Failed to
+    decrypt prekey message: failed to save identity ... database
+    is locked (5) (SQLITE_BUSY)` — meaning the Signal-Protocol
+    prekey decryption was dropping incoming messages because the
+    identity-save lost the write-lock race. The bridge's
+    `openContainer` only set WAL mode; modernc.org/sqlite
+    defaults `busy_timeout` to 0, so any concurrent writer
+    immediately returned `SQLITE_BUSY` instead of waiting.
+    Concurrent goroutines (decryption, history-sync, contact
+    reconcile, identity-save) race for the WAL writer slot; the
+    loser drops its in-flight message silently. Whatsmeow logs the
+    error and skips the message; the bridge never sees a
+    corresponding `*events.Message`; yawac never persists it.
+    Re-pair works because it wipes Signal state — there's nothing
+    to contend with during initial bootstrap. Fix: extend the DSN
+    in `bridge/store.go:openContainer` with
+    `_pragma=busy_timeout(5000)` so concurrent writers wait up to
+    5s for the lock instead of failing immediately, plus
+    `_pragma=synchronous(NORMAL)` (the safe WAL pairing — durable
+    across app crash, only at risk on power loss within the WAL
+    checkpoint window; whatsmeow store losses on power loss are
+    acceptable since the phone has the canonical copy). Verified:
+    in identical post-launch session, SQLITE_BUSY count dropped
+    52 → 1.
+
 - ✅ **F80-F82 — Cold-cache chat-switch residual: avatar preheat,
   preheat budget, raw row id for scrollTo** (v0.10.10) — followups
   to F78+F79. Investigator-driven scan of the residual ~1-2s

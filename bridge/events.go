@@ -49,9 +49,40 @@ func (c *Client) handleWAEvent(evt any) {
 			"platform": v.Platform,
 		})
 		c.dispatch("PairSuccess", string(b))
+	case *events.OfflineSyncPreview:
+		// F83 diagnostic: log the server-announced offline-drain counts
+		// so we can compare against what actually arrives via *events.Message
+		// between the preview and OfflineSyncCompleted. Issue #6: messages
+		// received on phone while yawac is down don't appear after yawac
+		// reconnects; re-pair (HistorySync INITIAL_BOOTSTRAP) does fetch
+		// them. Need to know whether the gap is server→bridge (no Message
+		// event arrives) or bridge→Swift (arrives but filtered).
+		c.offlineDrain.start(v.Total, v.AppDataChanges, v.Messages, v.Notifications, v.Receipts)
+		offlineLog("preview total=%d appdata=%d messages=%d notifications=%d receipts=%d",
+			v.Total, v.AppDataChanges, v.Messages, v.Notifications, v.Receipts)
+		b, _ := json.Marshal(map[string]any{
+			"total":         v.Total,
+			"appdata":       v.AppDataChanges,
+			"messages":      v.Messages,
+			"notifications": v.Notifications,
+			"receipts":      v.Receipts,
+		})
+		c.dispatch("OfflineSyncPreview", string(b))
+	case *events.OfflineSyncCompleted:
+		got := c.offlineDrain.stop()
+		offlineLog("completed server=%d got_messages=%d got_receipts=%d",
+			v.Count, got.messages, got.receipts)
+		b, _ := json.Marshal(map[string]any{
+			"server_count":  v.Count,
+			"got_messages":  got.messages,
+			"got_receipts":  got.receipts,
+		})
+		c.dispatch("OfflineSyncCompleted", string(b))
 	case *events.Message:
+		c.offlineDrain.tickMessage(v)
 		c.dispatchMessage(v)
 	case *events.Receipt:
+		c.offlineDrain.tickReceipt(v)
 		c.dispatchReceipt(v)
 	case *events.Presence:
 		c.dispatchPresence(v)
