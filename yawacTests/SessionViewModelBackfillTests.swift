@@ -2,13 +2,20 @@ import XCTest
 import SwiftData
 @testable import yawac
 
-/// Verifies the v0.8.1 one-shot history backfill gate on SessionViewModel:
+/// Verifies the one-shot history backfill gate on SessionViewModel.
 ///   - When the flag is unset and a globally-oldest PersistedMessage exists,
 ///     `requestHistoryBackfillIfNeeded` issues exactly one
 ///     `requestFullHistorySync` IQ anchored at that row.
 ///   - When the flag is already set, the call is a no-op.
-///   - When the flag is unset but the SwiftData store is empty, the gate
-///     short-circuits to "flag = true" without issuing an IQ (no anchor).
+///   - When the flag is unset and the SwiftData store is empty (fresh
+///     install), the IQ STILL fires — with empty anchor strings. The
+///     type-6 FULL_HISTORY_SYNC_ON_DEMAND packet doesn't use the anchor
+///     fields (bridge sets HistoryFromTimestamp = now); they exist only
+///     for source compatibility. F56 (v0.9.66) inverted the old v0.8.1
+///     short-circuit so fresh installs actually get deep history instead
+///     of only the INITIAL_BOOTSTRAP chunk.
+///   - The flag flip happens on the first HistorySync arrival in
+///     ContentView (T12), not inside `requestHistoryBackfillIfNeeded`.
 @MainActor
 final class SessionViewModelBackfillTests: XCTestCase {
 
@@ -90,7 +97,12 @@ final class SessionViewModelBackfillTests: XCTestCase {
         XCTAssertNil(snap.chatJID)
     }
 
-    func testEmptyPersistedStoreSetsFlag() async throws {
+    func testEmptyPersistedStoreStillIssuesRequest() async throws {
+        // F56 (v0.9.66): fresh installs with no persisted rows used to
+        // short-circuit here, leaving the user with only the
+        // INITIAL_BOOTSTRAP chunk's messages. The type-6 packet doesn't
+        // need anchor info, so we now always send the request — empty
+        // anchor strings are harmless.
         UserDefaults.standard.set(false, forKey: Self.flagKey)
         let context = try makeInMemoryContext()
         let stub = try StubBackfillClient.make()
@@ -100,13 +112,15 @@ final class SessionViewModelBackfillTests: XCTestCase {
 
         await svm.requestHistoryBackfillIfNeeded()
 
-        // No anchor → no IQ issued.
         let snap = stub.snapshot()
-        XCTAssertEqual(snap.count, 0)
-        XCTAssertNil(snap.chatJID)
-        // …but the flag is flipped so future boots don't re-evaluate every
-        // time a message arrives.
-        XCTAssertTrue(UserDefaults.standard.bool(forKey: Self.flagKey))
+        XCTAssertEqual(snap.count, 1)
+        XCTAssertEqual(snap.chatJID, "")
+        XCTAssertEqual(snap.msgID, "")
+        XCTAssertEqual(snap.fromMe, false)
+        XCTAssertEqual(snap.tsUnix, 0)
+        // Flag stays false until the first HistorySync arrives (T12 flips
+        // it from ContentView). Requesting the IQ alone does not flip it.
+        XCTAssertFalse(UserDefaults.standard.bool(forKey: Self.flagKey))
     }
 }
 
