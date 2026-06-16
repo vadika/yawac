@@ -248,6 +248,46 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **F85 — SwiftData store maintenance: ANALYZE + periodic VACUUM
+  + auto_vacuum=INCREMENTAL** (v0.10.12) — followup to the discussion
+  about whether SQLite is the right backend for yawac's message store
+  at scale. Conclusion: yes — WhatsApp / Signal / Telegram all use
+  SQLite; alternative engines (DuckDB / LMDB / Realm / PostgreSQL)
+  are either worse-suited or impractical for a desktop chat client.
+  What was missing was housekeeping: per-connection pragmas
+  (`cache_size`, `mmap_size`, `synchronous`, `temp_store`) can only
+  be set on the connection that uses them, and SwiftData's public
+  `ModelConfiguration` exposes none of them — so those require a
+  drop-down to `NSPersistentStoreCoordinator` to ever take effect
+  on the right connections. Out of scope here; document and move on.
+  What IS shippable through a side raw-SQLite connection (same
+  pattern as F37 + F45):
+  - **`PRAGMA auto_vacuum=INCREMENTAL`** — persistent header pragma.
+    Effective once the next `VACUUM` rebuilds the page layout. Lets
+    a future `PRAGMA incremental_vacuum(N)` reclaim pages without
+    holding the EXCLUSIVE lock a full `VACUUM` requires.
+  - **`ANALYZE` every launch** — refreshes `sqlite_stat1` so the
+    query planner keeps picking the F45 raw-SQL indices as row
+    distributions shift over time. Costs ms.
+  - **`VACUUM` every 30 days** — compacts the store and reclaims
+    pages freed by F37's transaction-log prune. Holds EXCLUSIVE; on
+    our scale it's seconds (50.7 MB store completed in 148 ms, store
+    dropped to 46.9 MB). Skipped on launches inside the 30-day
+    window. Tracked via `UserDefaults` key `yawac.lastDBVacuum`.
+  Runs from a `Task.detached(priority: .utility)` after
+  `SwiftDataIndexes.ensure(at:)` lands. The maintenance connection
+  sets `busy_timeout=30000` (longer than F84's whatsmeow 5s window
+  because VACUUM is a multi-second operation that wants headroom).
+  Logging is via `NSLog` under `[yawac/maint]` so the Diagnostics
+  panel + Console.app + `log show` all surface failures. Verified
+  hot-path `EXPLAIN QUERY PLAN`:
+  ```
+  SEARCH ZPERSISTEDMESSAGE USING INDEX yawac_idx_msg_chat_ts (ZCHATJID=?)
+  SEARCH ZPERSISTEDREACTION USING INDEX yawac_idx_react_target (ZTARGETMESSAGEID=?)
+  SEARCH ZPERSISTEDPOLLVOTE USING INDEX yawac_idx_poll_msg (ZPOLLMESSAGEID=?)
+  ```
+  All 9 yawac_idx_* indices materialized; no full SCAN remaining.
+
 - ✅ **F83-F84 — Issue #6: messages received while yawac down stay
   missing after reconnect** (v0.10.11) — User report (@feedface,
   GitHub issue #6): "group message does not update if yawac was

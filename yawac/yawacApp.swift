@@ -61,6 +61,13 @@ struct YawacApp: App {
         Task.detached(priority: .utility) {
             if let url = SwiftDataIndexes.defaultStoreURL {
                 SwiftDataIndexes.ensure(at: url)
+                // F85: ANALYZE every launch + VACUUM every 30 days +
+                // auto_vacuum=INCREMENTAL on the file header. Cheap
+                // ANALYZE keeps the query planner picking the right
+                // F45 raw-SQL indices as row distributions shift;
+                // periodic VACUUM reclaims pages F37's transaction
+                // log prune frees.
+                SwiftDataMaintenance.maintainIfNeeded(at: url)
             }
         }
         // F37: prune SwiftData's transaction log on startup. The
