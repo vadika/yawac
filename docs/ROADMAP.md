@@ -235,6 +235,19 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **F91 hotfix — in-memory Chat.folderIDs sync** (v0.10.20) —
+  v0.10.19 shipped with `FolderRailViewModel.addChat` mutating
+  `PersistedChat.folderIDs` on disk but leaving the in-memory
+  `ChatListViewModel.chats[i].folderIDs` cache stale. `chatsFor(
+  .custom(folderID:))` reads the in-memory copy, so the chat list
+  rendered empty even though the disk row carried the folder tag.
+  Fix: pass a `weak chatList: ChatListViewModel?` reference into
+  the rail VM at construction; rail mutations now call
+  `chatList?.refreshFolderIDs(for: jid)` which re-reads
+  PersistedChat.folderIDs back into the in-memory cache. Affects
+  add (drag + context menu), remove, and folder delete (scrubs
+  every chat).
+
 - ✅ **F91 — Folders / chat lists (Telegram-style rail)** (v0.10.19) —
   Vertical folder rail on the left of the chat list. Custom
   user-defined folders (`PersistedFolder` SwiftData model, name-only;
