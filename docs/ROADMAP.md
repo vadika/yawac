@@ -235,6 +235,30 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **F92 hardening — reconnect catch-up wider + shorter throttle + chunk-arrival diagnostics** (v0.10.24) —
+  v0.10.23's F92 catch-up fires correctly (`[yawac/catchup]
+  sending FULL_HISTORY_SYNC_ON_DEMAND count=7` + `SendPeerMessage
+  ok` visible in /tmp/yawac.log) but the phone responds with
+  HistorySync chunks asynchronously, seconds after SendPeerMessage
+  returns. If the user quits yawac quickly to inspect the log,
+  chunks never arrive. The 5-min throttle then blocks a re-fire on
+  the next launch.
+  - **Throttle 5 min → 30 s.** Reconnect-flap protection still
+    works (a 30 s window prevents the kernel from spinning if
+    the network drops repeatedly), but legitimate user-driven
+    relaunches now re-fire the catch-up. Phone-side dedupes
+    naturally via the FULL_HISTORY_SYNC_ON_DEMAND request ID
+    collision.
+  - **Window 7 → 30 days.** Covers users who close yawac for a
+    week or two before relaunching.
+  - **ON_DEMAND chunk arrival diagnostic.** New
+    `[yawac/catchup] received ON_DEMAND chunk progress=N
+    chunkMessages=M conversations=K` log line in
+    `/tmp/yawac.log`. When the phone responds, the chunk now
+    leaves a trace we can match against the SendPeerMessage line.
+  - **User guidance.** Leave yawac running 30-60 s after launch
+    to let chunks settle.
+
 - ✅ **F92 — Reconnect catch-up history sync** (v0.10.23) —
   Issue #6 regression: user reports messages read on the phone
   while yawac was offline never sync after reconnect. F83/F84/F89

@@ -48,11 +48,14 @@ final class SessionViewModel {
         set { UserDefaults.standard.set(newValue, forKey: Self.lastReconnectCatchupKey) }
     }
 
-    /// F92: 5-minute throttle for `requestReconnectCatchupSyncIfNeeded`. Set
-    /// long enough that reconnect-flapping doesn't hammer the phone
-    /// but short enough that a user who quits + relaunches a few minutes
-    /// later still gets a fresh pull.
-    static let reconnectCatchupThrottle: TimeInterval = 5 * 60
+    /// F92 hardening (v0.10.24): dropped from 5 min to 30 s. The
+    /// original throttle was set to prevent reconnect-flap from
+    /// hammering the phone, but a 30 s window still prevents
+    /// hammering in practice while letting a user who launches +
+    /// quickly relaunches still re-fire the catch-up. Phone-side
+    /// catch-up dedupes anyway (idempotent FULL_HISTORY_SYNC_ON_DEMAND
+    /// request IDs collide and the phone discards the second).
+    static let reconnectCatchupThrottle: TimeInterval = 30
     /// User-triggered full history sync progress state. Read by the
     /// AccountPanel "Full history sync" row to render a linear
     /// ProgressView + counters while a backfill burst is in flight.
@@ -702,6 +705,15 @@ final class SessionViewModel {
                 self.joinRequestStore.clear(chatJID: chatJID)
             }
         case .historySync(let syncType, let n, let progress, _, let chunkMessages):
+            // F92 hardening (v0.10.24): trace ON_DEMAND chunks so we
+            // can see whether the phone responded to the catch-up
+            // request. ON_DEMAND chunks are the type-6 FULL_HISTORY_
+            // SYNC_ON_DEMAND response (also fired by user-tap Full
+            // sync). Both paths share this code, both want visibility.
+            if syncType == "ON_DEMAND" {
+                NSLog("[yawac/catchup] received ON_DEMAND chunk progress=%d chunkMessages=%d conversations=%d",
+                      progress, chunkMessages, n)
+            }
             syncedConversations += n
             armSyncWatchdog()
             if fullSync.inFlight {
@@ -1100,7 +1112,7 @@ final class SessionViewModel {
             return
         }
         lastReconnectCatchupAt = now
-        NSLog("[yawac/catchup] sending FULL_HISTORY_SYNC_ON_DEMAND count=7 (days)")
+        NSLog("[yawac/catchup] sending FULL_HISTORY_SYNC_ON_DEMAND count=30 (days)")
         do {
             try await Task.detached { [client] in
                 try client.requestFullHistorySync(
@@ -1108,7 +1120,7 @@ final class SessionViewModel {
                     beforeMsgID: "",
                     beforeFromMe: false,
                     beforeTSUnix: 0,
-                    count: 7)
+                    count: 30)
             }.value
             NSLog("[yawac/catchup] SendPeerMessage ok — waiting for HistorySync chunks")
         } catch {

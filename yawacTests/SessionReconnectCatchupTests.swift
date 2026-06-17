@@ -58,10 +58,11 @@ final class SessionReconnectCatchupTests: XCTestCase {
     }
 
     func testSkipsWhenWithinThrottleWindow() async throws {
-        // Set lastReconnectCatchupAt to "1 minute ago" and historyBackfillCompleted true.
+        // Set lastReconnectCatchupAt to "10 seconds ago" and historyBackfillCompleted true.
+        // 10 s is well inside the new 30 s throttle (F92 hardening v0.10.24).
         // Use a real stub so the client guard passes; the throttle fires before the send.
         UserDefaults.standard.set(true, forKey: Self.flagKey)
-        let recentTs = Date().timeIntervalSince1970 - 60   // 1 min ago
+        let recentTs = Date().timeIntervalSince1970 - 10   // 10 s ago — inside 30 s throttle
         UserDefaults.standard.set(recentTs, forKey: Self.catchupKey)
 
         let stub = try StubBackfillClient.make()
@@ -72,7 +73,7 @@ final class SessionReconnectCatchupTests: XCTestCase {
         // Timestamp must remain unchanged — no send occurred.
         let after = UserDefaults.standard.double(forKey: Self.catchupKey)
         XCTAssertEqual(after, recentTs, accuracy: 0.5,
-                       "timestamp must not advance when inside the 5-min throttle window")
+                       "10s ago is inside the 30s throttle — timestamp should not advance")
         // And no requestFullHistorySync was called on the stub.
         XCTAssertEqual(stub.snapshot().count, 0,
                        "no history-sync IQ should be sent within the throttle window")
