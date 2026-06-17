@@ -229,7 +229,7 @@ struct ChatListView: View {
         }
         .task {
             if folderRail == nil {
-                let rail = FolderRailViewModel(context: modelContext)
+                let rail = FolderRailViewModel(context: modelContext, chatList: vm)
                 rail.loadFolders()
                 let knownIDs = Set(rail.folders.map(\.id))
                 rail.selection = FolderSelection.resolved(

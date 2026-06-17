@@ -18,9 +18,13 @@ final class FolderRailViewModel {
     var archivedUnread: Int = 0
 
     @ObservationIgnored private let context: ModelContext
+    /// F91 hotfix: back-reference to the chat list so rail mutations can
+    /// sync in-memory Chat.folderIDs immediately after persisting.
+    @ObservationIgnored weak var chatList: ChatListViewModel?
 
-    init(context: ModelContext) {
+    init(context: ModelContext, chatList: ChatListViewModel? = nil) {
         self.context = context
+        self.chatList = chatList
     }
 
     // MARK: - Load
@@ -77,6 +81,9 @@ final class FolderRailViewModel {
         }
         try? context.save()
         loadFolders()
+        // F91 hotfix: scrub every in-memory Chat.folderIDs (deleteFolder
+        // removed this folder's id from every PersistedChat on disk).
+        chatList?.refreshFolderIDs(for: nil)
     }
 
     func reorder(fromIndex: Int, toIndex: Int) {
@@ -106,6 +113,9 @@ final class FolderRailViewModel {
             c.folderIDs.append(folderID)
             try? context.save()
         }
+        // F91 hotfix: sync the updated folderIDs back into the in-memory
+        // chat list so chatsFor(.custom) sees the change immediately.
+        chatList?.refreshFolderIDs(for: jid)
     }
 
     func removeChat(jid: String, fromFolderID folderID: String) {
@@ -116,6 +126,8 @@ final class FolderRailViewModel {
             c.folderIDs.removeAll { $0 == folderID }
             try? context.save()
         }
+        // F91 hotfix: sync the updated folderIDs back into the in-memory cache.
+        chatList?.refreshFolderIDs(for: jid)
     }
 
     // MARK: - Badge compute (implemented in Task 5)

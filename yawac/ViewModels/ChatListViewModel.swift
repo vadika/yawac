@@ -1261,6 +1261,28 @@ final class ChatListViewModel {
         upsertPersisted(chats[idx])
     }
 
+    /// F91 hotfix: re-read PersistedChat.folderIDs into the in-memory
+    /// chats[] cache after rail mutations. `jid == nil` refreshes every
+    /// chat (used after deleteFolder which scrubs all memberships).
+    func refreshFolderIDs(for jid: String?) {
+        guard let context else { return }
+        let descriptor = FetchDescriptor<PersistedChat>()
+        let persisted = (try? context.fetch(descriptor)) ?? []
+        let byJID = Dictionary(uniqueKeysWithValues: persisted.map { ($0.jid, $0.folderIDs) })
+        if let jid {
+            if let idx = chats.firstIndex(where: { $0.jid == jid }),
+               let folderIDs = byJID[jid] {
+                chats[idx].folderIDs = folderIDs
+            }
+        } else {
+            for i in chats.indices {
+                if let folderIDs = byJID[chats[i].jid] {
+                    chats[i].folderIDs = folderIDs
+                }
+            }
+        }
+    }
+
     /// Cold-start reconcile: pull whatsmeow's local muted-chats list
     /// and align our rows. whatsmeow doesn't re-emit events.Mute for
     /// already-synced patches on reconnect.
