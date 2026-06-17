@@ -40,7 +40,8 @@ struct YawacApp: App {
                 for: PersistedMessage.self,
                 PersistedChat.self,
                 PersistedReaction.self,
-                PersistedPollVote.self)
+                PersistedPollVote.self,
+                PersistedFolder.self)
         } catch {
             fatalError("ModelContainer: \(error)")
         }

@@ -257,6 +257,12 @@ final class PersistedChat {
     /// because the default-value path keeps every existing call site
     /// compiling; upsertPersisted assigns it explicitly.
     var bellEnabled: Bool = true
+    /// F91: folder memberships. Plain Codable [String] of
+    /// PersistedFolder.id values. Default-value optional so existing
+    /// rows lightweight-migrate transparently. Not added to init(...)
+    /// because the default-value path keeps every existing call site
+    /// compiling; upsertPersisted / addChat assigns explicitly.
+    var folderIDs: [String] = []
 
     init(jid: String, name: String,
          lastMessageText: String? = nil,
