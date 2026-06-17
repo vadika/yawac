@@ -17,6 +17,14 @@ struct FolderRail: View {
                             isSelected: vm.selection == .custom(folderID: folder.id),
                             badge: vm.unreadByFolderID[folder.id] ?? 0,
                             onTap: { vm.selection = .custom(folderID: folder.id) })
+                        .dropDestination(for: ChatJIDTransfer.self) { transfers, _ in
+                            for t in transfers {
+                                vm.addChat(jid: t.jid, toFolderID: folder.id)
+                            }
+                            return !transfers.isEmpty
+                        } isTargeted: { _ in
+                            // visual feedback handled by FolderRailItem if needed
+                        }
                     }
 
                     FolderRailItem(

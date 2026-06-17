@@ -555,6 +555,12 @@ struct ChatListView: View {
             Divider()
             Button("Delete chat…", role: .destructive) { pendingDelete = chat }
         }
+        .draggable(ChatJIDTransfer(jid: chat.jid)) {
+            // Drag preview: just the row body at half opacity.
+            chatRowBody(chat, indent: 0)
+                .frame(width: 240)
+                .opacity(0.75)
+        }
     }
 
     @ViewBuilder
