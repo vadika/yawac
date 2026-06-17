@@ -18,6 +18,12 @@ struct QuickSendChatPicker: View {
 
     @State private var highlightIndex: Int = 0
 
+    /// Cache of `chats` sorted DESC by `lastTimestamp`. Keyed on
+    /// `chats.count` so per-keystroke body evals reuse the sort; only
+    /// a chat-list mutation invalidates it.
+    @State private var sortedCache: [Chat] = []
+    @State private var sortedCacheKey: Int = -1
+
     /// Pure, testable. Sorts recents DESC by `lastTimestamp`, then
     /// truncates to `recentLimit` when the query is empty; with a
     /// non-empty query it filters the entire list (case-insensitive
@@ -26,6 +32,14 @@ struct QuickSendChatPicker: View {
     static func filter(chats: [Chat], query: String,
                        recentLimit: Int) -> [Chat] {
         let sorted = chats.sorted { $0.lastTimestamp > $1.lastTimestamp }
+        return applyQuery(sorted: sorted, query: query,
+                          recentLimit: recentLimit)
+    }
+
+    /// Query/recent-limit application against a pre-sorted list. Split
+    /// out so the view can reuse a memoized sort across keystrokes.
+    static func applyQuery(sorted: [Chat], query: String,
+                           recentLimit: Int) -> [Chat] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             return Array(sorted.prefix(recentLimit))
@@ -34,8 +48,8 @@ struct QuickSendChatPicker: View {
         let needleIsDigits = trimmed.allSatisfy(\.isNumber)
         return sorted.filter { chat in
             if chat.name.lowercased().contains(needle) { return true }
-            if needleIsDigits,
-               let user = chat.jid.split(separator: "@").first {
+            if needleIsDigits {
+                let user = chat.jid.prefix(while: { $0 != "@" })
                 return user.hasPrefix(trimmed)
             }
             return false
@@ -43,8 +57,21 @@ struct QuickSendChatPicker: View {
     }
 
     private var visible: [Chat] {
-        Self.filter(chats: chats, query: query,
-                    recentLimit: Self.defaultRecentLimit)
+        if sortedCacheKey != chats.count {
+            // Defer the cache write to next runloop; for THIS body eval,
+            // do the sort inline.
+            let fresh = chats.sorted { $0.lastTimestamp > $1.lastTimestamp }
+            DispatchQueue.main.async {
+                sortedCache = fresh
+                sortedCacheKey = chats.count
+            }
+            return Self.applyQuery(sorted: fresh,
+                                   query: query,
+                                   recentLimit: Self.defaultRecentLimit)
+        }
+        return Self.applyQuery(sorted: sortedCache,
+                               query: query,
+                               recentLimit: Self.defaultRecentLimit)
     }
 
     var body: some View {
@@ -56,15 +83,6 @@ struct QuickSendChatPicker: View {
                 .padding(.bottom, 6)
                 .onChange(of: query) { _, _ in highlightIndex = 0 }
                 .onSubmit { selectHighlighted() }
-                .onKeyPress(.upArrow) {
-                    highlightIndex = max(0, highlightIndex - 1)
-                    return .handled
-                }
-                .onKeyPress(.downArrow) {
-                    let cap = max(0, visible.count - 1)
-                    highlightIndex = min(cap, highlightIndex + 1)
-                    return .handled
-                }
 
             if visible.isEmpty {
                 emptyState
@@ -76,7 +94,7 @@ struct QuickSendChatPicker: View {
                         .contentShape(.rect)
                         .onTapGesture {
                             highlightIndex = idx
-                            selectedChatJID = chat.jid
+                            selectHighlighted()
                         }
                         .listRowInsets(.init(top: 4, leading: 10,
                                              bottom: 4, trailing: 10))
@@ -84,6 +102,16 @@ struct QuickSendChatPicker: View {
                 .listStyle(.plain)
                 .frame(maxHeight: 260)
             }
+        }
+        .focusable()
+        .onKeyPress(.upArrow) {
+            highlightIndex = max(0, highlightIndex - 1)
+            return .handled
+        }
+        .onKeyPress(.downArrow) {
+            let cap = max(0, visible.count - 1)
+            highlightIndex = min(cap, highlightIndex + 1)
+            return .handled
         }
     }
 
