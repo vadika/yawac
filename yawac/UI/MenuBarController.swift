@@ -5,14 +5,19 @@ import SwiftUI
 /// distinguish left- vs right-click on macOS — both fire the menu) with
 /// a raw `NSStatusItem`:
 ///
-///   - Left-click  → show / hide / unminimize the main window.
-///   - Right-click → drop the action menu (unread count, Quit, etc).
+///   - Left-click  → toggle the quick-send popover.
+///   - Right-click → drop the action menu (unread count, Show Main
+///     Window, Quit, etc).
 ///
 /// F73: the status item is now optional — `bind(session:)` caches the
 /// session on launch and `setEnabled(_:)` installs / tears down to
 /// follow the `yawac.menuBar.show` preference. `install()` must run
 /// from a SwiftUI lifecycle hook so `NSApp` is fully wired by the time
 /// we touch `NSStatusBar`.
+///
+/// F87: the install/teardown bundle also owns an `NSPopover` for the
+/// quick-send UI and a Carbon `GlobalHotkey` (⌘⇧Y) — all three follow
+/// the `yawac.menuBar.show` toggle as one unit.
 @MainActor
 final class MenuBarController: NSObject {
     static let shared = MenuBarController()
@@ -20,6 +25,10 @@ final class MenuBarController: NSObject {
     private var item: NSStatusItem?
     private weak var session: SessionViewModel?
     private var observationTask: Task<Void, Never>?
+
+    // F87: popover + global hotkey lifecycle.
+    private var popover: NSPopover?
+    private let hotkey = GlobalHotkey()
 
     override private init() { super.init() }
 
@@ -50,9 +59,24 @@ final class MenuBarController: NSObject {
         self.item = item
         refreshIcon()
         startObservingUnread()
+
+        // F87: register the global ⌘⇧Y hotkey alongside the status
+        // item. The lifecycle is bundled — disabling the menu bar
+        // setting tears both down.
+        hotkey.register { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.togglePopover()
+            }
+        }
     }
 
     private func tearDown() {
+        if let popover, popover.isShown {
+            popover.performClose(nil)
+        }
+        popover = nil
+        hotkey.unregister()
+
         guard let item else { return }
         observationTask?.cancel()
         observationTask = nil
@@ -99,8 +123,51 @@ final class MenuBarController: NSObject {
         if isRightClick {
             popContextMenu()
         } else {
-            WindowToggler.bringToFront()
+            // F87: left-click now toggles the quick-send popover
+            // instead of bringing the main window forward. "Show Main
+            // Window" lives in the right-click context menu.
+            togglePopover()
         }
+    }
+
+    /// F87: public entry point for both the status-item left-click and
+    /// the Carbon ⌘⇧Y hotkey callback. Idempotent — clicking while
+    /// the popover is already open closes it.
+    func togglePopover() {
+        guard let item, let button = item.button else { return }
+        guard let session else { return }
+        guard let client = session.client else {
+            // No client = no point opening the popover.
+            return
+        }
+        let popover = ensurePopover(session: session, client: client)
+        if popover.isShown {
+            popover.performClose(nil)
+        } else {
+            // Activate yawac just enough to host the popover focus,
+            // without bringing the main window forward — `.accessory`
+            // is the policy when `yawac.dock.keep` is false, so
+            // forcing activation is necessary for keyboard focus.
+            NSApp.activate(ignoringOtherApps: true)
+            popover.show(relativeTo: button.bounds,
+                         of: button, preferredEdge: .minY)
+        }
+    }
+
+    private func ensurePopover(session: SessionViewModel,
+                               client: WAClient) -> NSPopover {
+        if let popover { return popover }
+        let popover = NSPopover()
+        popover.behavior = .transient
+        popover.animates = true
+        let root = QuickSendPopover(session: session,
+                                    client: client,
+                                    onClose: { [weak self] in
+            self?.popover?.performClose(nil)
+        })
+        popover.contentViewController = NSHostingController(rootView: root)
+        self.popover = popover
+        return popover
     }
 
     private func popContextMenu() {
@@ -117,17 +184,27 @@ final class MenuBarController: NSObject {
     private func buildMenu() -> NSMenu {
         let menu = NSMenu()
         if let unread = session?.totalUnread, unread > 0 {
-            let header = NSMenuItem(title: "\(unread) unread", action: nil, keyEquivalent: "")
+            let header = NSMenuItem(title: "\(unread) unread",
+                                    action: nil, keyEquivalent: "")
             header.isEnabled = false
             menu.addItem(header)
             menu.addItem(.separator())
         }
+        // F87: "Show Main Window" entered the context menu when
+        // left-click moved to the popover.
+        let show = NSMenuItem(title: "Show Main Window",
+                              action: #selector(menuShowWindow),
+                              keyEquivalent: "")
+        show.target = self
+        menu.addItem(show)
+
         let toggle = NSMenuItem(title: "Show / Hide Window",
                                 action: #selector(menuToggleWindow),
                                 keyEquivalent: "h")
         toggle.keyEquivalentModifierMask = [.command, .shift]
         toggle.target = self
         menu.addItem(toggle)
+
         menu.addItem(.separator())
         let quit = NSMenuItem(title: "Quit yawac",
                               action: #selector(menuQuit),
@@ -137,6 +214,7 @@ final class MenuBarController: NSObject {
         return menu
     }
 
+    @objc private func menuShowWindow() { WindowToggler.bringToFront() }
     @objc private func menuToggleWindow() { WindowToggler.toggleMain() }
     @objc private func menuQuit() { NSApp.terminate(nil) }
 }
