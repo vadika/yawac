@@ -8,11 +8,14 @@ import SwiftUI
 struct QuickSendPopover: View {
 
     let session: SessionViewModel
-    let client: WAClient
     let onClose: () -> Void
 
     @State private var query: String = ""
     @State private var selectedChatJID: String?
+
+    private struct NotPairedError: Error, LocalizedError {
+        var errorDescription: String? { "No account paired" }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -41,7 +44,12 @@ struct QuickSendPopover: View {
         QuickSendComposer(
             chatJID: jid,
             displayName: resolvedName(for: jid),
-            send: { [client] chatJID, body in
+            send: { [session] chatJID, body in
+                // F87: lazy read so the popover doesn't carry a stale
+                // WAClient reference across logout → re-pair churn.
+                guard let client = session.client else {
+                    throw NotPairedError()
+                }
                 _ = try await Task.detached(priority: .userInitiated) {
                     try client.sendText(chatJID, body)
                 }.value

@@ -64,7 +64,7 @@ final class MenuBarController: NSObject {
         // item. The lifecycle is bundled — disabling the menu bar
         // setting tears both down.
         hotkey.register { [weak self] in
-            Task { @MainActor [weak self] in
+            Task { @MainActor in
                 self?.togglePopover()
             }
         }
@@ -136,11 +136,11 @@ final class MenuBarController: NSObject {
     func togglePopover() {
         guard let item, let button = item.button else { return }
         guard let session else { return }
-        guard let client = session.client else {
+        guard session.client != nil else {
             // No client = no point opening the popover.
             return
         }
-        let popover = ensurePopover(session: session, client: client)
+        let popover = ensurePopover(session: session)
         if popover.isShown {
             popover.performClose(nil)
         } else {
@@ -154,14 +154,12 @@ final class MenuBarController: NSObject {
         }
     }
 
-    private func ensurePopover(session: SessionViewModel,
-                               client: WAClient) -> NSPopover {
+    private func ensurePopover(session: SessionViewModel) -> NSPopover {
         if let popover { return popover }
         let popover = NSPopover()
         popover.behavior = .transient
         popover.animates = true
         let root = QuickSendPopover(session: session,
-                                    client: client,
                                     onClose: { [weak self] in
             self?.popover?.performClose(nil)
         })
