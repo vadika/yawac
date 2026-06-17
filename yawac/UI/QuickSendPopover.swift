@@ -46,9 +46,13 @@ struct QuickSendPopover: View {
             displayName: resolvedName(for: jid),
             send: { [session] chatJID, body in
                 // F87: lazy read so the popover doesn't carry a stale
-                // WAClient reference across logout → re-pair churn.
-                guard let client = session.client else {
-                    throw NotPairedError()
+                // WAClient reference across logout → re-pair churn. The
+                // closure is @Sendable so we hop to MainActor to read the
+                // currently-bound client + its bare JID (both are
+                // MainActor-isolated SessionViewModel/WAClient state).
+                let (client, ownJID): (WAClient, String) = try await MainActor.run {
+                    guard let c = session.client else { throw NotPairedError() }
+                    return (c, c.ownJID)
                 }
                 let result = try await Task.detached(priority: .userInitiated) {
                     try client.sendText(chatJID, body)
@@ -61,7 +65,7 @@ struct QuickSendPopover: View {
                 let synthetic = BridgeMessage(
                     id: result.messageID,
                     chatJID: chatJID,
-                    senderJID: client.ownJID,
+                    senderJID: ownJID,
                     senderPushName: nil,
                     fromMe: true,
                     timestamp: result.timestamp,
