@@ -3,16 +3,16 @@ module github.com/vadikas/yawac/bridge
 go 1.26.3
 
 require (
-	go.mau.fi/whatsmeow v0.0.0-20260516102357-8d3700152a69
+	go.mau.fi/whatsmeow v0.0.0-20260616120636-eaa388b4e537
 	golang.org/x/mobile v0.0.0-20260514233045-7de0a8fa7f4d
 	google.golang.org/protobuf v1.36.11
 	modernc.org/sqlite v1.50.1
 )
 
 require (
-	filippo.io/edwards25519 v1.1.0 // indirect
+	filippo.io/edwards25519 v1.2.0 // indirect
 	github.com/beeper/argo-go v1.1.2 // indirect
-	github.com/coder/websocket v1.8.14 // indirect
+	github.com/coder/websocket v1.8.15 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/elliotchance/orderedmap/v3 v3.1.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
@@ -23,23 +23,23 @@ require (
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/rs/zerolog v1.35.1 // indirect
 	github.com/vektah/gqlparser/v2 v2.5.27 // indirect
-	go.mau.fi/libsignal v0.2.1 // indirect
-	go.mau.fi/util v0.9.9 // indirect
-	golang.org/x/crypto v0.51.0 // indirect
-	golang.org/x/exp v0.0.0-20260508232706-74f9aab9d74a // indirect
-	golang.org/x/mod v0.36.0 // indirect
-	golang.org/x/net v0.54.0 // indirect
-	golang.org/x/sync v0.20.0 // indirect
-	golang.org/x/sys v0.44.0 // indirect
-	golang.org/x/text v0.37.0 // indirect
-	golang.org/x/tools v0.45.0 // indirect
+	go.mau.fi/libsignal v0.2.2 // indirect
+	go.mau.fi/util v0.9.10 // indirect
+	golang.org/x/crypto v0.53.0 // indirect
+	golang.org/x/exp v0.0.0-20260611194520-c48552f49976 // indirect
+	golang.org/x/mod v0.37.0 // indirect
+	golang.org/x/net v0.56.0 // indirect
+	golang.org/x/sync v0.21.0 // indirect
+	golang.org/x/sys v0.46.0 // indirect
+	golang.org/x/text v0.38.0 // indirect
+	golang.org/x/tools v0.46.0 // indirect
 	modernc.org/libc v1.72.3 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
 )
 
-// Fork (github.com/vadika/whatsmeow, branch yawac-patches) carrying
-// upstream PRs #1120 (appstate auto-recovery), #1148 (LID privacy
-// tokens), and #1151 (historical poll-vote tallies on HistorySync).
-// See docs/whatsmeow-patches.md.
-replace go.mau.fi/whatsmeow => github.com/vadika/whatsmeow v0.0.0-20260523200524-582860a99368
+// Fork (github.com/vadika/whatsmeow) kept as an escape hatch for
+// emergency patches. Currently tracks upstream tip with zero divergence
+// — the prior fork patches (#1120 appstate recovery, #1148 LID privacy
+// tokens) are merged upstream. See docs/whatsmeow-patches.md.
+replace go.mau.fi/whatsmeow => github.com/vadika/whatsmeow v0.0.0-20260617085047-a91337b2c2a2

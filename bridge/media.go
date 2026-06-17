@@ -375,9 +375,9 @@ func (c *Client) DownloadMedia(refJSON, outPath string) (string, error) {
 			r.FileEncSHA256,
 			r.FileSHA256,
 			r.MediaKey,
-			int(r.FileLength),
 			mt,
 			mmsType,
+			false,
 		)
 		if ferr != nil {
 			// Final attempt: force-refresh the media connection token (some
@@ -389,9 +389,9 @@ func (c *Client) DownloadMedia(refJSON, outPath string) (string, error) {
 					r.FileEncSHA256,
 					r.FileSHA256,
 					r.MediaKey,
-					int(r.FileLength),
 					mt,
 					mmsType,
+					false,
 				)
 				if retryErr == nil {
 					data = retry

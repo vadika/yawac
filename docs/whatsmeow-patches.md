@@ -1,66 +1,68 @@
 # Local whatsmeow patches
 
-We carry two upstream PRs that haven't merged into whatsmeow main.
-Applied as a local clone at `/Users/vadikas/Work/vendor/whatsmeow-fork`,
-referenced via a `replace` directive in `bridge/go.mod`.
+We carry one upstream PR that hasn't merged into whatsmeow main.
+Pinned via a `replace` directive in `bridge/go.mod` pointing at the
+github.com/vadika/whatsmeow fork. The fork mirrors upstream tip with
+exactly one cherry-picked patch on top.
 
-Base commit: `8d3700152a6930c5a7fdae84a47b49a34d3d9cb0` (matches the
-pseudo-version `v0.0.0-20260516102357-8d3700152a69` we were pinned to).
+Current fork tip: `a91337b2c2a2` (pseudo-version
+`v0.0.0-20260617085047-a91337b2c2a2`), based on upstream
+`eaa388b4e537` (Jun 16 2026).
 
 ## Applied patches
 
-- **PR #1120** — appstate auto-recovery snapshot trigger.
-  Branch: `yawac-patches`, commit `dc1589a` (on top of `8d37001`).
-  Upstream: https://github.com/tulir/whatsmeow/pull/1120
+- **PR #1151** — historical poll-vote tally extractor.
+  Upstream: https://github.com/tulir/whatsmeow/pull/1151
 
-  When `applyAppStatePatches` sees `ErrMismatchingLTHash` or
-  `ErrMismatchingPatchMAC`, fires off `BuildAppStateRecoveryRequest(name)`
-  via `SendPeerMessage` so the primary device sends a fresh snapshot.
-  `handleAppStateRecovery` (already present in our base) consumes it and
-  resets the local collection — unsticks accounts whose app state diverged
-  from the server after offline mutations or upstream proto bumps.
+  Adds `events.HistorySync.HistoricalPollUpdates()` which flattens
+  `WebMessageInfo.PollUpdates` records across all conversations in a
+  HistorySync blob into `[]events.HistoricalPollVote`. Used by
+  `bridge/history.go` so newly-paired companions can render existing
+  poll tallies they never received as live `PollUpdateMessage` events.
 
+## Previously applied, now upstreamed (no longer carried)
+
+- **PR #1120** — appstate auto-recovery snapshot trigger. Merged
+  upstream as `b6f3348` + `1ba7eba`.
 - **PR #1148** — LID-addressed conversation privacy-token extraction.
-  Branch: `yawac-patches`, commit `235f2f1` (on top of `dc1589a`).
-  Upstream: https://github.com/tulir/whatsmeow/pull/1148
+  Merged upstream as `595ceb0` (which also adds the missing
+  PhoneNumber→LID mapping store call alongside the privacy-token fix).
 
-  `storeHistoricalMessageSecrets` now also extracts `tcToken` for chats
-  whose `chatJID.Server == types.HiddenUserServer` (LID), not just
-  `DefaultUserServer`. Without this, accounts migrated to LID get zero
-  privacy tokens from history sync and 1:1 sends fail with WA error 463.
+## Bumping the fork
 
-## Updating
+```
+cd /tmp && git clone git@github.com:vadika/whatsmeow.git
+cd whatsmeow
+git remote add upstream https://github.com/tulir/whatsmeow.git
+git fetch upstream
+git rebase upstream/main          # re-applies the PR #1151 patch on top
+git push --force-with-lease origin main
+```
 
-When tulir merges either PR upstream, drop the local clone:
+Then in yawac:
+
+```
+cd bridge
+# Edit replace directive in go.mod with new pseudo-version.
+go mod tidy
+cd ..
+./scripts/build-xcframework.sh
+```
+
+## Dropping the fork entirely
+
+When tulir merges PR #1151 upstream, remove the `replace` block:
 
 1. Remove the `replace` directive from `bridge/go.mod`.
 2. `cd bridge && go get go.mau.fi/whatsmeow@<sha-that-includes-the-fix>`.
 3. `go mod tidy`.
 4. Rebuild XCFramework.
-5. Delete `/Users/vadikas/Work/vendor/whatsmeow-fork`.
 
-## Rebuilding after pulling new whatsmeow main
+## Notes
 
-To stay current while keeping our patches:
-
-```
-cd /Users/vadikas/Work/vendor/whatsmeow-fork
-git fetch origin main
-git rebase origin/main
-cd /Users/vadikas/Work/yawac
-./scripts/build-xcframework.sh
-```
-
-## Concerns
-
-- The fork repo lives outside the yawac git tree at an absolute path. If
-  the project (or the vendor dir) is ever moved, update the `replace`
-  target in `bridge/go.mod`. Anyone cloning yawac fresh must reproduce
-  the `/Users/vadikas/Work/vendor/whatsmeow-fork` checkout, or rebuild
-  the patchset under their own path and adjust the `replace`.
-- The `go.sum` no longer carries entries for `go.mau.fi/whatsmeow`
-  itself (local replace path → no checksum). Indirect dependencies
-  inherited from whatsmeow are still pinned via go.sum. If you remove
-  the `replace`, `go mod tidy` will re-fetch and re-checksum.
-- `go mod download` run before the replace lands will pull upstream;
-  always commit `bridge/go.mod` with the `replace` block intact.
+- The fork's go.mod declares `module go.mau.fi/whatsmeow`, so `go get
+  github.com/vadika/whatsmeow@...` will fail. Edit the `replace`
+  directive's pseudo-version by hand and let `go mod tidy` resolve.
+- The `go.sum` carries entries for `github.com/vadika/whatsmeow@...`
+  instead of `go.mau.fi/whatsmeow@...`. If you remove the `replace`,
+  `go mod tidy` will swap them.

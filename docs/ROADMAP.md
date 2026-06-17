@@ -245,6 +245,33 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **F88 — whatsmeow upgrade to upstream tip (eaa388b + PR #1151)**
+  (v0.10.15) — Bumped pin from `8d37001` (May 16) to fork tip
+  `a91337b` based on upstream `eaa388b` (Jun 16). 25 upstream commits
+  pulled in. Notable wins for yawac: LID-aware historical message
+  secrets + privacy tokens (`595ceb0`, supersedes our prior PR #1148
+  patch), own web-message LID parse fix (`4e62216`), ack-all-nodes +
+  panic recovery in `handleEncryptedMessage` (`a7ea563`, adjacent to
+  issue #6's missing-message pattern), stale-entry cleanup in the
+  LID↔PN cache (`563bcaa`), `qrchan` atomic-bool conversion + listen
+  on `expectedDisconnect` (`256f4d7`), `sqlstore` container teardown
+  on upgrade failure (`88b76e5`), proto bumps to v1040847988.
+  - **Fork upkeep** — Prior patches PR #1120 + PR #1148 are now
+    upstream; only PR #1151 (historical poll-vote tally extractor for
+    `events.HistorySync.HistoricalPollUpdates()`) is still carried.
+    The fork branch was force-pushed to upstream tip + the one
+    cherry-pick. `docs/whatsmeow-patches.md` rewritten to reflect the
+    new state and bumping procedure.
+  - **Bridge API drift** — `Client.DownloadMediaWithPath` lost its
+    `fileLength int` argument (`d707fc2` removed length checks) and
+    gained an `allowNoHash bool` argument (`52afebe`). Updated both
+    call sites in `bridge/media.go`. Legacy URL fallback removal
+    (`9ff5508`) is safe — yawac has always downloaded via
+    `DirectPath`.
+  - **Transitive bumps** — `go.mau.fi/libsignal v0.2.1 → v0.2.2`,
+    `go.mau.fi/util v0.9.9 → v0.9.10`, plus golang.org/x/crypto, net,
+    sys, text, tools, sync, mod, exp, coder/websocket, edwards25519.
+
 - ✅ **F87 — Menu-bar quick-send popover + ⌘⇧Y global hotkey**
   (v0.10.14) — Fills the roadmap `Important → Productivity/macOS →
   Menu-bar quick-send` slot. Send a text message without surfacing
