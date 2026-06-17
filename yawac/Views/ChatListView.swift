@@ -552,6 +552,32 @@ struct ChatListView: View {
                     Button("Block…") { pendingBlock = chat }
                 }
             }
+            if let rail = folderRail {
+                Menu("Add to folder…") {
+                    ForEach(rail.folders, id: \.id) { f in
+                        Button {
+                            if chat.folderIDs.contains(f.id) {
+                                rail.removeChat(jid: chat.jid, fromFolderID: f.id)
+                            } else {
+                                rail.addChat(jid: chat.jid, toFolderID: f.id)
+                            }
+                        } label: {
+                            if chat.folderIDs.contains(f.id) {
+                                Label(f.name, systemImage: "checkmark")
+                            } else {
+                                Text(f.name)
+                            }
+                        }
+                    }
+                    if !rail.folders.isEmpty {
+                        Divider()
+                    }
+                    Button("New folder…") {
+                        newFolderInsertIndex = rail.folders.count
+                        showNewFolderSheet = true
+                    }
+                }
+            }
             Divider()
             Button("Delete chat…", role: .destructive) { pendingDelete = chat }
         }
