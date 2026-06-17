@@ -38,8 +38,9 @@ require (
 	modernc.org/memory v1.11.0 // indirect
 )
 
-// Fork (github.com/vadika/whatsmeow) kept as an escape hatch for
-// emergency patches. Currently tracks upstream tip with zero divergence
-// — the prior fork patches (#1120 appstate recovery, #1148 LID privacy
-// tokens) are merged upstream. See docs/whatsmeow-patches.md.
-replace go.mau.fi/whatsmeow => github.com/vadika/whatsmeow v0.0.0-20260617085047-a91337b2c2a2
+// Fork (github.com/vadika/whatsmeow) carries upstream PRs not yet
+// merged into whatsmeow main: #1151 historical poll-vote extractor,
+// #1160 binary-decoder panic resilience, #1168 signal session lock
+// (likely closes our issue #6), and #1171 SkipBrokenAppStatePatches
+// opt-in. See docs/whatsmeow-patches.md.
+replace go.mau.fi/whatsmeow => github.com/vadika/whatsmeow v0.0.0-20260617085916-69b126129f1b

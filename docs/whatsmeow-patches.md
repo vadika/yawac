@@ -1,12 +1,12 @@
 # Local whatsmeow patches
 
-We carry one upstream PR that hasn't merged into whatsmeow main.
+We carry four upstream PRs that haven't merged into whatsmeow main.
 Pinned via a `replace` directive in `bridge/go.mod` pointing at the
 github.com/vadika/whatsmeow fork. The fork mirrors upstream tip with
-exactly one cherry-picked patch on top.
+cherry-picked patches on top.
 
-Current fork tip: `a91337b2c2a2` (pseudo-version
-`v0.0.0-20260617085047-a91337b2c2a2`), based on upstream
+Current fork tip: `69b126129f1b` (pseudo-version
+`v0.0.0-20260617085916-69b126129f1b`), based on upstream
 `eaa388b4e537` (Jun 16 2026).
 
 ## Applied patches
@@ -19,6 +19,34 @@ Current fork tip: `a91337b2c2a2` (pseudo-version
   HistorySync blob into `[]events.HistoricalPollVote`. Used by
   `bridge/history.go` so newly-paired companions can render existing
   poll tallies they never received as live `PollUpdateMessage` events.
+
+- **PR #1160** — binary decoder doesn't panic on malformed nodes.
+  Upstream: https://github.com/tulir/whatsmeow/pull/1160
+
+  `consumeFrames` has no recover, so a single malformed frame
+  panicked the whole goroutine and took down the process. Returns an
+  error instead. Carries a fuzz target + table tests + a
+  marshal/unmarshal round trip.
+
+- **PR #1168** — per-address signal session lock around encrypt
+  and decrypt.
+  Upstream: https://github.com/tulir/whatsmeow/pull/1168
+
+  Prevents the send-while-receive ratchet race where one side
+  overwrites the other's session advance, causing either silent
+  "old counter" drops at the recipient or a permanent record bloat
+  from spurious skipped-message keys (22.5 MB observed on the
+  upstream profile). Likely closes our issue #6.
+
+- **PR #1171** — `Client.SkipBrokenAppStatePatches` opt-in.
+  Upstream: https://github.com/tulir/whatsmeow/pull/1171
+
+  Default off; yawac sets it `true` in `bridge/client.go`. Advances
+  the appstate version cursor past patches that fail LTHash
+  verification or reference missing sync keys, instead of aborting
+  the entire collection. Bounded skip-loop (300ms throttle × 200
+  cap). Fixes upstream issues #382, #518, #651, #858 where a
+  server-side bad patch wedges archive/mute/pin sync forever.
 
 ## Previously applied, now upstreamed (no longer carried)
 

@@ -172,6 +172,15 @@ func NewClient(dbPath string) (*Client, error) {
 	// fresh device link — never reaches the Swift side, leaving the
 	// sidebar/menu stuck in their default state.
 	wa.EmitAppStateEventsOnFullSync = true
+	// F89: enable graceful recovery from server-side bad appstate
+	// patches (ErrMismatchingLTHash / ErrKeyNotFound) that would
+	// otherwise wedge FetchAppState forever and block every
+	// SendAppState write with 409 conflict. Advance the cursor past
+	// the bad patch instead of aborting. Skipped patches lose their
+	// mutations (archive/mute/pin toggles from another device at that
+	// version) — same trade-off WhatsApp Web itself accepts when it
+	// requests a snapshot reset. See tulir/whatsmeow#1171.
+	wa.SkipBrokenAppStatePatches = true
 	return &Client{
 		wa:           wa,
 		dbPath:       dbPath,

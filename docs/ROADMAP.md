@@ -245,6 +245,37 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **F89 — whatsmeow S-tier PRs cherry-picked (#1160, #1168, #1171)**
+  (v0.10.16) — Three open upstream PRs picked onto the fork on top
+  of F88. Total ~400 LoC across whatsmeow; one bridge wiring line.
+  - **PR #1160 — decoder no-panic.** `binary.consumeFrames` has no
+    recover, so any malformed frame (non-string node tag, zero-length
+    parity-flagged packed string, empty Unpack payload) crashed the
+    whole goroutine. Now returns errors; `handleFrame` already drops
+    them. Fuzz target + table tests included. Pure crash resilience.
+  - **PR #1168 — signal session lock.** Per-address lock around the
+    full load-encrypt-store cycle in `encryptMessageForDevices` and
+    around `decryptDM`. Prevents the send-while-receive race that
+    caused either "message with old counter" silent drops at the
+    recipient or 22.5 MB of spurious skipped-message-key allocations
+    on the upstream profile. Lock is per-address so unrelated chats
+    don't block. **Likely closes our issue #6** (messages received on
+    phone while yawac offline, never synced after reconnect).
+  - **PR #1171 — `Client.SkipBrokenAppStatePatches` opt-in.** New
+    field on `Client`; defaults off. yawac flips it `true` in
+    `bridge/client.go`. When the appstate sync hits a permanently
+    bad patch (`ErrMismatchingLTHash` or `ErrKeyNotFound`), the
+    cursor is advanced past it (`PutAppStateVersion` with a zeroed
+    hash) and the fetch is retried — bounded skip-loop, 300 ms
+    throttle × 200 cap. Skipped patches lose their archive/mute/pin
+    mutations; same trade-off WhatsApp Web takes on snapshot reset.
+    Fixes upstream issues #382, #518, #651, #858 — the perpetually-
+    stuck `regular_low` chain. Default behavior unchanged for any
+    other whatsmeow consumer.
+  - **Fork upkeep** — Cherry-picks landed clean (no conflicts) on top
+    of the F88 fork tip (a91337b). `docs/whatsmeow-patches.md`
+    rewritten to list all four carried patches.
+
 - ✅ **F88 — whatsmeow upgrade to upstream tip (eaa388b + PR #1151)**
   (v0.10.15) — Bumped pin from `8d37001` (May 16) to fork tip
   `a91337b` based on upstream `eaa388b` (Jun 16). 25 upstream commits
