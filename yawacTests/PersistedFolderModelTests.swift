@@ -50,6 +50,18 @@ final class PersistedFolderModelTests: XCTestCase {
         XCTAssertEqual(fetched.first?.folderIDs, ["folder-1", "folder-2"])
     }
 
+    func testPersistedChatFolderIDsDefaultsToEmpty() throws {
+        let container = try Self.makeInMemoryContainer()
+        let context = ModelContext(container)
+
+        let chat = PersistedChat(jid: "111@s.whatsapp.net", name: "Alice")
+        context.insert(chat)
+        try context.save()
+
+        let fetched = try context.fetch(FetchDescriptor<PersistedChat>())
+        XCTAssertEqual(fetched.first?.folderIDs, [])
+    }
+
     private static func makeInMemoryContainer() throws -> ModelContainer {
         let config = ModelConfiguration(isStoredInMemoryOnly: true)
         return try ModelContainer(
