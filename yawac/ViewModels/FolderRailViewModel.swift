@@ -121,6 +121,22 @@ final class FolderRailViewModel {
     // MARK: - Badge compute (implemented in Task 5)
 
     func refreshBadges(chats: [Chat]) {
-        // Filled in Task 5. For Task 4 leave as a stub.
+        var byFolder: [String: Int] = [:]
+        var all = 0
+        var archived = 0
+        for c in chats {
+            guard c.unread > 0 else { continue }
+            if c.archivedAt != nil {
+                archived += c.unread
+                continue
+            }
+            all += c.unread
+            for fid in c.folderIDs {
+                byFolder[fid, default: 0] += c.unread
+            }
+        }
+        self.unreadByFolderID = byFolder
+        self.allUnread = all
+        self.archivedUnread = archived
     }
 }
