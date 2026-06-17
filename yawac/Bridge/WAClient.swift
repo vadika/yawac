@@ -158,6 +158,17 @@ class WAClient: PhoneValidating, LIDResolving {
         subscribersQueue.sync { body(&_subscribers) }
     }
 
+    nonisolated func dispatchSynthetic(_ event: Event) {
+        // F87: yawac-side synthesized events (e.g. own outbound sends that
+        // whatsmeow does not echo). Routed through the same subscriber fan-
+        // out as real bridge events so ChatListViewModel + ConversationView
+        // observers update via their existing .onChange paths.
+        let snapshot: [AsyncStream<Event>.Continuation] = self.withSubscribers { subs in
+            Array(subs.values)
+        }
+        for cont in snapshot { cont.yield(event) }
+    }
+
     init(dbPath: String) throws {
         var err: NSError?
         guard let client = BridgeNewClient(dbPath, &err) else {

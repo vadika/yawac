@@ -53,12 +53,11 @@ struct QuickSendPopover: View {
                 let result = try await Task.detached(priority: .userInitiated) {
                     try client.sendText(chatJID, body)
                 }.value
-                // F87: whatsmeow doesn't echo own outbound sends back as
-                // events.Message, so we synthesize a BridgeMessage here and pass
-                // it through the normal ChatListViewModel ingest path. That
-                // persists to PersistedMessage, updates the sidebar preview, and
-                // runs the FTS upsert in one shot. Without this, quick-sent
-                // messages reached the phone but never showed up in yawac.
+                // F87: yawac is the originator of this send and whatsmeow doesn't
+                // echo own outbound sends back as events.Message. Inject a
+                // synthetic .message into the bridge event stream so the chat
+                // list + any open ConversationView pick it up via their existing
+                // subscribers — same downstream behavior as a real inbound msg.
                 let synthetic = BridgeMessage(
                     id: result.messageID,
                     chatJID: chatJID,
@@ -76,9 +75,7 @@ struct QuickSendPopover: View {
                     locationSequence: nil,
                     contact: nil,
                     isViewOnce: false)
-                await MainActor.run {
-                    session.chatList?.ingest(synthetic)
-                }
+                client.dispatchSynthetic(.message(synthetic))
             },
             onClose: onClose,
             onBack: { selectedChatJID = nil })
