@@ -152,9 +152,6 @@ struct YawacApp: App {
                 }
                 .keyboardShortcut("?", modifiers: .command)
             }
-            CommandMenu("Folders") {
-                FolderCommands()
-            }
         }
 
         Settings {
@@ -174,33 +171,6 @@ private struct FindCommands: View {
         }
         .keyboardShortcut("f", modifiers: .command)
         .disabled(conversation == nil)
-    }
-}
-
-/// F91: ⌘0 = All chats; ⌘1..9 = first 9 custom folders. Writes through
-/// the @AppStorage key that the rail's view-model reads on load and
-/// observes on .onChange — the rail updates without any direct VM hand-off.
-private struct FolderCommands: View {
-
-    @AppStorage("yawac.selectedFolderID") private var selectedFolderIDRaw: String = ""
-    @Environment(\.modelContext) private var modelContext
-
-    var body: some View {
-        Button("All chats") {
-            selectedFolderIDRaw = FolderSelection.all.storageValue
-        }
-        .keyboardShortcut("0", modifiers: .command)
-
-        // Re-fetch on every render — cheap (folders are O(10)).
-        let folders = (try? modelContext.fetch(
-            FetchDescriptor<PersistedFolder>(
-                sortBy: [SortDescriptor(\.sortIndex, order: .forward)]))) ?? []
-        ForEach(Array(folders.prefix(9).enumerated()), id: \.element.id) { idx, f in
-            Button(f.name) {
-                selectedFolderIDRaw = FolderSelection.custom(folderID: f.id).storageValue
-            }
-            .keyboardShortcut(KeyEquivalent(Character("\(idx + 1)")), modifiers: .command)
-        }
     }
 }
 

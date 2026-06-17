@@ -235,6 +235,30 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **F91 v3 — Folders iteration: scope row restored + "+" button + drop ⌘ menu** (v0.10.21) —
+  Post-v0.10.20 user feedback iteration.
+  - Removed the `CommandMenu("Folders")` ⌘0..⌘9 wiring + the
+    `FolderCommands` struct. Rail click is the only selection input
+    now. AppStorage launch-restore stays.
+  - Restored a 3-button horizontal Direct / Groups / Communities
+    scope row at the top of the chat list. Toggleable (tap to
+    apply, tap again to clear); persisted via @AppStorage
+    `yawac.kindScope`. Layers ON TOP of the rail's
+    Folder / All chats / Archived selection — orthogonal kind
+    filter applied after `chatsFor`. No "All" segment — the
+    rail's All chats sentinel is the no-kind-filter default.
+  - Added a small "+" button at the bottom of the folder rail
+    (below the Archived sentinel). Tap → emits `RailEvent
+    .newFolder(insertIndex: vm.folders.count)` which the parent
+    handles by surfacing `NewFolderSheet`. Discoverable affordance
+    that doesn't require a right-click.
+  - Verified folder drag-reorder ([previously T13 in v0.10.19])
+    works as designed: both `.draggable(FolderIDTransfer)` source
+    and `.dropDestination(for: FolderIDTransfer.self)` target on
+    the custom `FolderRailItem`. Fixed stale-index capture: `to`
+    index now looked up by `folder.id` at drop time rather than
+    relying on the closure-captured `idx` from `enumerated()`.
+
 - ✅ **F91 hotfix — in-memory Chat.folderIDs sync** (v0.10.20) —
   v0.10.19 shipped with `FolderRailViewModel.addChat` mutating
   `PersistedChat.folderIDs` on disk but leaving the in-memory

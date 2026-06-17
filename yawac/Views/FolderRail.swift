@@ -41,9 +41,10 @@ struct FolderRail: View {
                         }
                         .dropDestination(for: FolderIDTransfer.self) { transfers, _ in
                             guard let moved = transfers.first,
-                                  let from = vm.folders.firstIndex(where: { $0.id == moved.id })
+                                  let from = vm.folders.firstIndex(where: { $0.id == moved.id }),
+                                  let to = vm.folders.firstIndex(where: { $0.id == folder.id })
                             else { return false }
-                            vm.reorder(fromIndex: from, toIndex: idx)
+                            vm.reorder(fromIndex: from, toIndex: to)
                             return true
                         }
                         .contextMenu {
@@ -69,6 +70,27 @@ struct FolderRail: View {
                         isSelected: vm.selection == .archived,
                         badge: vm.archivedUnread,
                         onTap: { vm.selection = .archived })
+
+                    Button {
+                        onEvent(.newFolder(insertIndex: vm.folders.count))
+                    } label: {
+                        VStack(spacing: 4) {
+                            Image(systemName: "plus")
+                                .scaledIcon(16, weight: .semibold)
+                                .foregroundStyle(Theme.textFaint)
+                                .frame(width: 44, height: 36)
+                                .background(Color.clear,
+                                            in: RoundedRectangle(cornerRadius: 8))
+                            Text("New")
+                                .scaledUI(10.5)
+                                .foregroundStyle(Theme.textFaint)
+                        }
+                        .frame(width: 72)
+                        .padding(.vertical, 6)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("New folder…")
                 }
                 .padding(.vertical, 8)
             }

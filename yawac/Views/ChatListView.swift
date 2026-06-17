@@ -23,6 +23,7 @@ struct ChatListView: View {
     @State private var newFolderInsertIndex: Int = 0
     @State private var renameDraft: String = ""
     @AppStorage("yawac.selectedFolderID") private var selectedFolderIDRaw: String = ""
+    @AppStorage("yawac.kindScope") private var kindScopeRaw: String = ""
     @Environment(\.modelContext) private var modelContext
 
     /// F46 — memoized `displayRows()` output. Body re-evals during a
@@ -89,9 +90,17 @@ struct ChatListView: View {
         // F91 — filter chats through the active folder selection first.
         let selection = folderRail?.selection ?? .all
         let allChatsSource = search.query.isEmpty ? vm.chats : search.filteredChats
-        let visibleChats = ChatListViewModel.chatsFor(
+        let railFiltered = ChatListViewModel.chatsFor(
             selection: selection,
             allChats: allChatsSource)
+        // F91 v3 — layer kind filter on top of rail selection.
+        let kindScope: KindScope? = KindScope(rawValue: kindScopeRaw)
+        let visibleChats: [Chat]
+        if let k = kindScope {
+            visibleChats = railFiltered.filter { k.matches($0) }
+        } else {
+            visibleChats = railFiltered
+        }
 
         // F91 — archived sentinel: flat sorted list, no sections/pinned/groups.
         if selection == .archived {
@@ -359,6 +368,39 @@ struct ChatListView: View {
                     .accessibilityHidden(true)
             )
 
+            // ─── Kind scope row (Direct / Groups / Communities).
+            // Toggleable: tap to apply, tap again to clear. Orthogonal
+            // to the folder rail selection.
+            HStack(spacing: 4) {
+                ForEach(KindScope.allCases) { k in
+                    Button {
+                        var tx = Transaction()
+                        tx.disablesAnimations = true
+                        withTransaction(tx) {
+                            kindScopeRaw = kindScopeRaw == k.rawValue ? "" : k.rawValue
+                        }
+                    } label: {
+                        VStack(spacing: 3) {
+                            Image(systemName: k.icon)
+                                .scaledIcon(14, weight: .regular)
+                            Text(k.label)
+                                .scaledUI(10, weight: .medium)
+                                .opacity(0.85)
+                        }
+                        .foregroundStyle(kindScopeRaw == k.rawValue ? Theme.accentText : Theme.textMuted)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                        .background(
+                            kindScopeRaw == k.rawValue ? Theme.accentSoft : Color.clear,
+                            in: RoundedRectangle(cornerRadius: Theme.sidebarItemRadius)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.bottom, 8)
+
             // ─── List with sectioned chats. Flat row enum so LazyVStack
             // only diffs one ForEach instead of multiple nested ones.
             // F5: while the cold-start bootstrap is in flight and we
@@ -499,15 +541,8 @@ struct ChatListView: View {
                 cachedRows = rebuildDisplayRows()
             }
         }
-        // F91 — react to CommandMenu ⌘0..9 writing AppStorage directly.
-        .onChange(of: selectedFolderIDRaw) { _, newRaw in
-            guard let rail = folderRail else { return }
-            let knownIDs = Set(rail.folders.map(\.id))
-            let resolved = FolderSelection.resolved(storageValue: newRaw, knownIDs: knownIDs)
-            if rail.selection != resolved {
-                rail.selection = resolved
-            }
-        }
+        // F91 v3 — rebuild when kind scope filter changes.
+        .onChange(of: kindScopeRaw) { _, _ in cachedRows = rebuildDisplayRows() }
     }
 
     @ViewBuilder
@@ -889,6 +924,36 @@ struct ChatListView: View {
             }
         }
         .contentShape(Rectangle())
+    }
+}
+
+/// F91 v3 — 3-button kind filter. Orthogonal to the folder rail
+/// selection; applied on top of `chatsFor` output. File-scoped so
+/// tests can import and exercise `matches(_:)` directly.
+enum KindScope: String, CaseIterable, Identifiable {
+    case direct, groups, communities
+    var id: String { rawValue }
+    var icon: String {
+        switch self {
+        case .direct:      return "person.fill"
+        case .groups:      return "person.3.fill"
+        case .communities: return "building.2.fill"
+        }
+    }
+    var label: String {
+        switch self {
+        case .direct:      return "Direct"
+        case .groups:      return "Groups"
+        case .communities: return "Communities"
+        }
+    }
+    /// Pure: returns true iff the chat matches this kind.
+    func matches(_ chat: Chat) -> Bool {
+        switch self {
+        case .direct:      return !chat.isGroup && !chat.isCommunityParent
+        case .groups:      return chat.isGroup && !chat.isCommunityParent
+        case .communities: return chat.isCommunityParent
+        }
     }
 }
 
