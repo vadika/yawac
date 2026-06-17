@@ -50,9 +50,35 @@ struct QuickSendPopover: View {
                 guard let client = session.client else {
                     throw NotPairedError()
                 }
-                _ = try await Task.detached(priority: .userInitiated) {
+                let result = try await Task.detached(priority: .userInitiated) {
                     try client.sendText(chatJID, body)
                 }.value
+                // F87: whatsmeow doesn't echo own outbound sends back as
+                // events.Message, so we synthesize a BridgeMessage here and pass
+                // it through the normal ChatListViewModel ingest path. That
+                // persists to PersistedMessage, updates the sidebar preview, and
+                // runs the FTS upsert in one shot. Without this, quick-sent
+                // messages reached the phone but never showed up in yawac.
+                let synthetic = BridgeMessage(
+                    id: result.messageID,
+                    chatJID: chatJID,
+                    senderJID: client.ownJID,
+                    senderPushName: nil,
+                    fromMe: true,
+                    timestamp: result.timestamp,
+                    kind: "text",
+                    text: body,
+                    media: nil,
+                    poll: nil,
+                    quoted: nil,
+                    isForwarded: false,
+                    location: nil,
+                    locationSequence: nil,
+                    contact: nil,
+                    isViewOnce: false)
+                await MainActor.run {
+                    session.chatList?.ingest(synthetic)
+                }
             },
             onClose: onClose,
             onBack: { selectedChatJID = nil })
