@@ -56,6 +56,85 @@ final class ConversationViewModelPollHistoryTests: XCTestCase {
 
         XCTAssertEqual(vm.mySelections(for: pollID), Set(["h2"]))
     }
+
+    // MARK: buildHistorySnapshot hydration
+
+    func testBuildHistorySnapshotHydratesOwnPollVote() async throws {
+        let container = try Self.makeInMemoryContainer()
+        let context = ModelContext(container)
+
+        let pollTimestamp = Date(timeIntervalSince1970: 1_729_000_000)
+        context.insert(PersistedMessage(
+            id: pollID,
+            chatJID: chatJID,
+            senderJID: chatJID,
+            fromMe: false,
+            timestamp: pollTimestamp,
+            kind: "poll",
+            text: "Lunch?"))
+        context.insert(PersistedPollVote(
+            chatJID: chatJID,
+            pollMessageID: pollID,
+            voterJID: ownJID,
+            optionHashesJSON: "[\"h1\",\"h2\"]",
+            timestamp: pollTimestamp.addingTimeInterval(60)))
+        try context.save()
+
+        let snap = await Task.detached { [chatJID, container] in
+            ConversationViewModel.buildHistorySnapshot(
+                chatJID: chatJID,
+                container: container,
+                canonicalize: { $0 },
+                limit: 100)
+        }.value
+
+        XCTAssertTrue(
+            snap.pollVotes[pollID]?["h1"]?.contains(ownJID) == true,
+            "own vote on h1 should hydrate from PersistedPollVote")
+        XCTAssertTrue(
+            snap.pollVotes[pollID]?["h2"]?.contains(ownJID) == true,
+            "own vote on h2 should hydrate from PersistedPollVote")
+    }
+
+    func testBuildHistorySnapshotIgnoresVotesForOffWindowPolls() async throws {
+        let container = try Self.makeInMemoryContainer()
+        let context = ModelContext(container)
+
+        // No PersistedMessage row for "ORPHAN_POLL" — vote should not
+        // be hydrated since the snapshot only seeds for visible polls.
+        context.insert(PersistedPollVote(
+            chatJID: chatJID,
+            pollMessageID: "ORPHAN_POLL",
+            voterJID: ownJID,
+            optionHashesJSON: "[\"h1\"]",
+            timestamp: Date(timeIntervalSince1970: 1_729_000_000)))
+        try context.save()
+
+        let snap = await Task.detached { [chatJID, container] in
+            ConversationViewModel.buildHistorySnapshot(
+                chatJID: chatJID,
+                container: container,
+                canonicalize: { $0 },
+                limit: 100)
+        }.value
+
+        XCTAssertNil(snap.pollVotes["ORPHAN_POLL"])
+    }
+
+    // MARK: helpers
+
+    private static func makeInMemoryContainer() throws -> ModelContainer {
+        // Mirrors the app's ModelContainer construction in yawacApp.swift
+        // (the four `@Model` types this app declares). isStoredInMemoryOnly
+        // keeps each test hermetic — no on-disk store, no inter-test leak.
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        return try ModelContainer(
+            for: PersistedMessage.self,
+            PersistedChat.self,
+            PersistedReaction.self,
+            PersistedPollVote.self,
+            configurations: config)
+    }
 }
 
 /// Minimal WAClient subclass that overrides `ownJID` so the tests can
