@@ -235,6 +235,25 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **F91 v4 — Drag-reorder fix + "All" scope segment** (v0.10.22) —
+  Iteration on v0.10.21 user feedback.
+  - **Drag-reorder.** v0.10.21 fixed a stale-`idx` capture in the
+    drop closure but folders still didn't actually react to drag
+    because SwiftUI's `.draggable(FolderIDTransfer(...))` on a
+    `Button` competes with the button's tap-target — on macOS the
+    button hit-test wins before the drag distance threshold is
+    met. Replaced with the older `.onDrag { NSItemProvider }`
+    pattern + matching `.onDrop(of: [.folderID])` drop handler.
+    Added `FolderIDTransferNSObject` wrapper conforming to
+    `NSItemProviderWriting`. Chat-drop on the same item still
+    uses `.dropDestination(for: ChatJIDTransfer.self)` because
+    the source is a chat row (not a button), where `.draggable`
+    works fine.
+  - **"All" scope.** Added `.all` segment to `KindScope`, default
+    selection. 4 buttons: All / Direct / Groups / Communities.
+    Tapping "All" or the active segment clears back to All.
+    `.matches(_:)` returns `true` for `.all` over any chat.
+
 - ✅ **F91 v3 — Folders iteration: scope row restored + "+" button + drop ⌘ menu** (v0.10.21) —
   Post-v0.10.20 user feedback iteration.
   - Removed the `CommandMenu("Folders")` ⌘0..⌘9 wiring + the

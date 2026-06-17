@@ -23,7 +23,7 @@ struct ChatListView: View {
     @State private var newFolderInsertIndex: Int = 0
     @State private var renameDraft: String = ""
     @AppStorage("yawac.selectedFolderID") private var selectedFolderIDRaw: String = ""
-    @AppStorage("yawac.kindScope") private var kindScopeRaw: String = ""
+    @AppStorage("yawac.kindScope") private var kindScopeRaw: String = KindScope.all.rawValue
     @Environment(\.modelContext) private var modelContext
 
     /// F46 — memoized `displayRows()` output. Body re-evals during a
@@ -93,14 +93,10 @@ struct ChatListView: View {
         let railFiltered = ChatListViewModel.chatsFor(
             selection: selection,
             allChats: allChatsSource)
-        // F91 v3 — layer kind filter on top of rail selection.
-        let kindScope: KindScope? = KindScope(rawValue: kindScopeRaw)
-        let visibleChats: [Chat]
-        if let k = kindScope {
-            visibleChats = railFiltered.filter { k.matches($0) }
-        } else {
-            visibleChats = railFiltered
-        }
+        // F91 v4 — layer kind filter on top of rail selection.
+        // `.all` passes everything through; other cases filter.
+        let kind = KindScope(rawValue: kindScopeRaw) ?? .all
+        let visibleChats = railFiltered.filter { kind.matches($0) }
 
         // F91 — archived sentinel: flat sorted list, no sections/pinned/groups.
         if selection == .archived {
@@ -368,16 +364,22 @@ struct ChatListView: View {
                     .accessibilityHidden(true)
             )
 
-            // ─── Kind scope row (Direct / Groups / Communities).
-            // Toggleable: tap to apply, tap again to clear. Orthogonal
-            // to the folder rail selection.
+            // ─── Kind scope row (All / Direct / Groups / Communities).
+            // Tap to apply; tap "All" or the already-selected segment
+            // to reset to All. Orthogonal to the folder rail selection.
             HStack(spacing: 4) {
                 ForEach(KindScope.allCases) { k in
                     Button {
                         var tx = Transaction()
                         tx.disablesAnimations = true
                         withTransaction(tx) {
-                            kindScopeRaw = kindScopeRaw == k.rawValue ? "" : k.rawValue
+                            // Tapping the active non-all segment resets to all;
+                            // tapping all always selects all.
+                            if k == .all || kindScopeRaw == k.rawValue {
+                                kindScopeRaw = KindScope.all.rawValue
+                            } else {
+                                kindScopeRaw = k.rawValue
+                            }
                         }
                     } label: {
                         VStack(spacing: 3) {
@@ -927,14 +929,16 @@ struct ChatListView: View {
     }
 }
 
-/// F91 v3 — 3-button kind filter. Orthogonal to the folder rail
-/// selection; applied on top of `chatsFor` output. File-scoped so
-/// tests can import and exercise `matches(_:)` directly.
+/// F91 v4 — 4-button kind filter. Added `.all` as the default no-filter
+/// state. Orthogonal to the folder rail selection; applied on top of
+/// `chatsFor` output. File-scoped so tests can import and exercise
+/// `matches(_:)` directly.
 enum KindScope: String, CaseIterable, Identifiable {
-    case direct, groups, communities
+    case all, direct, groups, communities
     var id: String { rawValue }
     var icon: String {
         switch self {
+        case .all:         return "bubble.left.and.bubble.right.fill"
         case .direct:      return "person.fill"
         case .groups:      return "person.3.fill"
         case .communities: return "building.2.fill"
@@ -942,14 +946,17 @@ enum KindScope: String, CaseIterable, Identifiable {
     }
     var label: String {
         switch self {
+        case .all:         return "All"
         case .direct:      return "Direct"
         case .groups:      return "Groups"
         case .communities: return "Communities"
         }
     }
     /// Pure: returns true iff the chat matches this kind.
+    /// `.all` matches every chat.
     func matches(_ chat: Chat) -> Bool {
         switch self {
+        case .all:         return true
         case .direct:      return !chat.isGroup && !chat.isCommunityParent
         case .groups:      return chat.isGroup && !chat.isCommunityParent
         case .communities: return chat.isCommunityParent
