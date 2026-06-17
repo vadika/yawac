@@ -119,7 +119,10 @@ struct YawacApp: App {
                     MenuBarController.shared.bind(session: session)
                     let show = UserDefaults.standard
                         .object(forKey: "yawac.menuBar.show") as? Bool ?? false
-                    MenuBarController.shared.setEnabled(show)
+                    // Test-host runs would otherwise race the GlobalHotkeyTests for ⌘⇧Y;
+                    // keep the status item + hotkey out of XCTest hosts.
+                    let underTest = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+                    MenuBarController.shared.setEnabled(show && !underTest)
                 }
                 .sheet(isPresented: $showShortcuts) {
                     KeyboardShortcutsView()
