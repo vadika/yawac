@@ -7,7 +7,7 @@ cask "yawac" do
   desc "Yet Another Client for WhatsApp — native macOS SwiftUI"
   homepage "https://github.com/vadika/yawac"
 
-  depends_on macos: ">= :sonoma"
+  depends_on macos: :sonoma
 
   app "yawac.app"
 
