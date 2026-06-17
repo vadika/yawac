@@ -120,39 +120,37 @@ func (c *Client) applyHistorySync(evt *events.HistorySync) {
 
 // emitHistoricalPollUpdatesFromBlob dispatches one synthetic "PollVote"
 // event per record returned by events.HistorySync.HistoricalPollUpdates().
-// The helper already produces SHA-256(optionName) hashes — identical to
-// what DecryptPollVote yields for live votes — so the Swift tally path
-// is uniform across live and historical sources.
+// The fork's helper already produces SHA-256(optionName) hashes —
+// identical to what DecryptPollVote yields for live votes — so the
+// Swift tally path is uniform across live and historical sources.
+//
+// F90: per-sweep counter log so /tmp/yawac.log shows substitution
+// activity after a Full sync. self > 0 confirms the empty-voter →
+// ownJID substitution fired (fix for the F88 PollCreationFromMe gate
+// that missed own-votes on peer-created polls).
 func (c *Client) emitHistoricalPollUpdatesFromBlob(evt *events.HistorySync) {
 	records := evt.HistoricalPollUpdates()
 	if len(records) == 0 {
 		return
 	}
-	fmt.Fprintf(os.Stderr,
-		"[yawac/poll-history] sweep %d records\n", len(records))
+	var ownBareJID string
+	if c.wa != nil && c.wa.Store != nil && c.wa.Store.ID != nil {
+		ownBareJID = c.wa.Store.ID.ToNonAD().String()
+	}
+	var selfN, peerN int
 	for _, r := range records {
-		voterStr := r.Voter.String()
-		// Self-vote: helper leaves Voter empty when the update key has
-		// FromMe=true and no Participant. Substitute our own bare JID
-		// so the Swift side keys this against client.ownJID.
-		if voterStr == "" && r.PollCreationFromMe &&
-			c.wa != nil && c.wa.Store != nil && c.wa.Store.ID != nil {
-			voterStr = c.wa.Store.ID.ToNonAD().String()
+		v := historicalRecordToVote(r, ownBareJID)
+		if ownBareJID != "" && v.VoterJID == ownBareJID {
+			selfN++
+		} else {
+			peerN++
 		}
-		hashes := make([]string, 0, len(r.SelectedOptionHashes))
-		for _, h := range r.SelectedOptionHashes {
-			hashes = append(hashes, hex.EncodeToString(h))
-		}
-		payload := JPollVote{
-			ChatJID:       r.Chat.String(),
-			PollMessageID: r.PollCreationID,
-			VoterJID:      voterStr,
-			OptionHashes:  hashes,
-			Timestamp:     r.Timestamp.Unix(),
-		}
-		b, _ := json.Marshal(payload)
+		b, _ := json.Marshal(v)
 		c.dispatch("PollVote", string(b))
 	}
+	fmt.Fprintf(os.Stderr,
+		"[yawac/poll-history] sweep records=%d self=%d peer=%d\n",
+		len(records), selfN, peerN)
 }
 
 // historicalRecordToVote maps one HistoricalPollVote record into the
