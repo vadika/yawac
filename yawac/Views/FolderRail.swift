@@ -11,12 +11,20 @@ struct FolderRail: View {
         VStack(spacing: 0) {
             ScrollView(.vertical, showsIndicators: false) {
                 VStack(spacing: 2) {
-                    ForEach(vm.folders, id: \.id) { folder in
+                    ForEach(Array(vm.folders.enumerated()), id: \.element.id) { idx, folder in
                         FolderRailItem(
                             kind: .custom(folder),
                             isSelected: vm.selection == .custom(folderID: folder.id),
                             badge: vm.unreadByFolderID[folder.id] ?? 0,
                             onTap: { vm.selection = .custom(folderID: folder.id) })
+                        .draggable(FolderIDTransfer(id: folder.id)) {
+                            FolderRailItem(
+                                kind: .custom(folder),
+                                isSelected: true,
+                                badge: 0,
+                                onTap: {})
+                                .opacity(0.6)
+                        }
                         .dropDestination(for: ChatJIDTransfer.self) { transfers, _ in
                             for t in transfers {
                                 vm.addChat(jid: t.jid, toFolderID: folder.id)
@@ -24,6 +32,13 @@ struct FolderRail: View {
                             return !transfers.isEmpty
                         } isTargeted: { _ in
                             // visual feedback handled by FolderRailItem if needed
+                        }
+                        .dropDestination(for: FolderIDTransfer.self) { transfers, _ in
+                            guard let moved = transfers.first,
+                                  let from = vm.folders.firstIndex(where: { $0.id == moved.id })
+                            else { return false }
+                            vm.reorder(fromIndex: from, toIndex: idx)
+                            return true
                         }
                     }
 
