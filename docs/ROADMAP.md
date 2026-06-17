@@ -235,6 +235,34 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **F92 — Reconnect catch-up history sync** (v0.10.23) —
+  Issue #6 regression: user reports messages read on the phone
+  while yawac was offline never sync after reconnect. F83/F84/F89
+  closed the in-bridge silent-drop failure modes (SQLITE_BUSY,
+  signal session race), but `/tmp/yawac.log` analysis shows a
+  separate WhatsApp protocol behavior is now the cause: when the
+  primary device (phone) reads a message, the server marks it
+  delivered to all linked devices and clears the offline buffer.
+  yawac then gets only "notifications" (read-state hints), no
+  actual message content. Server-side, not fixable in bridge.
+  - **Workaround.** On every `.connected` event after the one-shot
+    full backfill, fire a 7-day FULL_HISTORY_SYNC_ON_DEMAND
+    (type 6) catch-up request via the existing
+    `Client.requestFullHistorySync` path. Phone re-ships those
+    7 days of history — the recently-cleared messages re-arrive
+    through the normal `applyHistorySync` classifier, dedupe by
+    message ID at persist time.
+  - **Throttle.** 5-minute minimum between catch-ups, tracked via
+    `@UserDefault("yawac.lastReconnectCatchupAt")`. Prevents
+    reconnect-flapping (visible in logs as `connection reset by
+    peer` bursts during weak network) from hammering the phone.
+  - **Logout reset.** `logout()` clears the throttle timestamp
+    alongside `historyBackfillCompleted` so a re-pair starts
+    fresh.
+  - **Diagnostics.** New `[yawac/catchup]` log lines in
+    `/tmp/yawac.log`: `skip — last fired Xs ago`,
+    `sending FULL_HISTORY_SYNC_ON_DEMAND count=7`, or `failed: …`.
+
 - ✅ **F91 v4 — Drag-reorder fix + "All" scope segment** (v0.10.22) —
   Iteration on v0.10.21 user feedback.
   - **Drag-reorder.** v0.10.21 fixed a stale-`idx` capture in the

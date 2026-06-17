@@ -37,6 +37,22 @@ final class SessionViewModel {
         set { UserDefaults.standard.set(newValue,
                                         forKey: Self.historyBackfillCompletedKey) }
     }
+
+    /// F92: timestamp (Unix seconds) of the last on-reconnect
+    /// catch-up history sync. Used to throttle the per-connect 7-day
+    /// catch-up so reconnect flapping doesn't hammer the phone.
+    private static let lastReconnectCatchupKey = "yawac.lastReconnectCatchupAt"
+
+    var lastReconnectCatchupAt: TimeInterval {
+        get { UserDefaults.standard.double(forKey: Self.lastReconnectCatchupKey) }
+        set { UserDefaults.standard.set(newValue, forKey: Self.lastReconnectCatchupKey) }
+    }
+
+    /// F92: 5-minute throttle for `requestReconnectCatchupSyncIfNeeded`. Set
+    /// long enough that reconnect-flapping doesn't hammer the phone
+    /// but short enough that a user who quits + relaunches a few minutes
+    /// later still gets a fresh pull.
+    static let reconnectCatchupThrottle: TimeInterval = 5 * 60
     /// User-triggered full history sync progress state. Read by the
     /// AccountPanel "Full history sync" row to render a linear
     /// ProgressView + counters while a backfill burst is in flight.
@@ -598,6 +614,7 @@ final class SessionViewModel {
         // Re-arm the v0.8.1 one-shot history backfill so the next pairing
         // session re-runs it against whatever state the new account has.
         historyBackfillCompleted = false
+        lastReconnectCatchupAt = 0  // F92: reset catch-up throttle on logout
         try? client?.logout()
         client = nil
         qrCode = nil
@@ -673,6 +690,11 @@ final class SessionViewModel {
             // persisted message. No-op once the flag is set; see T12 for
             // where the flag flips on first HistorySync arrival.
             Task { await self.requestHistoryBackfillIfNeeded() }
+            // F92: on every connect after the one-shot deep sync, fire
+            // a 7-day catch-up so messages the phone read while yawac
+            // was offline (which WhatsApp clears from the offline buffer)
+            // still flow in via direct history-sync request. Throttled.
+            Task { await self.requestReconnectCatchupSyncIfNeeded() }
         case .joinApprovalModeChanged(let chatJID, let on, _, _):
             if on {
                 Task { await self.joinRequestStore.refresh(chatJID: chatJID) }
@@ -1052,6 +1074,47 @@ final class SessionViewModel {
             return
         }
         // Flag flipped on first HistorySync arrival — see T12 (ContentView).
+    }
+
+    /// F92: on every `.connected` event AFTER the one-shot full history
+    /// backfill has already happened, request a small (7-day) catch-up
+    /// sync. WhatsApp clears its offline buffer for messages the phone
+    /// has already read, so messages missed while yawac was down don't
+    /// re-deliver via the normal `.connected` path. This catch-up bypasses
+    /// the server-side clearing by asking the phone directly via type-6
+    /// FULL_HISTORY_SYNC_ON_DEMAND. Throttled to 5 min so reconnect
+    /// flapping doesn't hammer.
+    @MainActor
+    func requestReconnectCatchupSyncIfNeeded() async {
+        guard historyBackfillCompleted else {
+            // First-pair flow: let `requestHistoryBackfillIfNeeded` run
+            // the full deep sync. Catch-up only kicks in after.
+            return
+        }
+        guard let client else { return }
+        let now = Date().timeIntervalSince1970
+        let last = lastReconnectCatchupAt
+        if now - last < Self.reconnectCatchupThrottle {
+            NSLog("[yawac/catchup] skip — last fired %.0fs ago (throttle=%.0fs)",
+                  now - last, Self.reconnectCatchupThrottle)
+            return
+        }
+        lastReconnectCatchupAt = now
+        NSLog("[yawac/catchup] sending FULL_HISTORY_SYNC_ON_DEMAND count=7 (days)")
+        do {
+            try await Task.detached { [client] in
+                try client.requestFullHistorySync(
+                    beforeChatJID: "",
+                    beforeMsgID: "",
+                    beforeFromMe: false,
+                    beforeTSUnix: 0,
+                    count: 7)
+            }.value
+            NSLog("[yawac/catchup] SendPeerMessage ok — waiting for HistorySync chunks")
+        } catch {
+            NSLog("[yawac/catchup] catch-up sync failed: %@",
+                  String(describing: error))
+        }
     }
 
     /// Fan-out refresh of pending join-request queues for every group
