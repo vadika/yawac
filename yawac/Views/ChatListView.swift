@@ -5,6 +5,8 @@ struct ChatListView: View {
     @Environment(ChatSearchViewModel.self) private var search
     @FocusState private var searchFocused: Bool
     @Environment(SessionViewModel.self) private var session
+    // F91 — kept for compilation; .archivedHeader Row case is now dead
+    // (archived chats are shown via the Archived rail sentinel, not inline).
     @State private var archivedExpanded = false
     @State private var pendingDelete: Chat?
     @State private var pendingBlock: Chat?
@@ -12,7 +14,15 @@ struct ChatListView: View {
     @State private var showingNewGroup = false
     @State private var showingNewCommunity = false
     @Binding var selection: Chat.ID?
-    @AppStorage("yawac.chatListScope") private var scopeRaw: String = Scope.all.rawValue
+
+    // F91 — folder rail state
+    @State private var folderRail: FolderRailViewModel?
+    @State private var showNewFolderSheet: Bool = false
+    @State private var renamingFolder: PersistedFolder?
+    @State private var folderPendingDelete: PersistedFolder?
+    @State private var newFolderInsertIndex: Int = 0
+    @AppStorage("yawac.selectedFolderID") private var selectedFolderIDRaw: String = ""
+    @Environment(\.modelContext) private var modelContext
 
     /// F46 — memoized `displayRows()` output. Body re-evals during a
     /// splitter drag fire at gesture-event rate; recomputing the O(C)
@@ -21,30 +31,6 @@ struct ChatListView: View {
     /// `rebuildDisplayRows()` actually changes (see the `.onChange`
     /// wires at the bottom of `body`).
     @State private var cachedRows: [Row] = []
-
-    enum Scope: String, CaseIterable, Identifiable {
-        case all, chats, groups, communities
-        var id: String { rawValue }
-        var label: String {
-            switch self {
-            case .all:         return "All"
-            case .chats:       return "Direct"
-            case .groups:      return "Groups"
-            case .communities: return "Communities"
-            }
-        }
-        var icon: String {
-            switch self {
-            case .all:         return "tray"
-            case .chats:       return "person"
-            case .groups:      return "person.2"
-            case .communities: return "building.2"
-            }
-        }
-        var count: Int? { nil } // populated by ChatListView via VM
-    }
-
-    private var scope: Scope { Scope(rawValue: scopeRaw) ?? .all }
 
     private enum Row: Hashable, Identifiable {
         case section(id: String, label: String, count: Int)
@@ -99,7 +85,35 @@ struct ChatListView: View {
     /// so splitter drags (which re-eval body at gesture-event rate)
     /// no longer trigger this O(C) pass per frame.
     private func rebuildDisplayRows() -> [Row] {
-        let chats = search.query.isEmpty ? vm.chats : search.filteredChats
+        // F91 — filter chats through the active folder selection first.
+        let selection = folderRail?.selection ?? .all
+        let allChatsSource = search.query.isEmpty ? vm.chats : search.filteredChats
+        let visibleChats = ChatListViewModel.chatsFor(
+            selection: selection,
+            allChats: allChatsSource)
+
+        // F91 — archived sentinel: flat sorted list, no sections/pinned/groups.
+        if selection == .archived {
+            var out: [Row] = []
+            if !search.query.isEmpty
+                && (!search.messageHits.isEmpty
+                    || !search.filters.isEmpty
+                    || search.globalChatFilter != nil) {
+                out.append(.messageSection(count: search.messageHits.count))
+                out.append(.messageFilterChips)
+                let nameLookup = Dictionary(vm.chats.map { ($0.jid, $0.name) },
+                                            uniquingKeysWith: { first, _ in first })
+                for hit in search.messageHits {
+                    let name = nameLookup[hit.chatJID] ?? hit.chatJID
+                    out.append(.messageHit(hit: hit, chatName: name))
+                }
+            } else {
+                let sorted = visibleChats.sorted { $0.lastTimestamp > $1.lastTimestamp }
+                for c in sorted { out.append(.chat(c, indent: 0)) }
+            }
+            return out
+        }
+
         var out: [Row] = []
         if vm.inviteLinkPreview != nil {
             out.append(.invitePreview)
@@ -113,13 +127,11 @@ struct ChatListView: View {
         var directChats: [Chat] = []
         var subsByParent: [String: [Chat]] = [:]
         var pinned: [Chat] = []
-        var archived: [Chat] = []
 
-        for c in chats {
-            if search.query.isEmpty, c.archivedAt != nil {
-                archived.append(c)
-                continue
-            }
+        // F91 — visibleChats already excludes archived chats (chatsFor
+        // filters them out for .all and .custom). No inline archived
+        // section is rendered; the Archived rail sentinel owns that view.
+        for c in visibleChats {
             if c.pinnedAt != nil {
                 pinned.append(c)
                 continue
@@ -135,39 +147,11 @@ struct ChatListView: View {
             }
         }
 
-        let s = scope
-
-        let archivedVisible: [Chat] = archived.filter { c in
-            switch s {
-            case .all:         return true
-            case .chats:       return !c.isGroup && !c.isCommunityParent
-            case .groups:      return c.isGroup && !c.isCommunityParent
-            case .communities: return c.isCommunityParent
-            }
-        }
-        if !archivedVisible.isEmpty {
-            out.append(.archivedHeader(count: archivedVisible.count))
-            if archivedExpanded {
-                for a in archivedVisible {
-                    out.append(.chat(a, indent: 0))
-                }
-            }
-        }
-
-        // Pinned floats above everything (and across scope buckets).
-        // Hide under .communities — pin lives in the home tabs only.
-        let pinnedVisible: [Chat] = pinned.filter { c in
-            switch s {
-            case .all:         return true
-            case .chats:       return !c.isGroup && !c.isCommunityParent
-            case .groups:      return c.isGroup && !c.isCommunityParent
-            case .communities: return c.isCommunityParent
-            }
-        }
-        if !pinnedVisible.isEmpty {
+        // Pinned floats above everything (and across folder buckets).
+        if !pinned.isEmpty {
             out.append(.section(id: "pinned", label: "Pinned",
-                                count: pinnedVisible.count))
-            for p in pinnedVisible {
+                                count: pinned.count))
+            for p in pinned {
                 out.append(.chat(p, indent: 0))
                 // A pinned community parent should still expose its
                 // joined sub-groups under it — otherwise users lose
@@ -181,61 +165,29 @@ struct ChatListView: View {
             }
         }
 
-        if s == .all {
-            // F50: All scope renders one timeline-sorted list (matches the
-            // native WhatsApp client) instead of segregating by type. The
-            // previous bucketed layout pushed fresh direct messages below
-            // every group, so a new DM never bubbled to the top of All —
-            // only Direct showed it on top. Communities still keep their
-            // parent+sub-group indented grouping, but each community
-            // parent shows up at its own recency position rather than
-            // collected into a Communities section.
-            var interleaved: [Chat] = []
-            interleaved.reserveCapacity(communities.count
-                                         + standaloneGroups.count
-                                         + directChats.count)
-            interleaved.append(contentsOf: communities)
-            interleaved.append(contentsOf: standaloneGroups)
-            interleaved.append(contentsOf: directChats)
-            // The source `chats` array is already sorted by recency
-            // (sortChats() runs after every ingest flush); preserve that
-            // ordering when merging the three buckets.
-            interleaved.sort { $0.lastTimestamp > $1.lastTimestamp }
-            if !interleaved.isEmpty {
-                out.append(.section(id: "chats", label: "Chats",
-                                    count: interleaved.count))
-                for c in interleaved {
-                    out.append(.chat(c, indent: 0))
-                    if c.isCommunityParent {
-                        for sub in subsByParent[c.jid] ?? [] {
-                            out.append(.chat(sub, indent: 16))
-                        }
-                    }
-                }
-            }
-        } else {
-            if s == .communities && !communities.isEmpty {
-                out.append(.section(id: "communities", label: "Communities",
-                                    count: communities.count))
-                for parent in communities {
-                    out.append(.chat(parent, indent: 0))
-                    for sub in subsByParent[parent.jid] ?? [] {
+        // F91 — .all and .custom both use the timeline-sorted single list.
+        // F50: All scope renders one timeline-sorted list (matches the
+        // native WhatsApp client) instead of segregating by type.
+        var interleaved: [Chat] = []
+        interleaved.reserveCapacity(communities.count
+                                     + standaloneGroups.count
+                                     + directChats.count)
+        interleaved.append(contentsOf: communities)
+        interleaved.append(contentsOf: standaloneGroups)
+        interleaved.append(contentsOf: directChats)
+        // The source array is already sorted by recency
+        // (sortChats() runs after every ingest flush); preserve that
+        // ordering when merging the three buckets.
+        interleaved.sort { $0.lastTimestamp > $1.lastTimestamp }
+        if !interleaved.isEmpty {
+            out.append(.section(id: "chats", label: "Chats",
+                                count: interleaved.count))
+            for c in interleaved {
+                out.append(.chat(c, indent: 0))
+                if c.isCommunityParent {
+                    for sub in subsByParent[c.jid] ?? [] {
                         out.append(.chat(sub, indent: 16))
                     }
-                }
-            }
-            if s == .groups && !standaloneGroups.isEmpty {
-                out.append(.section(id: "groups", label: "Groups",
-                                    count: standaloneGroups.count))
-                for g in standaloneGroups {
-                    out.append(.chat(g, indent: 0))
-                }
-            }
-            if s == .chats && !directChats.isEmpty {
-                out.append(.section(id: "direct", label: "Direct",
-                                    count: directChats.count))
-                for c in directChats {
-                    out.append(.chat(c, indent: 0))
                 }
             }
         }
@@ -257,6 +209,38 @@ struct ChatListView: View {
     }
 
     var body: some View {
+        HStack(spacing: 0) {
+            if let rail = folderRail {
+                FolderRail(vm: rail)
+                    .contextMenu {
+                        Button("New folder…") {
+                            newFolderInsertIndex = rail.folders.count
+                            showNewFolderSheet = true
+                        }
+                    }
+                Divider()
+            }
+            chatListContent
+        }
+        .task {
+            if folderRail == nil {
+                let rail = FolderRailViewModel(context: modelContext)
+                rail.loadFolders()
+                let knownIDs = Set(rail.folders.map(\.id))
+                rail.selection = FolderSelection.resolved(
+                    storageValue: selectedFolderIDRaw,
+                    knownIDs: knownIDs)
+                folderRail = rail
+            }
+        }
+        .sheet(isPresented: $showNewFolderSheet) {
+            NewFolderSheet(isPresented: $showNewFolderSheet) { name in
+                folderRail?.createFolder(name: name, atIndex: newFolderInsertIndex)
+            }
+        }
+    }
+
+    private var chatListContent: some View {
         VStack(spacing: 0) {
             // ─── Title-bar gutter. 64pt matches the right pane's chat
             // header so the two columns share a single seam; traffic
@@ -337,40 +321,6 @@ struct ChatListView: View {
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
             )
-
-            // ─── Tabs (custom pill-style, matching design).
-            HStack(spacing: 4) {
-                ForEach(Scope.allCases) { s in
-                    Button {
-                        // Skip implicit animation — animating the diff
-                        // between scopes is what caused multi-second
-                        // hangs on large chat lists.
-                        var tx = Transaction()
-                        tx.disablesAnimations = true
-                        withTransaction(tx) {
-                            scopeRaw = s.rawValue
-                        }
-                    } label: {
-                        VStack(spacing: 3) {
-                            Image(systemName: s.icon)
-                                .scaledIcon(14, weight: .regular)
-                            Text(s.label)
-                                .scaledUI(10, weight: .medium)
-                                .opacity(0.85)
-                        }
-                        .foregroundStyle(scope == s ? Theme.accentText : Theme.textMuted)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
-                        .background(
-                            scope == s ? Theme.accentSoft : Color.clear,
-                            in: RoundedRectangle(cornerRadius: Theme.sidebarItemRadius)
-                        )
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(.horizontal, 14)
-            .padding(.bottom, 8)
 
             // ─── List with sectioned chats. Flat row enum so LazyVStack
             // only diffs one ForEach instead of multiple nested ones.
@@ -478,6 +428,7 @@ struct ChatListView: View {
         .onChange(of: vm.chats) { _, _ in
             if !search.query.isEmpty { search.refresh() }
             cachedRows = rebuildDisplayRows()
+            folderRail?.refreshBadges(chats: vm.chats)
         }
         // F46 — rebuild the memoized row list when any input to
         // `rebuildDisplayRows()` changes. Body itself no longer calls
@@ -504,11 +455,12 @@ struct ChatListView: View {
         .onChange(of: search.globalChatFilter) { _, _ in
             cachedRows = rebuildDisplayRows()
         }
-        .onChange(of: archivedExpanded) { _, _ in
-            cachedRows = rebuildDisplayRows()
-        }
-        .onChange(of: scopeRaw) { _, _ in
-            cachedRows = rebuildDisplayRows()
+        // F91 — persist folder selection and rebuild rows when rail selection changes.
+        .onChange(of: folderRail?.selection) { _, newValue in
+            if let s = newValue {
+                selectedFolderIDRaw = s.storageValue
+                cachedRows = rebuildDisplayRows()
+            }
         }
     }
 
