@@ -33,22 +33,14 @@ struct QuickSendPopover: View {
             query: $query,
             selectedChatJID: $selectedChatJID,
             chats: chats,
-            nameResolver: { chat in
-                let resolved = session.displayName(for: chat.jid)
-                if !resolved.isEmpty { return resolved }
-                return chat.name.isEmpty ? chat.jid : chat.name
-            })
+            nameResolver: { chat in resolvedName(for: chat.jid) })
     }
 
     @ViewBuilder
     private func composer(for jid: String) -> some View {
-        let resolved = session.displayName(for: jid)
-        let displayName = resolved.isEmpty
-            ? (chats.first(where: { $0.jid == jid })?.name ?? jid)
-            : resolved
         QuickSendComposer(
             chatJID: jid,
-            displayName: displayName,
+            displayName: resolvedName(for: jid),
             send: { [client] chatJID, body in
                 _ = try await Task.detached(priority: .userInitiated) {
                     try client.sendText(chatJID, body)
@@ -68,5 +60,15 @@ struct QuickSendPopover: View {
 
     private var chats: [Chat] {
         session.chatList?.chats ?? []
+    }
+
+    /// Three-tier name resolution: session-resolved (LID→PN aware via F60) →
+    /// the chat row's own name from the sidebar list → raw JID.
+    private func resolvedName(for jid: String) -> String {
+        let resolved = session.displayName(for: jid)
+        if !resolved.isEmpty { return resolved }
+        if let chat = chats.first(where: { $0.jid == jid }),
+           !chat.name.isEmpty { return chat.name }
+        return jid
     }
 }
