@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"go.mau.fi/whatsmeow"
+	"go.mau.fi/whatsmeow/proto/waCompanionReg"
 	"go.mau.fi/whatsmeow/store"
 	waLog "go.mau.fi/whatsmeow/util/log"
 	"google.golang.org/protobuf/proto"
@@ -47,6 +48,21 @@ func applyDeeperHistorySyncDefaults() {
 	cfg.CompleteOnDemandReady = proto.Bool(true)
 }
 
+// applyYawacBrand overrides whatsmeow's stock DeviceProps Os +
+// PlatformType so the phone's linked-devices list shows "yawac" with
+// a macOS desktop icon instead of "whatsmeow · other platform · other
+// device". F86. Phone-side reads Os as the human-visible device name
+// and PlatformType drives the icon — CATALINA = 12 is WhatsApp
+// Desktop's own macOS slot, the closest match for a native macOS
+// companion.
+//
+// Only matters at FIRST pair (or after Logout + re-pair). Existing
+// pairings are stuck with whatever they registered.
+func applyYawacBrand() {
+	store.DeviceProps.Os = proto.String("yawac")
+	store.DeviceProps.PlatformType = waCompanionReg.DeviceProps_CATALINA.Enum()
+}
+
 // redirectStderr is run once at package init so logs (whatsmeow's
 // chatty INFO/WARN stream + our own fprintf traces) survive when the
 // app is launched via LaunchServices (`open`), which otherwise routes
@@ -76,6 +92,9 @@ func init() {
 	// call — DeviceProps is a package-level singleton consulted at
 	// registration.
 	applyDeeperHistorySyncDefaults()
+	// F86: brand the linked-device entry as "yawac · macOS" instead
+	// of "whatsmeow · other platform".
+	applyYawacBrand()
 }
 
 // Client wraps a *whatsmeow.Client and is the primary handle exposed to Swift.

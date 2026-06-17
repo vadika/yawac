@@ -248,6 +248,32 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **F86 — Brand the linked-device entry as "yawac · macOS"**
+  (v0.10.13) — Phone's WhatsApp linked-devices list showed yawac as
+  "whatsmeow · other platform · other device" with the generic
+  fallback icon. Two fields control this on the wire and both ship as
+  whatsmeow's stock defaults at pair time:
+  - `store.DeviceProps.Os` — phone reads this verbatim as the
+    human-visible device name. Was `"whatsmeow"`; now `"yawac"`.
+  - `store.DeviceProps.PlatformType` — enum that drives the icon.
+    Was `UNKNOWN (0)`; now `CATALINA (12)`, which is the slot
+    WhatsApp's own macOS Desktop client uses, so the phone shows a
+    macOS icon. CHROME/FIREFOX/etc. would have worked too but pick
+    the wrong icon (browser glyphs); DESKTOP (7) is generic. CATALINA
+    matches reality — yawac IS a native macOS app.
+  Lives in `bridge/client.go` next to the F1-era
+  `applyDeeperHistorySyncDefaults` override and runs from the same
+  package `init()` so the override lands before any
+  `whatsmeow.NewClient` call (DeviceProps is a package-level singleton
+  consulted only at registration).
+  **Caveat: pair-time lock-in.** Whatsmeow sends DeviceProps once,
+  during the pairing handshake. The phone records the values it sees
+  there and they show in the linked-devices list forever after.
+  Existing paired clients running v0.10.13+ continue to show as
+  "whatsmeow · other platform" until the user explicitly Logs Out +
+  re-pairs. Worth doing once (and freshly re-pulling deep history at
+  the same time, given F56) but not forced.
+
 - ✅ **F85 — SwiftData store maintenance: ANALYZE + periodic VACUUM
   + auto_vacuum=INCREMENTAL** (v0.10.12) — followup to the discussion
   about whether SQLite is the right backend for yawac's message store
