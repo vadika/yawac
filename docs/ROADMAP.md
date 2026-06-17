@@ -163,16 +163,7 @@ rare-use utilities) ships only when the important list is clear.
   Shortcuts actions. Targets workflow / quick-action use cases
   the official app can't do. Native-Mac citizenship.
 > Menu-bar quick-send shipped as F87 in v0.10.14.
-- ☐ **Folders / chat lists** — user-defined groupings (Work,
-  Family, Side-project, Mute-list, …) shown as a top-level
-  sidebar pill row, optionally with smart filters (unread-only,
-  unanswered, has-media). Lives entirely client-side; mapping
-  is `chatJID → Set<folder>`, persisted in SwiftData with an
-  ordering int. Drag-to-folder + cmd-1..N folder switch +
-  context-menu "Add to folder…". Smart folder examples: All,
-  Direct (already a filter today), Groups, Communities,
-  Unread, VIP. The official Mac client has only Archive +
-  Pinned; folders are a power-user organization win.
+- ✅ **Folders / chat lists** — landed as F91 in v0.10.19.
 - ☐ **Wire cosmetic Settings toggles** (v0.9.13 follow-up) — the
   General + Display panels render the controls but the storage
   keys aren't read anywhere yet. Needs real wiring:
@@ -243,6 +234,53 @@ the important list is materially shorter.
 
 Kept here for context — flip back to open only if a regression
 surfaces.
+
+- ✅ **F91 — Folders / chat lists (Telegram-style rail)** (v0.10.19) —
+  Vertical folder rail on the left of the chat list. Custom
+  user-defined folders (`PersistedFolder` SwiftData model, name-only;
+  no per-folder icon picker v1) live above two sticky smart
+  sentinels: **All chats** and **Archived**. The latter replaces the
+  prior inline expandable archived section — archived chats are now
+  hidden from the main list and surface only via the Archived rail
+  icon.
+  - **Membership.** Three input paths: drag a chat row onto a custom
+    rail item (`ChatJIDTransfer` custom UT type
+    `dev.vadikas.yawac.chatjid`), right-click the chat → "Add to
+    folder…" submenu with per-folder checkmarks (toggles
+    membership), and "Add to folder…" inside that submenu's trailing
+    "New folder…" item. Storage is a Codable `[String]` `folderIDs`
+    field on `PersistedChat`; `addChat` is Set-semantics idempotent.
+  - **Rail CRUD.** Right-click a custom folder → Rename / Delete
+    folder… / New folder…. Delete cascades a scrub of every chat's
+    `folderIDs`. Rename + Create flow through a small
+    `NewFolderSheet` (1-field name prompt).
+  - **Reorder.** Drag custom folder rail items up/down via a
+    second `FolderIDTransfer` UT type (`dev.vadikas.yawac.folderid`).
+    `sortIndex` re-assigns by working order on drop. Smart
+    sentinels not draggable.
+  - **Unread badges.** Red top-right capsule on each rail item =
+    sum of `unread` across chats in the folder; "99+" cap. Archived
+    chats count ONLY toward the Archived sentinel — they don't bump
+    a custom folder badge they were tagged into pre-archive.
+  - **⌘0..9 quick switch.** New `CommandMenu("Folders")` wired in
+    `yawacApp.swift`. ⌘0 = All chats; ⌘1..9 = first 9 custom
+    folders by rail order. Writes through `@AppStorage("yawac
+    .selectedFolderID")` which the rail observes; folders beyond
+    ⌘9 reachable only via rail click. Archived not bound to any
+    shortcut (rare-use).
+  - **Behavior change vs prior build.** The 4-segment scope picker
+    (`@AppStorage("yawac.chatListScope")` driving All / Direct /
+    Groups / Communities) is REMOVED — the rail subsumes it. The
+    inline expandable Archived section in the chat list is REMOVED
+    — archived chats now live in the Archived rail entry only.
+    Replaces ROADMAP entry "Folders / chat lists".
+  - **Local-only.** Folders are NOT cross-device synced. Each
+    yawac install has its own folder set. Multi-account splitting
+    is out of scope (covered by future Multi-account work).
+  - **Spec / plan.** Design at `docs/superpowers/specs/2026-06-17
+    -folders-chat-lists-design.md`; TDD plan at
+    `docs/superpowers/plans/2026-06-17-folders-chat-lists.md`.
+    Subagent-driven execution.
 
 - ✅ **F90 — Historical poll-vote consumer fix (own-vote substitution
   on peer-created polls)** (v0.10.18) — F88 wired the fork's PR #1151
