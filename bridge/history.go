@@ -155,6 +155,38 @@ func (c *Client) emitHistoricalPollUpdatesFromBlob(evt *events.HistorySync) {
 	}
 }
 
+// historicalRecordToVote maps one HistoricalPollVote record into the
+// JPollVote payload that mirrors live PollUpdateMessage dispatches.
+// Empty r.Voter signals an own-vote: the upstream helper (fork PR
+// #1151's HistoricalPollUpdates) sets Voter only when
+// PollUpdateMessageKey.Participant is set, OR when the chat is 1:1 and
+// the vote is NOT from us; when voteKey.FromMe is true it leaves Voter
+// empty. The only consistent interpretation is "vote from us", so
+// substitute ownBareJID. Swift's mySelections() keys against
+// client.ownJID (= Store.ID.ToNonAD().String()) so the substitution form
+// must match.
+//
+// When the client is unpaired (ownBareJID == ""), the substitution is
+// skipped — VoterJID stays empty and SQLite upsert is recoverable on
+// the next sweep after pairing.
+func historicalRecordToVote(r events.HistoricalPollVote, ownBareJID string) JPollVote {
+	voterStr := r.Voter.String()
+	if voterStr == "" && ownBareJID != "" {
+		voterStr = ownBareJID
+	}
+	hashes := make([]string, 0, len(r.SelectedOptionHashes))
+	for _, h := range r.SelectedOptionHashes {
+		hashes = append(hashes, hex.EncodeToString(h))
+	}
+	return JPollVote{
+		ChatJID:       r.Chat.String(),
+		PollMessageID: string(r.PollCreationID),
+		VoterJID:      voterStr,
+		OptionHashes:  hashes,
+		Timestamp:     r.Timestamp.Unix(),
+	}
+}
+
 // dispatchWebMessage converts a WebMessageInfo (from history sync)
 // into the same JMessage JSON shape that dispatchMessage emits.
 func (c *Client) dispatchWebMessage(chatJID string, wm *waWeb.WebMessageInfo) {
