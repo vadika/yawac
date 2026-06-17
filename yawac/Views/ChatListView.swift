@@ -499,6 +499,15 @@ struct ChatListView: View {
                 cachedRows = rebuildDisplayRows()
             }
         }
+        // F91 — react to CommandMenu ⌘0..9 writing AppStorage directly.
+        .onChange(of: selectedFolderIDRaw) { _, newRaw in
+            guard let rail = folderRail else { return }
+            let knownIDs = Set(rail.folders.map(\.id))
+            let resolved = FolderSelection.resolved(storageValue: newRaw, knownIDs: knownIDs)
+            if rail.selection != resolved {
+                rail.selection = resolved
+            }
+        }
     }
 
     @ViewBuilder
