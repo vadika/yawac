@@ -21,9 +21,8 @@ rare-use utilities) ships only when the important list is clear.
 - ◐ **Polls** — create + vote shipped; tallies + voter-by-option render
   in the bubble.
   Gaps:
-    - ☐ Cross-device own-vote re-render from `HistoricalPollVote`
-      event (after history sync the user's own selection may show
-      empty until they vote again).
+    - ✅ Cross-device own-vote re-render from `HistoricalPollVote`
+      event — landed as F90 in v0.10.18.
     - ☐ Anonymous polls — whatsmeow exposes no toggle; spec unclear
       if WhatsApp protocol supports it for mobile clients.
 - ◐ **Location sharing** — static MapKit picker (search + current
@@ -245,6 +244,36 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **F90 — Historical poll-vote consumer fix (own-vote substitution
+  on peer-created polls)** (v0.10.18) — F88 wired the fork's PR #1151
+  helper end-to-end but gated the bridge's empty-Voter substitution on
+  `r.PollCreationFromMe` — a field that tells us who created the poll,
+  not who cast the vote. The helper at `types/events/historicalpollvotes
+  .go` leaves `Voter` empty whenever the update key has `FromMe=true`,
+  regardless of poll authorship; the only consistent interpretation is
+  "vote from us". Failure case: peer creates poll, user votes from
+  phone → bridge persists vote with `voterJID=""` → Swift
+  `mySelections(for:)` keyed against `client.ownJID` finds nothing →
+  bubble shows the user didn't vote even though they did.
+  - **Fix.** Drop the `PollCreationFromMe` gate. Extract the per-record
+    translation into a pure helper `historicalRecordToVote(r,
+    ownBareJID) JPollVote` so the substitution rule is unit-testable
+    without a `*Client`. Substitute `ownBareJID` whenever `r.Voter` is
+    the zero JID (and the client is paired). Unpaired client → no
+    substitution; SQLite row recoverable on next sweep after pairing.
+  - **Tests.** Bridge: table-driven `bridge/history_test.go` covering
+    own-vote on own/peer poll, peer-vote on own/peer poll 1:1,
+    peer-vote in group with Participant, empty-selection vote-clear,
+    unpaired-client guard. Swift: `yawacTests/ConversationView
+    ModelPollHistoryTests.swift` covers `applyPollVote` ↔
+    `mySelections(for:)` round-trip + `buildHistorySnapshot` hydration
+    from `PersistedPollVote` rows. `StubPollHistoryClient: WAClient`
+    overrides `ownJID` (same pattern as `StubSelfChatClient`).
+  - **Diagnostic.** New per-sweep log line `[yawac/poll-history]
+    sweep records=N self=M peer=K` in `/tmp/yawac.log` so substitution
+    activity is visible on the existing paired account without
+    re-pair. After the user-facing **Full sync** button fires, `self
+    > 0` confirms the F90 substitution is live.
 - ✅ **F89 — whatsmeow S-tier PRs cherry-picked (#1160, #1168, #1171)**
   (v0.10.16) — Three open upstream PRs picked onto the fork on top
   of F88. Total ~400 LoC across whatsmeow; one bridge wiring line.
