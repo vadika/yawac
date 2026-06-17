@@ -1629,4 +1629,22 @@ final class ChatListViewModel {
             sortChats()
         }
     }
+
+    /// F91: pure folder-selection filter applied BEFORE bucket logic
+    /// (pinned / archived header / sections). `.all` and `.custom` hide
+    /// archived chats — the rail's Archived sentinel is now their only
+    /// surface. `.archived` shows them flat.
+    nonisolated static func chatsFor(selection: FolderSelection,
+                                     allChats: [Chat]) -> [Chat] {
+        switch selection {
+        case .all:
+            return allChats.filter { $0.archivedAt == nil }
+        case .archived:
+            return allChats.filter { $0.archivedAt != nil }
+        case .custom(let id):
+            return allChats.filter {
+                $0.archivedAt == nil && $0.folderIDs.contains(id)
+            }
+        }
+    }
 }
