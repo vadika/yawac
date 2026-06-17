@@ -163,10 +163,7 @@ rare-use utilities) ships only when the important list is clear.
   `start search "<query>"` as AppleScript verbs + matching
   Shortcuts actions. Targets workflow / quick-action use cases
   the official app can't do. Native-Mac citizenship.
-- ☐ **Menu-bar quick-send** — `NSStatusItem` popover with chat
-  picker + message field; cmd-shift-Y opens it from anywhere.
-  Compose without bringing the full window forward. Pairs well
-  with the Shortcuts integration above.
+> Menu-bar quick-send shipped as F87 in v0.10.14.
 - ☐ **Folders / chat lists** — user-defined groupings (Work,
   Family, Side-project, Mute-list, …) shown as a top-level
   sidebar pill row, optionally with smart filters (unread-only,
@@ -247,6 +244,80 @@ the important list is materially shorter.
 
 Kept here for context — flip back to open only if a regression
 surfaces.
+
+- ✅ **F87 — Menu-bar quick-send popover + ⌘⇧Y global hotkey**
+  (v0.10.14) — Fills the roadmap `Important → Productivity/macOS →
+  Menu-bar quick-send` slot. Send a text message without surfacing
+  the main window. F73 mounted the `NSStatusItem` stub; F87 added
+  the popover, the chat picker, the composer, and the Carbon global
+  hotkey on top.
+  - **`yawac/UI/GlobalHotkey.swift`** — `@MainActor final class`
+    wrapping Carbon `RegisterEventHotKey(kVK_ANSI_Y, cmdKey|shiftKey,
+    'yawc', 1)`. Carbon path (vs `NSEvent.addGlobalMonitorForEvents`)
+    skips the Accessibility-permission prompt; same approach
+    Raycast / Alfred use. `eventHotKeyExistsErr` is swallowed +
+    logged via `NSLog("[yawac/hotkey] ...")` so a conflict with
+    another app doesn't crash. Unit tests cover register/unregister
+    idempotency + the conflict swallow.
+  - **`yawac/UI/QuickSendChatPicker.swift`** — search field + filtered
+    `List`. Pure-data static `filter(chats:query:recentLimit:)`
+    helper: DESC sort by `lastTimestamp`, empty-query path truncates
+    to `recentLimit = 15`, non-empty query bypasses the cap and
+    matches case-insensitive `name` substring OR (digit-only query)
+    JID user-component `hasPrefix`. View memoizes the sort across
+    body evals via a count-keyed `@State` cache so keystrokes don't
+    pay O(n log n) per re-render. Up/Down arrow navigation +
+    `.onSubmit` selection. Unit tests cover the 5 filter behaviors.
+  - **`yawac/UI/QuickSendComposer.swift`** — text composer with
+    pure-async `attemptSend(chatJID:draft:sender:onClose:) async ->
+    SendOutcome` so the send-driver is unit-testable without a real
+    `WAClient`. `canSend(draft:)` trims `.whitespacesAndNewlines`.
+    Cmd-Enter sends; error banner shows the bridge error for 4s
+    (race-safe — clear only if `self.error == msg`). Unit tests
+    cover empty-draft block, success-closes-popover, failure-keeps-
+    open-with-error.
+  - **`yawac/UI/QuickSendPopover.swift`** — root view. Three
+    render paths: `session.client == nil` placeholder, picker,
+    composer. Three-tier `resolvedName(for:)` helper —
+    `session.displayName` → chat row's `.name` → raw JID. The
+    composer's `send:` closure does NOT capture a `WAClient`
+    reference at construction; it reads `session.client` lazily
+    at fire time so the cached popover doesn't carry a stale
+    client across `logout()` → `boot()` re-pair churn.
+  - **`yawac/UI/MenuBarController.swift`** — F73's status-item
+    controller now also owns a `NSPopover` + a `GlobalHotkey`.
+    Left-click toggles the quick-send popover (was: bring main
+    window forward). Right-click context menu gains a new "Show
+    Main Window" item — the old left-click affordance moved here.
+    `install()` / `tearDown()` bundle the status item + popover
+    + hotkey lifecycle under the `yawac.menuBar.show` preference
+    (F73). `togglePopover()` (the public entry called by both
+    left-click and the Carbon callback) activates yawac via
+    `NSApp.activate(ignoringOtherApps: true)` so the popover gets
+    focus without surfacing the main window.
+  - **`yawac/yawacApp.swift`** — gated the menu-bar install
+    behind a "not running under XCTest" check
+    (`ProcessInfo.processInfo.environment["XCTestConfigurationFile
+    Path"] != nil`) so `GlobalHotkeyTests` doesn't race the host
+    app for ⌘⇧Y.
+  - **Outbound persistence path.** whatsmeow does NOT echo own
+    outbound sends back as `events.Message` — confirmed by the
+    F51 optimistic-send comment in `ConversationViewModel.swift`.
+    Quick-send synthesizes a `BridgeMessage` from
+    `BridgeSendResult` and injects it via new
+    `WAClient.dispatchSynthetic(_:)`, which yields the event to
+    every existing subscriber (chat list + open conversation
+    view). Single emit → both subscribers update via the same
+    code path real inbound messages take: sidebar tip refreshes,
+    open chat scrollback appends the row immediately, FTS upsert
+    fires through `ChatListViewModel.ingest`'s writer queue.
+  - **Spec / plan.** Brainstorm + design at
+    `docs/superpowers/specs/2026-06-17-menu-bar-quick-send-design.
+    md`; TDD plan at `docs/superpowers/plans/2026-06-17-menu-bar-
+    quick-send.md`. Subagent-driven execution: one implementer +
+    spec-compliance reviewer + code-quality reviewer per task,
+    fix loops where reviewers flagged issues, final E2E manual
+    verification on the running Debug binary.
 
 - ✅ **F86 — Brand the linked-device entry as "yawac · macOS"**
   (v0.10.13) — Phone's WhatsApp linked-devices list showed yawac as
