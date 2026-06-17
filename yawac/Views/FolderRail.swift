@@ -5,7 +5,14 @@ import SwiftUI
 /// "Archived" sentinel. Fixed 76pt width.
 struct FolderRail: View {
 
+    enum Event {
+        case rename(PersistedFolder)
+        case delete(PersistedFolder)
+        case newFolder(insertIndex: Int)
+    }
+
     let vm: FolderRailViewModel
+    let onEvent: (Event) -> Void
 
     var body: some View {
         VStack(spacing: 0) {
@@ -18,11 +25,10 @@ struct FolderRail: View {
                             badge: vm.unreadByFolderID[folder.id] ?? 0,
                             onTap: { vm.selection = .custom(folderID: folder.id) })
                         .draggable(FolderIDTransfer(id: folder.id)) {
-                            FolderRailItem(
-                                kind: .custom(folder),
-                                isSelected: true,
-                                badge: 0,
-                                onTap: {})
+                            FolderRailItem(kind: .custom(folder),
+                                           isSelected: true,
+                                           badge: 0,
+                                           onTap: {})
                                 .opacity(0.6)
                         }
                         .dropDestination(for: ChatJIDTransfer.self) { transfers, _ in
@@ -39,6 +45,16 @@ struct FolderRail: View {
                             else { return false }
                             vm.reorder(fromIndex: from, toIndex: idx)
                             return true
+                        }
+                        .contextMenu {
+                            Button("Rename…") { onEvent(.rename(folder)) }
+                            Button("Delete folder…", role: .destructive) {
+                                onEvent(.delete(folder))
+                            }
+                            Divider()
+                            Button("New folder…") {
+                                onEvent(.newFolder(insertIndex: vm.folders.count))
+                            }
                         }
                     }
 

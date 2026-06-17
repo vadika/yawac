@@ -21,6 +21,7 @@ struct ChatListView: View {
     @State private var renamingFolder: PersistedFolder?
     @State private var folderPendingDelete: PersistedFolder?
     @State private var newFolderInsertIndex: Int = 0
+    @State private var renameDraft: String = ""
     @AppStorage("yawac.selectedFolderID") private var selectedFolderIDRaw: String = ""
     @Environment(\.modelContext) private var modelContext
 
@@ -211,13 +212,17 @@ struct ChatListView: View {
     var body: some View {
         HStack(spacing: 0) {
             if let rail = folderRail {
-                FolderRail(vm: rail)
-                    .contextMenu {
-                        Button("New folder…") {
-                            newFolderInsertIndex = rail.folders.count
-                            showNewFolderSheet = true
-                        }
+                FolderRail(vm: rail) { event in
+                    switch event {
+                    case .rename(let f):
+                        renamingFolder = f
+                    case .delete(let f):
+                        folderPendingDelete = f
+                    case .newFolder(let idx):
+                        newFolderInsertIndex = idx
+                        showNewFolderSheet = true
                     }
+                }
                 Divider()
             }
             chatListContent
@@ -237,6 +242,38 @@ struct ChatListView: View {
             NewFolderSheet(isPresented: $showNewFolderSheet) { name in
                 folderRail?.createFolder(name: name, atIndex: newFolderInsertIndex)
             }
+        }
+        .alert("Rename folder",
+               isPresented: Binding(
+                get: { renamingFolder != nil },
+                set: { if !$0 { renamingFolder = nil } })) {
+            TextField("Folder name", text: $renameDraft)
+            Button("Save") {
+                if let f = renamingFolder {
+                    folderRail?.renameFolder(id: f.id, to: renameDraft)
+                }
+                renamingFolder = nil
+            }
+            Button("Cancel", role: .cancel) { renamingFolder = nil }
+        } message: {
+            Text("Enter a new name for the folder.")
+        }
+        .alert("Delete folder",
+               isPresented: Binding(
+                get: { folderPendingDelete != nil },
+                set: { if !$0 { folderPendingDelete = nil } })) {
+            Button("Delete", role: .destructive) {
+                if let f = folderPendingDelete {
+                    folderRail?.deleteFolder(id: f.id)
+                }
+                folderPendingDelete = nil
+            }
+            Button("Cancel", role: .cancel) { folderPendingDelete = nil }
+        } message: {
+            Text("\"\(folderPendingDelete?.name ?? "")\" will be removed from the rail. Chats stay in your chat list.")
+        }
+        .onChange(of: renamingFolder?.id) { _, _ in
+            renameDraft = renamingFolder?.name ?? ""
         }
     }
 
