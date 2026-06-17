@@ -235,6 +235,36 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **F93 — Offline-drain UndecryptableMessage instrumentation** (v0.10.25) —
+  v0.10.23/24 F92 catch-up + chunk-arrival log confirmed the phone
+  responds to type-6 FULL_HISTORY_SYNC_ON_DEMAND but only ships a
+  tiny diff slice (50 msg / 1 conv for a 30-day window). User's
+  read-on-phone-while-yawac-offline messages are not in those
+  chunks. Need to determine ground truth: do the bytes reach the
+  bridge layer at all?
+  - Extended F83's `offlineDrainTracker` with a fourth tick path
+    for `*events.UndecryptableMessage`. Whatsmeow emits this event
+    when it tried to decrypt but couldn't. Two subcases:
+    - `IsUnavailable=true`: sender device DID NOT send a ciphertext
+      to this device — exactly the "primary device consumed,
+      offline buffer cleared" case.
+    - `IsUnavailable=false`: ciphertext arrived but couldn't be
+      decrypted — key state mismatch (signal session race).
+  - `bridge/events.go` adds a new `case *events.UndecryptableMessage`
+    that ticks the tracker WITHOUT dispatching to Swift (diagnostic
+    only). The tick short-circuits outside the in-flight offline
+    drain window so non-offline decrypt failures don't pollute the
+    log.
+  - Updated the `OfflineSyncCompleted` log line + bridge dispatch
+    payload to include `undecryptable=N (unavail=M ciphertext=K)`.
+  - Three bridge tests cover: ticks on `IsUnavailable=true`,
+    ticks on `IsUnavailable=false`, no-op outside in-flight window.
+  - **Next step (post v0.10.25 user repro):** if `unavail > 0` →
+    protocol limit confirmed → file upstream whatsmeow issue +
+    document as known. If `ciphertext > 0` → fix subcase via
+    PLACEHOLDER_MESSAGE_RESEND. If both 0 → bytes never arrive →
+    open whatsmeow issue.
+
 - ✅ **F92 hardening — reconnect catch-up wider + shorter throttle + chunk-arrival diagnostics** (v0.10.24) —
   v0.10.23's F92 catch-up fires correctly (`[yawac/catchup]
   sending FULL_HISTORY_SYNC_ON_DEMAND count=7` + `SendPeerMessage

@@ -70,12 +70,16 @@ func (c *Client) handleWAEvent(evt any) {
 		c.dispatch("OfflineSyncPreview", string(b))
 	case *events.OfflineSyncCompleted:
 		got := c.offlineDrain.stop()
-		offlineLog("completed server=%d got_messages=%d got_receipts=%d",
-			v.Count, got.messages, got.receipts)
+		offlineLog("completed server=%d got_messages=%d got_receipts=%d undecryptable=%d (unavail=%d ciphertext=%d)",
+			v.Count, got.messages, got.receipts,
+			got.undecryptable, got.undecryptableUnavail, got.undecryptableCiphertext)
 		b, _ := json.Marshal(map[string]any{
-			"server_count":  v.Count,
-			"got_messages":  got.messages,
-			"got_receipts":  got.receipts,
+			"server_count":             v.Count,
+			"got_messages":             got.messages,
+			"got_receipts":             got.receipts,
+			"undecryptable":            got.undecryptable,
+			"undecryptable_unavail":    got.undecryptableUnavail,
+			"undecryptable_ciphertext": got.undecryptableCiphertext,
 		})
 		c.dispatch("OfflineSyncCompleted", string(b))
 	case *events.Message:
@@ -84,6 +88,11 @@ func (c *Client) handleWAEvent(evt any) {
 	case *events.Receipt:
 		c.offlineDrain.tickReceipt(v)
 		c.dispatchReceipt(v)
+	case *events.UndecryptableMessage:
+		c.offlineDrain.tickUndecryptable(v)
+		// Do NOT dispatch to Swift — these are diagnostic only. The Swift
+		// side has no UI for undecryptable messages; whatsmeow's own
+		// retry mechanism handles the recovery path.
 	case *events.Presence:
 		c.dispatchPresence(v)
 	case *events.ChatPresence:
