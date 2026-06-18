@@ -154,9 +154,9 @@ func NewClient(dbPath string) (*Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open container: %w", err)
 	}
-	dev, err := firstDevice(context.Background(), container)
+	dev, err := container.GetFirstDevice(context.Background())
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get device: %w", err)
 	}
 	log := waLog.Stdout("whatsmeow", "INFO", true)
 	wa := whatsmeow.NewClient(dev, log)

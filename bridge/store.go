@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/store/sqlstore"
 	waLog "go.mau.fi/whatsmeow/util/log"
 
@@ -35,10 +34,3 @@ func openContainer(dbPath string) (*sqlstore.Container, error) {
 	return sqlstore.New(ctx, "sqlite", dsn, log)
 }
 
-func firstDevice(ctx context.Context, c *sqlstore.Container) (*store.Device, error) {
-	dev, err := c.GetFirstDevice(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("get device: %w", err)
-	}
-	return dev, nil
-}
