@@ -9,17 +9,11 @@ final class MapSnapshotCache {
     private init() {}
 
     private var memory: [String: NSImage] = [:]
-    /// Coordinates whose snapshotter call failed (offline, invalid coord,
-    /// throttle). Without this, every retry re-spawns `MKMapSnapshotter`
-    /// which holds a render pipeline. Cleared only at process restart;
-    /// re-attempt by relaunching.
-    private var negative: Set<String> = []
 
     func snapshot(lat: Double, lng: Double,
                   zoom: CLLocationDistance = 1000) async -> NSImage? {
         let key = "\(String(format: "%.6f", lat))_\(String(format: "%.6f", lng))_\(Int(zoom))"
         if let cached = memory[key] { return cached }
-        if negative.contains(key) { return nil }
         if let disk = readDisk(key: key) {
             memory[key] = disk
             return disk
@@ -37,7 +31,6 @@ final class MapSnapshotCache {
             writeDisk(key: key, image: composed)
             return composed
         } catch {
-            negative.insert(key)
             return nil
         }
     }
