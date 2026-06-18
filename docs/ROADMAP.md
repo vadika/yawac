@@ -153,11 +153,7 @@ rare-use utilities) ships only when the important list is clear.
   windows. Builds on the same plumbing as the mute customization
   row above. Privacy-conscious UX win — the official app has
   none of this.
-- ☐ **Shortcuts / AppleScript integration** — expose user-
-  initiated `send`, `open chat <jid|phone>`, `mark read <jid>`,
-  `start search "<query>"` as AppleScript verbs + matching
-  Shortcuts actions. Targets workflow / quick-action use cases
-  the official app can't do. Native-Mac citizenship.
+- ✅ **Shortcuts / AppleScript integration** — App Intents path landed as F97 in v0.10.31. AppleScript sdef deferred.
 > Menu-bar quick-send shipped as F87 in v0.10.14.
 - ✅ **Folders / chat lists** — landed as F91 in v0.10.19.
 - ✅ **Wire cosmetic Settings toggles** — shipped as F73 in v0.10.6.
@@ -217,6 +213,43 @@ the important list is materially shorter.
 
 Kept here for context — flip back to open only if a regression
 surfaces.
+
+- ✅ **F97 — App Intents for Send / Open Chat / Mark Read / Search** (v0.10.31) —
+  Power-user automation surface that the official WhatsApp Mac
+  client can't match. Four App Intents wired through a fresh
+  `yawac/Intents/` folder:
+  - **`SendWhatsAppMessage(chat, body)`** — resolves chat via the
+    shared `ChatResolver` (phone digits or substring name match,
+    `@s.whatsapp.net` + `@lid` fallback), invokes
+    `WAClient.sendText`, returns `Sent message <ID>`.
+  - **`OpenWhatsAppChat(chat)`** — resolves chat, drives the
+    existing `SessionViewModel.openRootChat`, calls
+    `WindowToggler.bringToFront()` to surface the window.
+  - **`MarkWhatsAppChatRead(chat)`** — resolves chat, calls
+    `ChatListViewModel.markRead`.
+  - **`SearchWhatsAppMessages(query)`** — writes the query through
+    transient `SessionViewModel.pendingShortcutQuery`; ContentView
+    observer forwards into the live `ChatSearchViewModel`.
+  - **Discoverability.** `YawacShortcutsProvider: AppShortcutsProvider`
+    registers all four with phrases like "Send WhatsApp message via
+    yawac" so Shortcuts.app, Spotlight, and Siri pick them up on
+    first launch.
+  - **Dependency wiring.** `AppDependencyManager.shared.add(dependency: session)`
+    in the WindowGroup's `.onAppear` (not `init()` — `@State` isn't
+    readable from `App.init`) so `@Dependency private var session:
+    SessionViewModel` resolves inside `perform()`.
+  - **Coverage.** `openAppWhenRun: true` — live `WAClient` +
+    SwiftData store required, headless invocation not supported.
+  - **Resolver tests.** `yawacTests/ChatResolverTests.swift` — 8
+    pure-function cases (empty / phone-net / phone-lid / phone
+    normalize / exact name / substring case-insensitive / ambiguous
+    / not-found).
+  - **Spec / plan.** Design at `docs/superpowers/specs/2026-06-18
+    -shortcuts-app-intents-design.md`; plan at
+    `docs/superpowers/plans/2026-06-18-shortcuts-app-intents.md`.
+  - **Skipped (deferred to future cycle).** AppleScript `.sdef` /
+    `NSScriptCommand` path; send-with-attachment intent; reply-to-
+    message intent; multi-account targeting.
 
 - ✅ **F96 ponytail follow-up — saveSelfField helper + test defer** (v0.10.30) —
   Post-commit ponytail review on F96 (v0.10.29) found two yagni:
