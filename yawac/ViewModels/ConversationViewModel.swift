@@ -1791,17 +1791,21 @@ final class ConversationViewModel {
         }
     }
 
+    // Retry-path failures: phone responded but our MediaKey can't
+    // decrypt the notification, or phone said no.
+    private static let expiredErrorMarkers: Set<String> = [
+        "plaintext sha mismatch",
+        "hash of media ciphertext",
+        "status code 410",
+        "status code 404",
+        "failed to decrypt notification",
+        "message authentication failed",
+        "phone retry returned no path",
+    ]
+
     private func looksLikeExpiredError(_ reason: String) -> Bool {
         let r = reason.lowercased()
-        return r.contains("plaintext sha mismatch")
-            || r.contains("hash of media ciphertext")
-            || r.contains("status code 410")
-            || r.contains("status code 404")
-            // Retry-path failures: phone responded but our MediaKey can't
-            // decrypt the notification, or phone said no.
-            || r.contains("failed to decrypt notification")
-            || r.contains("message authentication failed")
-            || r.contains("phone retry returned no path")
+        return Self.expiredErrorMarkers.contains(where: { r.contains($0) })
     }
 
     private func markMediaExpired(_ id: String, reason: String) {
@@ -2100,7 +2104,7 @@ final class ConversationViewModel {
             return
         }
         unreadInboundIDs.remove(messageID)
-        sendReadReceipts(for: [BridgeIDPair(msg)])
+        sendReadReceipts(for: [(msg.id, msg.senderJID)])
         chatList?.decrementUnread(chatJID)
     }
 
@@ -2110,23 +2114,10 @@ final class ConversationViewModel {
     /// participants may have sent the unread batch).
     func markAllAsRead() {
         let inbound = messages.filter { !$0.fromMe }
-        sendReadReceipts(for: inbound.map(BridgeIDPair.init))
+        sendReadReceipts(for: inbound.map { ($0.id, $0.senderJID) })
     }
 
-    private struct BridgeIDPair {
-        let id: String
-        let senderJID: String
-        init(_ m: UIMessage) {
-            self.id = m.id
-            self.senderJID = m.senderJID
-        }
-        init(_ b: BridgeMessage) {
-            self.id = b.id
-            self.senderJID = b.senderJID
-        }
-    }
-
-    private func sendReadReceipts(for pairs: [BridgeIDPair]) {
+    private func sendReadReceipts(for pairs: [(id: String, senderJID: String)]) {
         guard !pairs.isEmpty else { return }
         let chat = chatJID
         let client = self.client
@@ -2142,7 +2133,7 @@ final class ConversationViewModel {
         }
     }
     private func sendReadReceipts(for messages: [BridgeMessage]) {
-        sendReadReceipts(for: messages.map(BridgeIDPair.init))
+        sendReadReceipts(for: messages.map { ($0.id, $0.senderJID) })
     }
 
     func setTyping(_ typing: Bool) {
