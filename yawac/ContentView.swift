@@ -126,6 +126,13 @@ struct ContentView: View {
             session.nav.removeChat(jid: jid)
             session.deletedChatJID = nil
         }
+        .onChange(of: session.pendingShortcutQuery) { _, newQuery in
+            guard let newQuery, let chatSearch else { return }
+            chatSearch.query = newQuery
+            // Consume: reset so the next shortcut with the same query
+            // still triggers the change.
+            session.pendingShortcutQuery = nil
+        }
         .task {
             guard let client = session.client else { return }
             let vm = ChatListViewModel(client: client, context: modelContext)
