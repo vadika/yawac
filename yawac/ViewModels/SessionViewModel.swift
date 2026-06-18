@@ -124,6 +124,12 @@ final class SessionViewModel {
     /// existing ChatSearchViewModel. Consumer resets to nil after
     /// applying so re-firing the same query re-triggers the change.
     var pendingShortcutQuery: String? = nil
+    /// F98: which ChatInfoView section to scroll to on next mount.
+    /// ChatListView writes this when the user taps a sidebar
+    /// affordance (e.g. pending-request chip); ChatInfoView observes
+    /// + scrolls + clears so re-tapping re-triggers.
+    enum PendingChatInfoSection: Equatable { case pendingRequests }
+    var pendingChatInfoSection: PendingChatInfoSection? = nil
     /// JIDs (bare) the user has blocked. Seeded from the server via
     /// `loadBlocklist()` on connect; updated by BlocklistChanged events.
     private(set) var blockedJIDs: Set<String> = []
