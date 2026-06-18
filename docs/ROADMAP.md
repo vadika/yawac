@@ -235,6 +235,20 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **F94 abandoned — synthetic future-anchor probe** (v0.10.27) —
+  F94 (v0.10.26) shipped a per-chat type-5 `requestOlderHistory`
+  with synthetic FUTURE anchor (now+1 day, fake msgID
+  `PROBE-FUTURE-<uuid8>`) to test whether the phone honors the
+  timestamp without validating msgID. User repro confirmed: probe
+  fires (4/4 logged) and 2 ON_DEMAND chunks return, but the target
+  chat (where user read messages on phone while yawac offline)
+  stays at the pre-probe timestamp. Phone validates msgID OR
+  returns only already-known older content. Reverted. Re-pair is
+  the only recovery path for the read-on-primary subset.
+  - Removed `requestPerChatFutureAnchorProbe()` method and the
+    `Task { await ... }` wiring in the `.connected` handler.
+  - F83 / F84 / F89 / F92 / F93 all stay.
+
 - ✅ **F94 — Per-chat future-anchored type-5 probe (experimental)** (v0.10.26) —
   Issue #6 long-tail probe after F93 (v0.10.25) verified phone
   ships zero bytes for read-on-primary-device messages. The

@@ -698,12 +698,6 @@ final class SessionViewModel {
             // was offline (which WhatsApp clears from the offline buffer)
             // still flow in via direct history-sync request. Throttled.
             Task { await self.requestReconnectCatchupSyncIfNeeded() }
-            // F94: experimental per-chat type-5 with future anchor.
-            // Fires after the F92 type-6 catch-up. If it works, the
-            // ON_DEMAND chunks land via the existing applyHistorySync
-            // path. If not, no harm done — phone just ignores or returns
-            // nothing for the synthetic msgID.
-            Task { await self.requestPerChatFutureAnchorProbe() }
         case .joinApprovalModeChanged(let chatJID, let on, _, _):
             if on {
                 Task { await self.joinRequestStore.refresh(chatJID: chatJID) }
@@ -1133,59 +1127,6 @@ final class SessionViewModel {
             NSLog("[yawac/catchup] catch-up sync failed: %@",
                   String(describing: error))
         }
-    }
-
-    /// F94 (v0.10.26): EXPERIMENTAL probe. Fire per-chat type-5
-    /// HISTORY_SYNC_ON_DEMAND for every chat with recent activity
-    /// (lastTimestamp within last 24h), passing a SYNTHETIC FUTURE
-    /// anchor (now+1d, fake msgID). Documented type-5 semantic is
-    /// "ship N messages BEFORE the given anchor". If phone honors
-    /// the timestamp without validating msgID against its local DB,
-    /// this pulls the most-recent N messages per chat — including
-    /// the read-on-phone-while-yawac-offline subset that type-6
-    /// catch-up keeps skipping.
-    ///
-    /// ponytail: hack, may not work — phone may reject unknown msgID
-    /// outright. If F94 log shows chunks arrive but target chat still
-    /// missing messages, abandon this path; only re-pair fixes it.
-    /// Throttled by reusing the same `lastReconnectCatchupAt` gate
-    /// as F92 — fires once per `.connected` after the throttle clears.
-    @MainActor
-    func requestPerChatFutureAnchorProbe() async {
-        guard historyBackfillCompleted else { return }
-        guard let client else { return }
-        guard let chats = chatList?.chats else { return }
-        let cutoff = Int64(Date().addingTimeInterval(-86400).timeIntervalSince1970)
-        let recent = chats.filter { $0.lastTimestamp > cutoff }
-        let futureTS = Int64(Date().addingTimeInterval(86400).timeIntervalSince1970)
-        NSLog("[yawac/catchup-probe] firing future-anchor type-5 probe for %d recent chats (cutoff=%lld)",
-              recent.count, cutoff)
-        var fired = 0
-        for chat in recent {
-            let jid = chat.jid
-            // ponytail: SenderJID = chatJID for 1:1 (correct), and best-effort
-            // for groups (whatsmeow will normalize). Don't iterate group
-            // participants — phone may not care for the timestamp-cutoff path.
-            do {
-                try await Task.detached { [client, jid, futureTS] in
-                    try client.requestOlderHistory(
-                        chatJID: jid,
-                        oldestMsgID: "PROBE-FUTURE-\(UUID().uuidString.prefix(8))",
-                        oldestSenderJID: jid,
-                        oldestFromMe: false,
-                        oldestTimestampSec: futureTS,
-                        count: 50)
-                }.value
-                fired += 1
-            } catch {
-                NSLog("[yawac/catchup-probe] chat=%@ error=%@", jid,
-                      String(describing: error))
-            }
-            // 100ms throttle between sends so we don't burst-hammer the phone.
-            try? await Task.sleep(for: .milliseconds(100))
-        }
-        NSLog("[yawac/catchup-probe] fired %d/%d type-5 future-anchor requests",
-              fired, recent.count)
     }
 
     /// Fan-out refresh of pending join-request queues for every group
