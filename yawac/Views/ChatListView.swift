@@ -881,18 +881,24 @@ struct ChatListView: View {
                     // the store happens to hold a count (e.g. stale entry
                     // after demote).
                     if let pending = vm.pendingRequestsChip(for: chat) {
-                        HStack(spacing: 2) {
-                            Image(systemName: "checkmark.circle")
-                                .scaledIcon(10, weight: .semibold)
-                            Text("\(pending)")
-                                .scaledMono(10.5, weight: .semibold)
-                                .monospacedDigit()
+                        Button {
+                            selection = chat.id
+                            session.pendingChatInfoSection = .pendingRequests
+                        } label: {
+                            HStack(spacing: 2) {
+                                Image(systemName: "checkmark.circle")
+                                    .scaledIcon(10, weight: .semibold)
+                                Text("\(pending)")
+                                    .scaledMono(10.5, weight: .semibold)
+                                    .monospacedDigit()
+                            }
+                            .foregroundStyle(Theme.accentText)
+                            .padding(.horizontal, 5)
+                            .frame(minHeight: 18)
+                            .background(Theme.accent.opacity(0.25), in: Capsule())
                         }
-                        .foregroundStyle(Theme.accentText)
-                        .padding(.horizontal, 5)
-                        .frame(minHeight: 18)
-                        .background(Theme.accent.opacity(0.25), in: Capsule())
-                        .help("\(pending) pending request\(pending == 1 ? "" : "s")")
+                        .buttonStyle(.plain)
+                        .help("\(pending) pending request\(pending == 1 ? "" : "s") — tap to review")
                     }
                     if chat.unread > 0 {
                         let muted = (chat.mutedUntil.map { $0 > Date() }) ?? false
