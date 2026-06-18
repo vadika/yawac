@@ -30,3 +30,19 @@ func TestSetSelfAboutUnpaired(t *testing.T) {
 		t.Log("note: SetSelfAbout on unpaired did not error")
 	}
 }
+
+func TestSetSelfPushNameUnpaired(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/p3.db")
+	if err := c.SetSelfPushName("Bob"); err == nil {
+		t.Log("note: SetSelfPushName on unpaired did not error")
+	}
+	c.Close()
+}
+
+func TestSetSelfPushNameRejectsEmpty(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/p4.db")
+	defer c.Close()
+	if err := c.SetSelfPushName("  "); err == nil {
+		t.Fatal("expected error on whitespace-only push name")
+	}
+}

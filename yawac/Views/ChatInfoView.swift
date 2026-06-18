@@ -116,6 +116,12 @@ struct ChatInfoView: View {
     @State private var aboutSaving: Bool = false
     @State private var aboutEditError: String?
 
+    // ─── F96: self-chat PUSH NAME editor state ───────────────────────
+    @State private var pushNameDraft: String = ""
+    @State private var pushNameBaseline: String = ""
+    @State private var pushNameSaving: Bool = false
+    @State private var pushNameEditError: String?
+
     var body: some View {
         VStack(spacing: 0) {
             // ─── Title-bar gutter. 64pt matches the chat header so the
@@ -724,6 +730,32 @@ struct ChatInfoView: View {
                     }
                 }
             }
+
+            // F96: own-profile Push Name editor — shown below About.
+            // Prefilled from `client.ownPushName` (local store). Server
+            // echoes the change back via appstate sync; no local cache
+            // update needed here.
+            sectionCard(label: "PUSH NAME") {
+                VStack(alignment: .leading, spacing: 6) {
+                    TextField("Edit your display name",
+                              text: $pushNameDraft)
+                        .textFieldStyle(.roundedBorder)
+                        .scaledUI(13)
+                    HStack {
+                        if let err = pushNameEditError {
+                            Text(err)
+                                .foregroundStyle(Color.red.opacity(0.9))
+                                .scaledUI(11)
+                                .autodismiss($pushNameEditError)
+                        }
+                        Spacer()
+                        Button(pushNameSaving ? "Saving…" : "Save") {
+                            saveSelfPushName()
+                        }
+                        .disabled(pushNameDraft == pushNameBaseline || pushNameSaving)
+                    }
+                }
+            }
         }
 
         // DISAPPEARING MESSAGES — 1:1. Ungated (either party may set
@@ -794,6 +826,9 @@ struct ChatInfoView: View {
             let current = userAbout ?? ""
             aboutBaseline = current
             aboutDraft = current
+            let pn = client.ownPushName ?? ""
+            pushNameBaseline = pn
+            pushNameDraft = pn
         }
     }
 
@@ -817,6 +852,28 @@ struct ChatInfoView: View {
                 userAbout = msg
             } catch {
                 aboutEditError = (error as NSError).localizedDescription
+            }
+        }
+    }
+
+    /// Persist `pushNameDraft` to the server via `WAClient.setSelfPushName`.
+    /// Only meaningful when `isSelfChat`; the Save button is gated on
+    /// `pushNameDraft != pushNameBaseline`. Server echoes the change back
+    /// via appstate sync — no local cache update needed.
+    private func saveSelfPushName() {
+        guard let client = session.client else { return }
+        let name = pushNameDraft
+        pushNameSaving = true
+        pushNameEditError = nil
+        Task { @MainActor in
+            defer { pushNameSaving = false }
+            do {
+                try await Task.detached {
+                    try client.setSelfPushName(name)
+                }.value
+                pushNameBaseline = name
+            } catch {
+                pushNameEditError = (error as NSError).localizedDescription
             }
         }
     }

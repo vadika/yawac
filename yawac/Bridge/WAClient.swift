@@ -1060,6 +1060,11 @@ class WAClient: PhoneValidating, LIDResolving {
         try go.setSelfAbout(message)
     }
 
+    nonisolated func setSelfPushName(_ name: String) throws {
+        bump("setSelfPushName")
+        try go.setSelfPushName(name)
+    }
+
     func getGroupInviteLink(chatJID: String, reset: Bool) throws -> String {
         bump("getGroupInviteLink")
         var err: NSError?

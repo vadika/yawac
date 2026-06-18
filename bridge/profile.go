@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
+
+	"go.mau.fi/whatsmeow/appstate"
 )
 
 // SetSelfAvatar sets the paired account's profile picture by
@@ -59,4 +62,23 @@ func (c *Client) OwnPushName() string {
 		return ""
 	}
 	return c.wa.Store.PushName
+}
+
+// SetSelfPushName updates the paired account's push name (display
+// name shown to peers) via a SETTING_PUSHNAME app-state patch.
+// Whatsmeow's appstate.BuildSettingPushName does the heavy lifting;
+// SendAppState ships the patch and triggers a background resync.
+func (c *Client) SetSelfPushName(name string) error {
+	if c.wa == nil {
+		return errors.New("client closed")
+	}
+	if c.wa.Store == nil || c.wa.Store.ID == nil {
+		return errors.New("not logged in")
+	}
+	trimmed := strings.TrimSpace(name)
+	if trimmed == "" {
+		return errors.New("push name cannot be empty")
+	}
+	return c.wa.SendAppState(context.Background(),
+		appstate.BuildSettingPushName(trimmed))
 }

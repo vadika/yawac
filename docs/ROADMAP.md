@@ -145,12 +145,8 @@ rare-use utilities) ships only when the important list is clear.
 
 ## Productivity / macOS
 
-- ☐ **Reply from native notification** — UNNotificationAction with
-  text-input on incoming banners; send-back via existing
-  `sendText`. Modest plumbing — ~150 LoC.
-- ☐ **Per-chat mute + notification customization** — extend
-  existing mute (8h / 1w / Always) with custom durations + bell /
-  sound toggles per chat. Touches sidebar ctx menu + ChatInfoView.
+- ✅ **Reply from native notification** — shipped as F64 in v0.10.5.
+- ✅ **Per-chat mute + notification customization** — shipped as F74 in v0.10.6.
 - ☐ **Per-chat notification rules beyond mute / unmute** —
   custom sound per chat, banner-vs-alert style, "show preview"
   per chat, VIP chats that bypass do-not-disturb, quiet-hours
@@ -164,17 +160,7 @@ rare-use utilities) ships only when the important list is clear.
   the official app can't do. Native-Mac citizenship.
 > Menu-bar quick-send shipped as F87 in v0.10.14.
 - ✅ **Folders / chat lists** — landed as F91 in v0.10.19.
-- ☐ **Wire cosmetic Settings toggles** (v0.9.13 follow-up) — the
-  General + Display panels render the controls but the storage
-  keys aren't read anywhere yet. Needs real wiring:
-    - `yawac.launchAtLogin` → `SMAppService.mainApp.register()`
-    - `yawac.menuBar.show` → `NSStatusItem` create / hide
-    - `yawac.dock.keep` → `NSApp.setActivationPolicy(.regular | .accessory)`
-    - `yawac.notifications.{enabled,preview,sound}` →
-      `NotificationService` payload customization
-    - `yawac.accentColor` → swap `Theme.accent` at render time
-    - `yawac.translate.auto` → already-existing translation flow
-      consumer.
+- ✅ **Wire cosmetic Settings toggles** — shipped as F73 in v0.10.6.
 
 ## Account / Privacy
 
@@ -189,10 +175,7 @@ rare-use utilities) ships only when the important list is clear.
   global notification routing tagged by account. Non-trivial —
   device count limits, paired-store isolation, and
   cross-account contact dedupe all have to land cleanly.
-- ☐ **Push-name edit** — About + avatar shipped (v0.9.0 / v0.9.1,
-  see Shipped). Push name (display name) is the only remaining
-  profile field — whatsmeow has no top-level setter, so a
-  `SETTING_PUSHNAME` app-state patch is needed. Phone-only for now.
+- ✅ **Push-name edit** — shipped as F96 in v0.10.29.
 - ☐ **Local chat export / archive** — proper local backup of
   conversations as machine-readable (JSON/SQLite) + human-
   readable (HTML / Markdown). Meta deliberately makes phone-
@@ -235,6 +218,22 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **F96 — Push-name edit** (v0.10.29) —
+  Completes the profile-edit story alongside avatar (v0.9.0) and
+  about (v0.9.1). The roadmap entry claimed whatsmeow had no
+  top-level push-name setter, but upstream
+  `appstate.BuildSettingPushName(string) PatchInfo` exists and
+  goes through the standard `Client.SendAppState` flow.
+  - Bridge: `Client.SetSelfPushName(name string) error` mirrors
+    the `SetSelfAbout` pattern — trim, validate non-empty,
+    `SendAppState(ctx, appstate.BuildSettingPushName(trimmed))`.
+  - Swift: `WAClient.setSelfPushName(_:)` shim + push-name text
+    field next to the existing About edit in `ChatInfoView`.
+    Prefills from `client.ownPushName` on sheet open.
+  - Source of truth stays on the phone — server echoes the change
+    back via appstate sync, no local cache update needed.
+  - Tests: bridge `TestSetSelfPushNameUnpaired` +
+    `TestSetSelfPushNameRejectsEmpty`.
 - ✅ **F95 — Ponytail code refactor sweep** (v0.10.28) —
   Repo-wide ponytail audit identified 30 over-engineering findings.
   Code-only sweep (docs untouched per user request). Net ~220 LoC
