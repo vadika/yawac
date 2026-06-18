@@ -119,6 +119,11 @@ final class SessionViewModel {
     /// clear the detail selection if that chat was open. Consumed + cleared
     /// by ContentView via `.onChange`.
     var deletedChatJID: String?
+    /// F97: Search shortcut payload. SearchMessagesIntent writes the
+    /// query string here; ContentView observes and applies to the
+    /// existing ChatSearchViewModel. Consumer resets to nil after
+    /// applying so re-firing the same query re-triggers the change.
+    var pendingShortcutQuery: String? = nil
     /// JIDs (bare) the user has blocked. Seeded from the server via
     /// `loadBlocklist()` on connect; updated by BlocklistChanged events.
     private(set) var blockedJIDs: Set<String> = []
