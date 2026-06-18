@@ -235,6 +235,32 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **F94 — Per-chat future-anchored type-5 probe (experimental)** (v0.10.26) —
+  Issue #6 long-tail probe after F93 (v0.10.25) verified phone
+  ships zero bytes for read-on-primary-device messages. The
+  documented `BuildHistorySyncRequest` semantic is "messages
+  BEFORE the given anchor". Probe: pass a synthetic FUTURE
+  anchor (now+1 day, fake msgID) per chat with recent activity
+  on every `.connected`. If phone honors the timestamp without
+  validating msgID against its local DB, this pulls the most
+  recent N messages per chat including the read-on-phone subset.
+  - **Fan-out.** Loops over chats with `lastTimestamp` within
+    the last 24h. 50 msgs per chat, 100 ms throttle between
+    sends so we don't burst-hammer the phone.
+  - **Anchor.** `oldestTimestampSec = now + 86400`,
+    `oldestMsgID = "PROBE-FUTURE-<uuid8>"`. Senderjid = chatJID
+    (correct for 1:1; best-effort for groups).
+  - **Diagnostics.** `[yawac/catchup-probe] firing for N
+    chats` and `fired M/N` lines in `/tmp/yawac.log`. If chunks
+    land, they flow through the existing `applyHistorySync`
+    classifier → normal persistence path.
+  - **Gated.** Reuses the `historyBackfillCompleted` check from
+    F92 — only fires after the one-shot deep sync.
+  - **Caveat.** Pure experiment. Phone may reject unknown msgID
+    outright or ignore the request silently. If post-v0.10.26
+    repro shows target chat still missing newer messages, F94
+    is abandoned — only re-pair recovers.
+
 - ✅ **F93 — Offline-drain UndecryptableMessage instrumentation** (v0.10.25) —
   v0.10.23/24 F92 catch-up + chunk-arrival log confirmed the phone
   responds to type-6 FULL_HISTORY_SYNC_ON_DEMAND but only ships a

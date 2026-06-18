@@ -66,8 +66,8 @@ targets:
         NSLocationWhenInUseUsageDescription: yawac uses your location only when you choose Send current location.
         LSMinimumSystemVersion: "14.0"
         CFBundleDisplayName: yawac
-        CFBundleShortVersionString: "0.10.25"
-        CFBundleVersion: "108"
+        CFBundleShortVersionString: "0.10.26"
+        CFBundleVersion: "109"
         ATSApplicationFontsPath: Fonts
         CFBundleIconName: AppIcon
         # F72: prevent macOS from spawning a second yawac instance when
