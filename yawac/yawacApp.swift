@@ -3,6 +3,7 @@ import SwiftData
 import AppKit
 import UserNotifications
 import Sparkle
+import AppIntents
 
 @main
 struct YawacApp: App {
@@ -118,6 +119,9 @@ struct YawacApp: App {
                     // singleton survives WindowGroup teardown), then
                     // reflect the current "Show in menu bar" setting.
                     MenuBarController.shared.bind(session: session)
+                    // F97: register session for App Intents dependency injection.
+                    // Done here (not init()) because @State can't be read from App.init.
+                    AppDependencyManager.shared.add(dependency: session)
                     let show = UserDefaults.standard
                         .object(forKey: "yawac.menuBar.show") as? Bool ?? false
                     // Test-host runs would otherwise race the GlobalHotkeyTests for ⌘⇧Y;
