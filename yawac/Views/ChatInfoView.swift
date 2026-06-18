@@ -133,27 +133,34 @@ struct ChatInfoView: View {
                 .overlay(alignment: .bottom) {
                     Rectangle().fill(Theme.border).frame(height: 1)
                 }
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    hero
-                    jidRow
-                    if isGroup {
-                        if loadingGroup {
-                            ProgressView().controlSize(.small).tint(Theme.accent)
-                                .frame(maxWidth: .infinity)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 18) {
+                        hero
+                        jidRow
+                        if isGroup {
+                            if loadingGroup {
+                                ProgressView().controlSize(.small).tint(Theme.accent)
+                                    .frame(maxWidth: .infinity)
+                            }
+                            if let err = loadError {
+                                Text(err).scaledUI(12)
+                                    .foregroundStyle(Color.red.opacity(0.85))
+                            }
+                            if let g = group { groupBody(g) }
+                        } else {
+                            userBody
                         }
-                        if let err = loadError {
-                            Text(err).scaledUI(12)
-                                .foregroundStyle(Color.red.opacity(0.85))
-                        }
-                        if let g = group { groupBody(g) }
-                    } else {
-                        userBody
                     }
+                    .padding(.horizontal, 18)
+                    .padding(.top, 18)
+                    .padding(.bottom, 22)
                 }
-                .padding(.horizontal, 18)
-                .padding(.top, 18)
-                .padding(.bottom, 22)
+                .onChange(of: session.pendingChatInfoSection) { _, target in
+                    guard target == .pendingRequests else { return }
+                    withAnimation { proxy.scrollTo("pending-requests", anchor: .top) }
+                    session.pendingChatInfoSection = nil
+                }
             }
         }
         .background(Theme.sidebarBg)
@@ -1316,6 +1323,7 @@ struct ChatInfoView: View {
                 model: prModel,
                 displayName: { jid in session.contactNames[jid] ?? jid }
             )
+            .id("pending-requests")
         }
 
         // Surface community sibling groups whenever there's a parent —
