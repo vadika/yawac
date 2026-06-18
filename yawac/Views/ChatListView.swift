@@ -736,7 +736,12 @@ struct ChatListView: View {
                         .scaledMono(10)
                         .foregroundStyle(Theme.textFaint)
                 }
-                snippetText(hit.snippet)
+                // Strips ⟦…⟧ snippet markers for v1; bold-around-hit rendering
+                // is deferred to a polish task.
+                Text(hit.snippet
+                    .replacingOccurrences(of: "⟦", with: "")
+                    .replacingOccurrences(of: "⟧", with: ""))
+                    .scaledUI(11)
                     .lineLimit(2)
                     .foregroundStyle(Theme.textMuted)
             }
@@ -745,14 +750,6 @@ struct ChatListView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-    }
-
-    /// Strips `⟦…⟧` snippet markers for v1; bold-around-hit rendering
-    /// is deferred to a polish task.
-    private func snippetText(_ raw: String) -> some View {
-        let cleaned = raw.replacingOccurrences(of: "⟦", with: "")
-                         .replacingOccurrences(of: "⟧", with: "")
-        return Text(cleaned).scaledUI(11)
     }
 
     private static let hitDateFmt: DateFormatter = {

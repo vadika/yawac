@@ -87,29 +87,6 @@ struct ConversationView: View {
 
     /// Returns the optional dot color + label for the status segment of
     /// the header. nil → nothing rendered.
-    ///
-    /// - Typing wins over online state.
-    /// - Online → green dot + "online".
-    /// - Offline with non-zero lastSeen → grey dot + "last seen <relative>".
-    /// - Offline with hidden lastSeen → nothing (matches WhatsApp's UX of
-    ///   not labelling peers as "offline" when they hide last-seen privacy).
-    /// - Groups: skip — presence isn't published per-group.
-    private func headerStatus(isGroup: Bool) -> (Color?, String)? {
-        if isGroup { return nil }
-        if vm?.peerTyping == true {
-            return (Theme.onlineDot, "typing…")
-        }
-        guard let p = session.presence(for: chatJID) else { return nil }
-        if p.online {
-            return (Theme.onlineDot, "online")
-        }
-        if p.lastSeen > 0 {
-            let date = Date(timeIntervalSince1970: TimeInterval(p.lastSeen))
-            return (Theme.textFaint, "last seen \(Self.lastSeenFmt.localizedString(for: date, relativeTo: Date()))")
-        }
-        return nil
-    }
-
     /// Replaces the composer while forwarding: selection count + actions.
     @ViewBuilder
     private func forwardBar(_ vm: ConversationViewModel) -> some View {
@@ -151,14 +128,28 @@ struct ConversationView: View {
                     .tracking(-0.2)
                     .foregroundStyle(Theme.titleColor)
                     .lineLimit(1)
-                if let (dotColor, label) = headerStatus(isGroup: isGroup) {
-                    HStack(spacing: 5) {
-                        if let dotColor {
-                            Circle().fill(dotColor).frame(width: 6, height: 6)
+                // Presence status: typing wins; online → green dot; lastSeen → grey dot.
+                // Groups skipped — presence isn't published per-group.
+                if !isGroup {
+                    let status: (Color?, String)? = {
+                        if vm?.peerTyping == true { return (Theme.onlineDot, "typing…") }
+                        guard let p = session.presence(for: chatJID) else { return nil }
+                        if p.online { return (Theme.onlineDot, "online") }
+                        if p.lastSeen > 0 {
+                            let date = Date(timeIntervalSince1970: TimeInterval(p.lastSeen))
+                            return (Theme.textFaint, "last seen \(Self.lastSeenFmt.localizedString(for: date, relativeTo: Date()))")
                         }
-                        Text(label)
-                            .scaledUI(12.5)
-                            .foregroundStyle(Theme.textMuted)
+                        return nil
+                    }()
+                    if let (dotColor, label) = status {
+                        HStack(spacing: 5) {
+                            if let dotColor {
+                                Circle().fill(dotColor).frame(width: 6, height: 6)
+                            }
+                            Text(label)
+                                .scaledUI(12.5)
+                                .foregroundStyle(Theme.textMuted)
+                        }
                     }
                 }
             }

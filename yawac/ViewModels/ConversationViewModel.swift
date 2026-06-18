@@ -1892,19 +1892,13 @@ final class ConversationViewModel {
             row.mediaRefJSON = s
             try? ctx.save()
             let kind = row.kind
-            await self?.applyMediaRetrySucceeded(
-                messageID: messageID, kind: kind, refJSON: s)
+            await MainActor.run {
+                self?.downloadErrors[messageID] = nil
+                self?.downloadTasks[messageID]?.cancel()
+                self?.downloadTasks[messageID] = nil
+                self?.ensureDownloadFromHistory(id: messageID, kind: kind, refJSON: s)
+            }
         }
-    }
-
-    @MainActor
-    private func applyMediaRetrySucceeded(messageID: String,
-                                          kind: String,
-                                          refJSON: String) {
-        downloadErrors[messageID] = nil
-        downloadTasks[messageID]?.cancel()
-        downloadTasks[messageID] = nil
-        ensureDownloadFromHistory(id: messageID, kind: kind, refJSON: refJSON)
     }
 
     func sendDraft() async {
