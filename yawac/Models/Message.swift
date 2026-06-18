@@ -75,6 +75,16 @@ extension UIMessage {
         case delivered
         case read
         case played
+
+        /// Monotone ordering for receipt-status resolution (higher wins).
+        var sortOrder: Int {
+            switch self {
+            case .sent:      return 0
+            case .delivered: return 1
+            case .played:    return 2
+            case .read:      return 3
+            }
+        }
     }
 }
 

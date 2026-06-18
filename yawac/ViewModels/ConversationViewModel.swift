@@ -3242,28 +3242,19 @@ final class ConversationViewModel {
         var resolved: [String: UIMessage.Status] = [:]
         for (id, status) in batch {
             if let existing = resolved[id] {
-                if rank(status) > rank(existing) { resolved[id] = status }
+                if status.sortOrder > existing.sortOrder { resolved[id] = status }
             } else {
                 resolved[id] = status
             }
         }
         for (id, status) in resolved {
             if let existing = receiptStatus[id] {
-                if rank(status) > rank(existing) {
+                if status.sortOrder > existing.sortOrder {
                     receiptStatus[id] = status
                 }
             } else {
                 receiptStatus[id] = status
             }
-        }
-    }
-
-    private func rank(_ s: UIMessage.Status) -> Int {
-        switch s {
-        case .sent:      return 0
-        case .delivered: return 1
-        case .played:    return 2
-        case .read:      return 3
         }
     }
 
