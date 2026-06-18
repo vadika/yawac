@@ -311,53 +311,7 @@ final class ConversationViewModel {
             transientError = "Original not available"
             return
         }
-        let body: UIMessage.Body
-        switch p.kind {
-        case "text":
-            body = .text(p.text ?? "")
-        case "image", "video", "audio", "document", "sticker":
-            body = .media(kind: p.kind, caption: p.mediaCaption,
-                          fileName: p.mediaFileName, localPath: p.mediaPath,
-                          waveform: p.audioWaveform, isPTT: p.isPTT)
-        case "poll":
-            if let json = p.pollJSON,
-               let data = json.data(using: .utf8),
-               let poll = try? JSONDecoder().decode(BridgePoll.self, from: data) {
-                body = .poll(question: poll.question,
-                             options: poll.options,
-                             selectableCount: poll.selectableCount)
-            } else {
-                body = .system(p.kind)
-            }
-        default:
-            // F35: kind=="system" rows now carry a friendly text (e.g.
-            // "Encryption key with X changed"). Use it when present;
-            // fall back to the bare kind otherwise.
-            if let t = p.text, !t.isEmpty {
-                body = .system(t)
-            } else {
-                body = .system(p.kind)
-            }
-        }
-        var m = UIMessage(
-            id: p.id, chatJID: p.chatJID, senderJID: p.senderJID,
-            fromMe: p.fromMe, timestamp: p.timestamp, body: body)
-        m.editedAt = p.editedAt
-        m.revokedAt = p.revokedAt
-        m.revokedBy = p.revokedBy
-        m.locallyDeleted = p.locallyDeleted
-        m.starredAt = p.starredAt
-        m.pinnedAt = p.pinnedAt
-        m.isForwarded = p.isForwarded
-        m.isViewOnce = p.isViewOnce
-        m.viewOnceLocked = p.viewOnceLocked
-        m.quotedMessageID = p.quotedMessageID
-        m.quotedSenderJID = p.quotedSenderJID
-        m.quotedFromMe = p.quotedFromMe
-        m.quotedTextSnippet = p.quotedTextSnippet
-        m.quotedKind = p.quotedKind
-        m.mediaWidth = p.mediaWidth
-        m.mediaHeight = p.mediaHeight
+        let m = Self.uiMessage(from: p)
 
         // Insert sorted by timestamp.
         let idx = messages.firstIndex(where: { $0.timestamp > m.timestamp }) ?? messages.count
@@ -963,60 +917,7 @@ final class ConversationViewModel {
         let displayable = rows.filter { p in
             p.kind != "reaction" && p.kind != "protocol" && p.kind != "system"
         }
-        let messages: [UIMessage] = displayable.map { p in
-            let body: UIMessage.Body
-            switch p.kind {
-            case "text":
-                body = .text(p.text ?? "")
-            case "image", "video", "audio", "document", "sticker":
-                body = .media(kind: p.kind, caption: p.mediaCaption,
-                              fileName: p.mediaFileName, localPath: p.mediaPath,
-                              waveform: p.audioWaveform, isPTT: p.isPTT)
-            case "poll":
-                if let json = p.pollJSON,
-                   let data = json.data(using: .utf8),
-                   let poll = try? JSONDecoder().decode(BridgePoll.self, from: data) {
-                    body = .poll(question: poll.question,
-                                 options: poll.options,
-                                 selectableCount: poll.selectableCount)
-                } else {
-                    body = .system(p.kind)
-                }
-            default:
-                // F35: same fallback as in the buildHistorySnapshot
-                // path above — surface the synthetic system text when
-                // present.
-                if let t = p.text, !t.isEmpty {
-                    body = .system(t)
-                } else {
-                    body = .system(p.kind)
-                }
-            }
-            var m = UIMessage(
-                id: p.id,
-                chatJID: p.chatJID,
-                senderJID: p.senderJID,
-                fromMe: p.fromMe,
-                timestamp: p.timestamp,
-                body: body)
-            m.editedAt = p.editedAt
-            m.revokedAt = p.revokedAt
-            m.revokedBy = p.revokedBy
-            m.locallyDeleted = p.locallyDeleted
-            m.starredAt = p.starredAt
-            m.pinnedAt = p.pinnedAt
-            m.isForwarded = p.isForwarded
-            m.isViewOnce = p.isViewOnce
-            m.viewOnceLocked = p.viewOnceLocked
-            m.quotedMessageID = p.quotedMessageID
-            m.quotedSenderJID = p.quotedSenderJID
-            m.quotedFromMe = p.quotedFromMe
-            m.quotedTextSnippet = p.quotedTextSnippet
-            m.quotedKind = p.quotedKind
-            m.mediaWidth = p.mediaWidth
-            m.mediaHeight = p.mediaHeight
-            return m
-        }
+        let messages: [UIMessage] = displayable.map { Self.uiMessage(from: $0) }
         // Hydrate persisted delivery status (fromMe only — receipts for
         // inbound messages aren't shown).
         var receiptStatus: [String: UIMessage.Status] = [:]
