@@ -235,6 +235,39 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **F95 — Ponytail code refactor sweep** (v0.10.28) —
+  Repo-wide ponytail audit identified 30 over-engineering findings.
+  Code-only sweep (docs untouched per user request). Net ~220 LoC
+  removed across 10 commits. No behavior change.
+  - Phase 1 deletes: legacy `scripts/release.sh` (`bump-cask-test.sh`
+    kept — CI uses it); inlined 3 verified single-caller Swift helpers
+    (`snippetText`, `applyMediaRetrySucceeded`, `headerStatus`) and
+    1 Go wrapper (`firstDevice`); moved `rank(Status)` switch to
+    `Status.sortOrder` computed property. (8 bridge test files kept
+    — all had substantive assertions; `sectionLabel` and
+    `dstEphemeralSec` kept — multi-callers.)
+  - Phase 2 stdlib swaps: `looksLikeExpiredError` uses static
+    `Set<String>` + `.contains(where:)` instead of 7 sequential
+    `.contains()` calls; replaced
+    `.reduce(0){$0 + ($1.alreadySeen ? 1 : 0)}` with
+    `.count(where:)`; inlined `BridgeIDPair` 2-init struct as
+    named tuples at 3 call sites.
+  - Phase 3 extracts: `.autodismiss(_:after:)` ViewModifier folds 8
+    repeated `.task(id:err)` patterns in ChatInfoView.swift;
+    consolidated 2 duplicated ~28-LoC UIMessage construction blocks
+    into existing `uiMessage(from:)` static helper.
+  - Phase 4: removed MapSnapshotCache in-session negative cache
+    (MKMapSnapshotter is naturally rate-limited; disk cache handles
+    success path).
+  - **Skipped from audit:** docs trimming (ROADMAP + plans archive),
+    `DateFormatter` consolidation (all already `private/fileprivate
+    static let`), `AvatarSemaphore→DispatchSemaphore` (actor-based
+    async semaphore — DispatchSemaphore.wait() blocks cooperative
+    thread), `buildEarlierSnapshot` metadata hydration (intentionally
+    minimal), MediaCache/AvatarCache unification (architectural
+    surface — separate cycle), TranslationStore reshape (caller
+    surface — separate cycle).
+
 - ✅ **F94 abandoned — synthetic future-anchor probe** (v0.10.27) —
   F94 (v0.10.26) shipped a per-chat type-5 `requestOlderHistory`
   with synthetic FUTURE anchor (now+1 day, fake msgID
