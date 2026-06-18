@@ -49,6 +49,10 @@ struct ChatInfoView: View {
     @State private var mediaVM: ChatMediaViewModel?
     @State private var confirmBlock = false
     @State private var confirmLeave = false
+    /// F98: parent-side confirmation flag for the bulk
+    /// listSubGroups + leaveGroup workflow. Separate from
+    /// `confirmLeave` so the message can be community-aware.
+    @State private var confirmLeaveCommunity = false
     @State private var editingName: Bool = false
     @State private var editingDescription: Bool = false
     @State private var nameDraft: String = ""
@@ -201,11 +205,16 @@ struct ChatInfoView: View {
         } message: {
             Text("You'll stop receiving messages from this group.")
         }
+        .confirmationDialog("Leave community \(name)?",
+                            isPresented: $confirmLeaveCommunity) {
+            Button("Leave community", role: .destructive) { leaveCommunity() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("You'll be removed from \"\(name)\" and all of its sub-groups.")
+        }
         .confirmationDialog(
             "Remove \(confirmRemoveJID.map { session.displayName(for: $0) } ?? "member")?",
-            isPresented: Binding(
-                get: { confirmRemoveJID != nil },
-                set: { if !$0 { confirmRemoveJID = nil } })
+            isPresented: confirmRemoveBinding
         ) {
             Button("Remove", role: .destructive) {
                 if let jid = confirmRemoveJID, let g = group {
@@ -219,9 +228,7 @@ struct ChatInfoView: View {
         }
         .confirmationDialog(
             "Demote \(confirmDemoteJID.map { session.displayName(for: $0) } ?? "admin")?",
-            isPresented: Binding(
-                get: { confirmDemoteJID != nil },
-                set: { if !$0 { confirmDemoteJID = nil } })
+            isPresented: confirmDemoteBinding
         ) {
             Button("Demote", role: .destructive) {
                 if let jid = confirmDemoteJID, let g = group {
@@ -281,41 +288,19 @@ struct ChatInfoView: View {
                         // chat list. whatsmeow's JoinedGroup event
                         // isn't wired through WAClient.Event yet, so
                         // an explicit fetch keeps the sidebar in sync.
-                        Task {
-                            if let info = try? client.getGroupInfo(jid: newJID) {
-                                session.chatList?.mergeGroups([info])
-                            }
-                            await loadGroup()
-                        }
+                        reloadAfterNewSubGroup(newJID: newJID)
                     }
                 )
             }
         }
         .confirmationDialog(
             "Unlink \u{201C}\(unlinkSubGroupTarget?.name ?? "")\u{201D} from community?",
-            isPresented: Binding(
-                get: { unlinkSubGroupTarget != nil },
-                set: { if !$0 { unlinkSubGroupTarget = nil } }),
+            isPresented: confirmUnlinkBinding,
             titleVisibility: .visible
         ) {
             Button("Unlink", role: .destructive) {
-                if let sub = unlinkSubGroupTarget,
-                   let g = group,
-                   let client = session.client {
-                    let parentJID = g.jid
-                    let subJID = sub.jid
-                    Task { @MainActor in
-                        do {
-                            try await Task.detached {
-                                try client.unlinkSubGroup(parentJID: parentJID,
-                                                          subJID: subJID)
-                            }.value
-                            await loadGroup()
-                        } catch {
-                            sectionError = (error as NSError).localizedDescription
-                        }
-                        unlinkSubGroupTarget = nil
-                    }
+                if let sub = unlinkSubGroupTarget, let g = group {
+                    performUnlinkSubGroup(sub: sub, parentJID: g.jid)
                 } else {
                     unlinkSubGroupTarget = nil
                 }
@@ -325,6 +310,25 @@ struct ChatInfoView: View {
             }
         } message: {
             Text("It will become a standalone group. You can re-link it later.")
+        }
+    }
+
+    /// Performs the async unlinkSubGroup bridge call. Extracted from the
+    /// confirmationDialog button closure to reduce view-body complexity for
+    /// Swift's type-checker.
+    private func performUnlinkSubGroup(sub: BridgeSubGroup, parentJID: String) {
+        guard let client = session.client else { return }
+        let subJID = sub.jid
+        Task { @MainActor in
+            do {
+                try await Task.detached {
+                    try client.unlinkSubGroup(parentJID: parentJID, subJID: subJID)
+                }.value
+                await loadGroup()
+            } catch {
+                sectionError = (error as NSError).localizedDescription
+            }
+            unlinkSubGroupTarget = nil
         }
     }
 
@@ -339,6 +343,86 @@ struct ChatInfoView: View {
             } catch {
                 NSLog("[yawac/leaveGroup] failed jid=%@ err=%@",
                       jid, String(describing: error))
+            }
+        }
+    }
+
+    /// Routes to the correct leave confirmation based on whether this chat
+    /// is a community parent. Extracted from the action closure to keep
+    /// the view-body expression tree within Swift's type-check budget.
+    private func confirmLeaveOrCommunity(isParent: Bool) {
+        if isParent { confirmLeaveCommunity = true } else { confirmLeave = true }
+    }
+
+    /// Binding helpers for optional-JID confirmation dialogs. Extracted so
+    /// the view-body modifier chain stays within Swift's type-check budget.
+    private var confirmRemoveBinding: Binding<Bool> {
+        Binding(get: { confirmRemoveJID != nil },
+                set: { if !$0 { confirmRemoveJID = nil } })
+    }
+    private var confirmDemoteBinding: Binding<Bool> {
+        Binding(get: { confirmDemoteJID != nil },
+                set: { if !$0 { confirmDemoteJID = nil } })
+    }
+    private var confirmUnlinkBinding: Binding<Bool> {
+        Binding(get: { unlinkSubGroupTarget != nil },
+                set: { if !$0 { unlinkSubGroupTarget = nil } })
+    }
+
+    /// Merges the new sub-group info into the sidebar and reloads the
+    /// parent group view. Extracted from the onCreated closure to keep
+    /// the view-body expression tree within Swift's type-check budget.
+    private func reloadAfterNewSubGroup(newJID: String) {
+        guard let client = session.client else { return }
+        Task {
+            if let info = try? client.getGroupInfo(jid: newJID) {
+                session.chatList?.mergeGroups([info])
+            }
+            await loadGroup()
+        }
+    }
+
+    /// F98: bulk-leave a community parent. Enumerates sub-groups
+    /// via `listSubGroups` and fires `leaveGroup` per sub + once
+    /// for the parent. Per-sub errors logged but the loop continues;
+    /// server may have removed user from some subs already.
+    /// Existing bridge `events.GroupInfo` handler drives chat-row
+    /// removal post-leave; `applyIncomingDelete` here just makes the
+    /// sidebar update feel instant.
+    private func leaveCommunity() {
+        guard let client = session.client else { return }
+        let parentJID = chatJID
+        let parentName = name
+        Task { @MainActor in
+            do {
+                let subs = try client.listSubGroups(parentJID: parentJID)
+                for sub in subs {
+                    let subJID = sub.jid
+                    do {
+                        try await Task.detached {
+                            try client.leaveGroup(jid: subJID)
+                        }.value
+                        session.chatList?.applyIncomingDelete(chatJID: subJID)
+                    } catch {
+                        NSLog("[yawac/leaveCommunity] sub-leave failed jid=%@ err=%@",
+                              subJID, String(describing: error))
+                    }
+                }
+                do {
+                    try await Task.detached {
+                        try client.leaveGroup(jid: parentJID)
+                    }.value
+                    session.chatList?.applyIncomingDelete(chatJID: parentJID)
+                } catch {
+                    NSLog("[yawac/leaveCommunity] parent-leave failed jid=%@ err=%@",
+                          parentJID, String(describing: error))
+                }
+                NSLog("[yawac/leaveCommunity] done parent=%@ subs=%d",
+                      parentName, subs.count)
+                onClose?()
+            } catch {
+                NSLog("[yawac/leaveCommunity] listSubGroups failed jid=%@ err=%@",
+                      parentJID, String(describing: error))
             }
         }
     }
@@ -1259,8 +1343,10 @@ struct ChatInfoView: View {
             // denied" sheet they can't recover from.
             .init(label: "Invite", icon: "link",
                   action: admin ? { inviteSheetOpen = true } : nil),
-            .init(label: "Leave", icon: "rectangle.portrait.and.arrow.right",
-                  destructive: true, action: { confirmLeave = true }),
+            .init(label: g.isParent ? "Leave community" : "Leave",
+                  icon: "rectangle.portrait.and.arrow.right",
+                  destructive: true,
+                  action: { confirmLeaveOrCommunity(isParent: g.isParent) }),
         ])
 
         // F74: MUTE — presets + "Until…" custom picker (mirrors userBody).
