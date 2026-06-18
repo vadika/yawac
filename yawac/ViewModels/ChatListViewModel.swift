@@ -528,7 +528,7 @@ final class ChatListViewModel {
             // NSLog from the systematic-debugging investigation that
             // showed the "refetch" perception was 98% fresh.
             if let session = self.session, session.fullSync.inFlight {
-                let dupes = outcomes.reduce(0) { $0 + ($1.alreadySeen ? 1 : 0) }
+                let dupes = outcomes.count(where: \.alreadySeen)
                 let fresh = outcomes.count - dupes
                 session.bumpFullSyncCounts(fresh: fresh, dupe: dupes)
             }
