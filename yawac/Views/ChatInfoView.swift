@@ -714,11 +714,7 @@ struct ChatInfoView: View {
                             Text(err)
                                 .foregroundStyle(Color.red.opacity(0.9))
                                 .scaledUI(11)
-                                .task(id: err) {
-                                    try? await Task.sleep(
-                                        nanoseconds: 6 * 1_000_000_000)
-                                    aboutEditError = nil
-                                }
+                                .autodismiss($aboutEditError)
                         }
                         Spacer()
                         Button(aboutSaving ? "Saving…" : "Save") {
@@ -767,11 +763,7 @@ struct ChatInfoView: View {
                     Text(err)
                         .scaledUI(11)
                         .foregroundStyle(Color.red.opacity(0.9))
-                        .task(id: err) {
-                            try? await Task.sleep(
-                                nanoseconds: 6 * 1_000_000_000)
-                            disappearingError = nil
-                        }
+                        .autodismiss($disappearingError)
                 }
             }
         }
@@ -1014,11 +1006,7 @@ struct ChatInfoView: View {
                         Text(err)
                             .scaledUI(11)
                             .foregroundStyle(Color.red.opacity(0.9))
-                            .task(id: err) {
-                                try? await Task.sleep(
-                                    nanoseconds: 6 * 1_000_000_000)
-                                disappearingError = nil
-                            }
+                            .autodismiss($disappearingError)
                     }
                 }
             }
@@ -1084,11 +1072,7 @@ struct ChatInfoView: View {
                         Text(err)
                             .scaledUI(11)
                             .foregroundStyle(Color.red.opacity(0.9))
-                            .task(id: err) {
-                                try? await Task.sleep(
-                                    nanoseconds: 6 * 1_000_000_000)
-                                toggleError = nil
-                            }
+                            .autodismiss($toggleError)
                     }
                 }
             }
@@ -1122,11 +1106,7 @@ struct ChatInfoView: View {
                         Text(err)
                             .scaledUI(11)
                             .foregroundStyle(Color.red.opacity(0.9))
-                            .task(id: err) {
-                                try? await Task.sleep(
-                                    nanoseconds: 6 * 1_000_000_000)
-                                announceError = nil
-                            }
+                            .autodismiss($announceError)
                     }
                 }
             }
@@ -1152,11 +1132,7 @@ struct ChatInfoView: View {
                         Text(err)
                             .scaledUI(11)
                             .foregroundStyle(Color.red.opacity(0.9))
-                            .task(id: err) {
-                                try? await Task.sleep(
-                                    nanoseconds: 6 * 1_000_000_000)
-                                lockedError = nil
-                            }
+                            .autodismiss($lockedError)
                     }
                 }
             }
@@ -1182,11 +1158,7 @@ struct ChatInfoView: View {
                         Text(err)
                             .scaledUI(11)
                             .foregroundStyle(Color.red.opacity(0.9))
-                            .task(id: err) {
-                                try? await Task.sleep(
-                                    nanoseconds: 6 * 1_000_000_000)
-                                memberAddError = nil
-                            }
+                            .autodismiss($memberAddError)
                     }
                 }
             }
@@ -1310,10 +1282,7 @@ struct ChatInfoView: View {
                     .scaledUI(11)
                     .foregroundStyle(Color.red.opacity(0.9))
                     .padding(.bottom, 4)
-                    .task(id: err) {
-                        try? await Task.sleep(nanoseconds: 6 * 1_000_000_000)
-                        sectionError = nil
-                    }
+                    .autodismiss($sectionError)
             }
             VStack(spacing: 0) {
                 ForEach(directory, id: \.jid) { sub in
