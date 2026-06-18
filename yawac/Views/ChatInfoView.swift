@@ -832,6 +832,34 @@ struct ChatInfoView: View {
         }
     }
 
+    /// F96 ponytail follow-up: shared shape for both self-profile save
+    /// handlers. Captures `draft`, marks `saving`, runs `persist` on a
+    /// detached thread, updates `baseline` on success (plus optional
+    /// `extra` binding to mirror the saved value into), surfaces
+    /// localizedDescription on failure.
+    private func saveSelfField(
+        draft: String,
+        baseline: Binding<String>,
+        saving: Binding<Bool>,
+        error: Binding<String?>,
+        persist: @escaping @Sendable (String) throws -> Void,
+        extra: Binding<String?>? = nil
+    ) {
+        let value = draft
+        saving.wrappedValue = true
+        error.wrappedValue = nil
+        Task { @MainActor in
+            defer { saving.wrappedValue = false }
+            do {
+                try await Task.detached { try persist(value) }.value
+                baseline.wrappedValue = value
+                extra?.wrappedValue = value
+            } catch let e {
+                error.wrappedValue = (e as NSError).localizedDescription
+            }
+        }
+    }
+
     /// Persist `aboutDraft` to the server via `WAClient.setSelfAbout`.
     /// Only meaningful when `isSelfChat`; the Save button is gated on
     /// `aboutDraft != aboutBaseline` so this won't get called for noop
@@ -839,21 +867,14 @@ struct ChatInfoView: View {
     /// replaces.
     private func saveSelfAbout() {
         guard let client = session.client else { return }
-        let msg = aboutDraft
-        aboutSaving = true
-        aboutEditError = nil
-        Task { @MainActor in
-            defer { aboutSaving = false }
-            do {
-                try await Task.detached {
-                    try client.setSelfAbout(msg)
-                }.value
-                aboutBaseline = msg
-                userAbout = msg
-            } catch {
-                aboutEditError = (error as NSError).localizedDescription
-            }
-        }
+        saveSelfField(
+            draft: aboutDraft,
+            baseline: $aboutBaseline,
+            saving: $aboutSaving,
+            error: $aboutEditError,
+            persist: { try client.setSelfAbout($0) },
+            extra: $userAbout
+        )
     }
 
     /// Persist `pushNameDraft` to the server via `WAClient.setSelfPushName`.
@@ -862,20 +883,13 @@ struct ChatInfoView: View {
     /// via appstate sync — no local cache update needed.
     private func saveSelfPushName() {
         guard let client = session.client else { return }
-        let name = pushNameDraft
-        pushNameSaving = true
-        pushNameEditError = nil
-        Task { @MainActor in
-            defer { pushNameSaving = false }
-            do {
-                try await Task.detached {
-                    try client.setSelfPushName(name)
-                }.value
-                pushNameBaseline = name
-            } catch {
-                pushNameEditError = (error as NSError).localizedDescription
-            }
-        }
+        saveSelfField(
+            draft: pushNameDraft,
+            baseline: $pushNameBaseline,
+            saving: $pushNameSaving,
+            error: $pushNameEditError,
+            persist: { try client.setSelfPushName($0) }
+        )
     }
 
     // ─── Group body ──────────────────────────────────────────────────

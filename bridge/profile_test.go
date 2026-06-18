@@ -33,10 +33,10 @@ func TestSetSelfAboutUnpaired(t *testing.T) {
 
 func TestSetSelfPushNameUnpaired(t *testing.T) {
 	c, _ := NewClient(t.TempDir() + "/p3.db")
+	defer c.Close()
 	if err := c.SetSelfPushName("Bob"); err == nil {
 		t.Log("note: SetSelfPushName on unpaired did not error")
 	}
-	c.Close()
 }
 
 func TestSetSelfPushNameRejectsEmpty(t *testing.T) {

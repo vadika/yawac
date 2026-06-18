@@ -218,6 +218,18 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **F96 ponytail follow-up — saveSelfField helper + test defer** (v0.10.30) —
+  Post-commit ponytail review on F96 (v0.10.29) found two yagni:
+  `saveSelfAbout` + `saveSelfPushName` shared ~17 LoC of identical
+  shape (capture-mark-save-baseline-error pattern), and
+  `TestSetSelfPushNameUnpaired` was missing `defer c.Close()` for
+  consistency with the other tests in the same file. Extracted
+  `saveSelfField(draft:baseline:saving:error:persist:)` to fold
+  both save handlers into one body; added the missing defer.
+  Net: a few LoC saved + tightened pattern for future profile
+  fields. Sets the precedent for the new "always ponytail before
+  commit" rule.
+
 - ✅ **F96 — Push-name edit** (v0.10.29) —
   Completes the profile-edit story alongside avatar (v0.9.0) and
   about (v0.9.1). The roadmap entry claimed whatsmeow had no
