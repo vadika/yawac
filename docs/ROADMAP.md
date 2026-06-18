@@ -130,14 +130,10 @@ rare-use utilities) ships only when the important list is clear.
   by foreground polling (whatsmeow does not emit an inbound
   `JoinRequest` event).
   Gaps:
-    - ☐ **Leave community** — multi-step "leave all sub-groups +
-      leave parent" workflow. Today user leaves each sub-group +
-      parent individually via Leave group on each chat info.
+    - ✅ **Leave community** — landed as F98 in v0.10.32.
     - ☐ **Demote community parent → plain group** — whatsmeow has no
       RPC to undo `IsParent`; create-time only.
-    - ☐ **Approve from sidebar chip tap** — sidebar pending-count
-      chip is read-only; tapping doesn't jump to the PENDING
-      REQUESTS section. Tap currently opens the chat as normal.
+    - ✅ **Approve from sidebar chip tap** — landed as F98 in v0.10.32.
     - ☐ **Default-subgroup unlink** — server allows the IQ but it
       breaks the community's announcements channel. yawac hides the
       Unlink action for `isDefaultSubGroup` rows. No "delete
@@ -213,6 +209,44 @@ the important list is materially shorter.
 
 Kept here for context — flip back to open only if a regression
 surfaces.
+
+- ✅ **F98 — Communities polish: sidebar chip tap + leave-community workflow** (v0.10.32) —
+  Two community-management gaps closed.
+  - **Sidebar pending-request chip is now tappable.** Previously
+    a read-only badge; tap opens the chat AND scrolls ChatInfoView
+    to the PENDING REQUESTS section. Implementation:
+    `SessionViewModel.pendingChatInfoSection: PendingChatInfoSection?`
+    transient field, `ChatListView` chip wrapped in `Button`,
+    `ChatInfoView` body wrapped in `ScrollViewReader` + `.onChange`
+    observer that runs `proxy.scrollTo("pending-requests", anchor: .top)`
+    and consumes the flag. Help-text gains "— tap to review".
+  - **Leave community workflow.** ChatInfoView's leave button on a
+    community parent (`g.isParent`) now reads "Leave community" and
+    opens a community-aware confirmation: "You'll be removed from X
+    and all of its sub-groups." Confirm enumerates sub-groups via
+    `WAClient.listSubGroups(parentJID:)`, fires `WAClient.leaveGroup(jid:)`
+    per sub (per-sub errors logged, loop continues), then for the
+    parent. `applyIncomingDelete(chatJID:)` makes sidebar updates
+    feel instant; bridge `events.GroupInfo` handler covers the
+    rest. Non-parent chats keep the original "Leave" wording.
+  - **ChatInfoView refactor ripple.** Adding the leave-community
+    button pushed `ChatInfoView.body` past Swift's type-check
+    complexity limit. Side-effect cleanup: three inline
+    `Binding(get:set:)` confirm-dialog bindings extracted to
+    computed properties (`confirmRemoveBinding`,
+    `confirmDemoteBinding`, `confirmUnlinkBinding`); two inline
+    Task closures extracted to private methods
+    (`reloadAfterNewSubGroup`, `performUnlinkSubGroup`). No
+    behavior change — just smaller body literals so the compiler
+    can finish typing the chain.
+  - **No bridge / Go changes.** No unit tests (pure UI wiring).
+    Manual smoke deferred to user post-Sparkle.
+  - **Spec / plan.** `docs/superpowers/specs/2026-06-18-communities-polish-design.md`
+    + `docs/superpowers/plans/2026-06-18-communities-polish.md`.
+  - **Out of scope (blocked).** Demote community parent → plain
+    group (whatsmeow no RPC); default-subgroup unlink (server
+    breaks announcements); Newsletter/Channels (upstream
+    Platform == MACOS argo decoding).
 
 - ✅ **F97 — App Intents for Send / Open Chat / Mark Read / Search** (v0.10.31) —
   Power-user automation surface that the official WhatsApp Mac
