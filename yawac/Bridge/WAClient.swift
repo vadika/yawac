@@ -145,6 +145,14 @@ class WAClient: PhoneValidating, LIDResolving {
     private let subscribersQueue = DispatchQueue(
         label: "yawac.WAClient.subscribers")
     nonisolated(unsafe) private var _subscribers: [UUID: AsyncStream<Event>.Continuation] = [:]
+    // F100: replay buffer for events that arrive at the pump BEFORE any
+    // Swift subscriber registers. Bridge starts dispatching as soon as
+    // websocket auth completes (~0.5s after WAClient.init), but
+    // ContentView.task subscribes only AFTER ChatListViewModel cold-start
+    // bootstrap + groups/contacts refresh (~1-2s). The race silently
+    // dropped every offline-drain message announced before the first
+    // subscriber. Protected by subscribersQueue.
+    nonisolated(unsafe) private var _pendingEvents: [Event] = []
     // pump Task is write-once in startPump (from MainActor init) and never
     // read back — nothing observes it for cancellation or deinit cleanup.
     // nonisolated(unsafe) is justified by that invariant.
@@ -182,9 +190,17 @@ class WAClient: PhoneValidating, LIDResolving {
     nonisolated func eventStream() -> AsyncStream<Event> {
         let id = UUID()
         return AsyncStream { continuation in
-            self.mutateSubscribers { subs in
+            // F100: register under lock + drain replay buffer atomically.
+            // Buffered events were captured by the pump while no subscriber
+            // existed. Yield them OUTSIDE the lock to avoid the
+            // onTermination reentrancy deadlock the pump comment calls out.
+            let backlog: [Event] = self.mutateSubscribers { subs in
                 subs[id] = continuation
+                let p = self._pendingEvents
+                self._pendingEvents.removeAll(keepingCapacity: false)
+                return p
             }
+            for e in backlog { continuation.yield(e) }
             continuation.onTermination = { [weak self] _ in
                 self?.mutateSubscribers { subs in
                     subs.removeValue(forKey: id)
@@ -997,8 +1013,18 @@ class WAClient: PhoneValidating, LIDResolving {
                 // synchronously and re-enters `subscribersQueue.sync` via
                 // `mutateSubscribers` — yielding while holding the lock
                 // would deadlock that path.
-                let snapshot: [AsyncStream<Event>.Continuation] = self.withSubscribers { subs in
-                    Array(subs.values)
+                // F100: always buffer (cap 1000) so any LATE subscriber
+                // (e.g. ChatListViewModel registers ~1s after SessionViewModel
+                // — events that fired in the gap would otherwise be missed)
+                // can drain the backlog on registration. Existing subs get
+                // the live yield as before; no dupes. Closes issue #6 for the
+                // late-subscriber-missed-offline-drain failure mode.
+                let snapshot: [AsyncStream<Event>.Continuation] = self.mutateSubscribers { subs in
+                    self._pendingEvents.append(evt)
+                    if self._pendingEvents.count > 1000 {
+                        self._pendingEvents.removeFirst(self._pendingEvents.count - 1000)
+                    }
+                    return Array(subs.values)
                 }
                 for cont in snapshot { cont.yield(evt) }
             }

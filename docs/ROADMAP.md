@@ -210,6 +210,40 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **F100 — Issue #6 ROOT CAUSE: late-subscriber misses pump fan-out** (v0.10.33) —
+  GitHub issue #6 chased through F83/F84/F89/F92/F93/F94 — each closed a
+  different failure mode, none was the actual root. F99 debug session
+  (whatsmeow fork cloned + instrumented) traced the message lifecycle:
+  whatsmeow `handleEncryptedMessage` → bridge dispatch → Swift event
+  pump → subscriber fan-out. Found: `WAClient.startPump` snapshots
+  current subscribers and yields each event to them. SessionViewModel
+  subscribes early via its own event loop; ChatListViewModel subscribes
+  ~1-2s later in `ContentView.task` AFTER `runBootstrap()` wait +
+  groups/contacts refresh. Every offline-drain message fired in that
+  window was yielded to SessionViewModel only, missing
+  ChatListViewModel.ingest entirely. Bytes arrived, bridge dispatched,
+  one subscriber consumed them; the OTHER subscriber never saw them.
+  Empirical proof: 21 messages dispatched, 1 reached `ingest` (the one
+  that arrived AFTER ContentView subscribed).
+  - **Fix.** WAClient gains a `_pendingEvents: [Event]` replay buffer
+    (capped 1000) protected by the existing `subscribersQueue`. The
+    pump always appends to the buffer in addition to fanning out live.
+    `eventStream()` drains the buffer to the newly-registering
+    subscriber atomically under the same lock. Late subscribers get
+    the full backlog of events since the last drain. Existing
+    subscribers get the live yield as before — no duplicates.
+  - **Verified.** F99 instrumentation showed 4 of 4 offline-drain
+    group messages now persist to `ZPERSISTEDMESSAGE` correctly.
+  - **F99 probes reverted.** NSLog instrumentation in `ChatListViewModel
+    .ingest`, `MessageWriter.enqueue`, `SessionViewModel.boot` removed;
+    whatsmeow fork patches reverted; `bridge/go.mod` `replace` directive
+    restored to the github.com/vadika/whatsmeow pin.
+  - **Caveat.** Phone-side-already-read messages where WhatsApp's
+    server cleared the offline buffer are still unrecoverable per
+    protocol (F93 confirmed `preview.messages=0` for those cases).
+    F100 closes the OTHER failure mode where bytes did arrive but
+    yawac was racing its own subscriber registration.
+
 - ✅ **F98 — Communities polish: sidebar chip tap + leave-community workflow** (v0.10.32) —
   Two community-management gaps closed.
   - **Sidebar pending-request chip is now tappable.** Previously
