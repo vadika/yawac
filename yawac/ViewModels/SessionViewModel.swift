@@ -339,11 +339,18 @@ final class SessionViewModel {
 
     /// Records a sender's push-name (the name they set on their phone)
     /// against their JID. Lower priority than explicit contact names —
-    /// only inserted when no other name is known.
+    /// only inserted when no other name is known. Mirrors the entry
+    /// across every form whatsmeow knows for this person (bare,
+    /// canonical PN, reverse-resolved LID) so a 1:1 push-name carried
+    /// on `<phone>@s.whatsapp.net` also resolves the same person's
+    /// group sender `<lid>@lid` (and vice versa) — without this every
+    /// group bubble for a 1:1 contact fell back to the bare LID
+    /// digits because the name lived only on the PN key.
     func ingestPushName(jid: String, name: String?) {
         guard let name, !name.isEmpty else { return }
-        let key = JIDNormalize.bare(jid)
-        if contactNames[key] == nil { contactNames[key] = name }
+        for key in JIDNormalize.allForms(jid, client: client) {
+            if contactNames[key] == nil { contactNames[key] = name }
+        }
     }
 
     func displayName(for jid: String) -> String {

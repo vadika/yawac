@@ -213,6 +213,21 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **F106 — mirror push-name across LID↔PN forms** (v0.10.37) —
+  Group bubbles for a 1:1 contact fell back to the bare LID digits
+  ("+<15-digit-lid>") instead of the saved push-name because
+  `ingestPushName` wrote the entry only at `JIDNormalize.bare(jid)`.
+  The same person's 1:1 message arrives as `<phone>@s.whatsapp.net`
+  but their group sender is `<lid>@lid`, two different keys in
+  `contactNames`. Switched the write to walk
+  `JIDNormalize.allForms(jid, client:)` so every push-name lands at
+  the bare + canonical PN + reverse-resolved LID keys whenever
+  whatsmeow's LID map knows the mapping. Existing keys are
+  preserved (the function still only inserts when no other name is
+  known). Fix is one function in SessionViewModel; live messages
+  populate immediately, in-memory state from before the upgrade
+  fills in as new traffic arrives or on restart.
+
 - ✅ **F105 — drop ThumbnailCache idle flush** (v0.10.36) —
   `ThumbnailCache.scheduleIdleFlush` (F34) wiped every NSCache 5
   minutes after `didResignActive` then bumped all three revisions
