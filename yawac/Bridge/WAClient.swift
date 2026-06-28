@@ -252,6 +252,13 @@ class WAClient: PhoneValidating, LIDResolving {
             .flatMap { String(data: $0, encoding: .utf8) } ?? empty
     }
 
+    /// Decode a UTF-8 JSON string returned by the gomobile bridge.
+    /// Folds the `JSONDecoder().decode(_:from: Data(json.utf8))` triple
+    /// that every send-call wrapper otherwise spelled out.
+    nonisolated private static func decodeJSON<T: Decodable>(_ json: String) throws -> T {
+        try JSONDecoder().decode(T.self, from: Data(json.utf8))
+    }
+
     // Nonisolated to match sendTextReply — the CGo round-trip blocks
     // for ~50-200ms and used to peg MainActor, leaving the composer
     // text "stuck" in the input until the call returned. Callable from
@@ -266,7 +273,7 @@ class WAClient: PhoneValidating, LIDResolving {
                                ephemeralSec: ephemeralSeconds,
                                error: &err)
         if let err { throw err }
-        return try JSONDecoder().decode(BridgeSendResult.self, from: Data(json.utf8))
+        return try Self.decodeJSON(json)
     }
 
     func sendImage(_ chatJID: String, path: String, caption: String,
@@ -279,7 +286,7 @@ class WAClient: PhoneValidating, LIDResolving {
                                 viewOnce: viewOnce,
                                 error: &err)
         if let err { throw err }
-        return try JSONDecoder().decode(BridgeSendResult.self, from: Data(json.utf8))
+        return try Self.decodeJSON(json)
     }
 
     func sendVideo(_ chatJID: String, path: String, caption: String,
@@ -292,7 +299,7 @@ class WAClient: PhoneValidating, LIDResolving {
                                 viewOnce: viewOnce,
                                 error: &err)
         if let err { throw err }
-        return try JSONDecoder().decode(BridgeSendResult.self, from: Data(json.utf8))
+        return try Self.decodeJSON(json)
     }
 
     func sendAudio(_ chatJID: String, path: String,
@@ -303,7 +310,7 @@ class WAClient: PhoneValidating, LIDResolving {
                                 ephemeralSec: ephemeralSeconds,
                                 error: &err)
         if let err { throw err }
-        return try JSONDecoder().decode(BridgeSendResult.self, from: Data(json.utf8))
+        return try Self.decodeJSON(json)
     }
 
     func sendVoiceNote(_ chatJID: String,
@@ -320,7 +327,7 @@ class WAClient: PhoneValidating, LIDResolving {
                                     ephemeralSec: ephemeralSeconds,
                                     error: &err)
         if let err { throw err }
-        return try JSONDecoder().decode(BridgeSendResult.self, from: Data(json.utf8))
+        return try Self.decodeJSON(json)
     }
 
     func sendDocument(_ chatJID: String, path: String, caption: String,
@@ -331,7 +338,7 @@ class WAClient: PhoneValidating, LIDResolving {
                                    ephemeralSec: ephemeralSeconds,
                                    error: &err)
         if let err { throw err }
-        return try JSONDecoder().decode(BridgeSendResult.self, from: Data(json.utf8))
+        return try Self.decodeJSON(json)
     }
 
     nonisolated func sendLocation(chatJID: String,
@@ -350,7 +357,7 @@ class WAClient: PhoneValidating, LIDResolving {
                                    ephemeralSec: ephemeralSeconds,
                                    error: &err)
         if let err { throw err }
-        return try JSONDecoder().decode(BridgeSendResult.self, from: Data(json.utf8))
+        return try Self.decodeJSON(json)
     }
 
     nonisolated func sendContact(chatJID: String,
@@ -365,7 +372,7 @@ class WAClient: PhoneValidating, LIDResolving {
                                   ephemeralSec: ephemeralSeconds,
                                   error: &err)
         if let err { throw err }
-        return try JSONDecoder().decode(BridgeSendResult.self, from: Data(json.utf8))
+        return try Self.decodeJSON(json)
     }
 
     /// Sends a multi-vCard ContactsArrayMessage. The vcards array is
@@ -385,7 +392,7 @@ class WAClient: PhoneValidating, LIDResolving {
                                         ephemeralSec: ephemeralSeconds,
                                         error: &err)
         if let err { throw err }
-        return try JSONDecoder().decode(BridgeSendResult.self, from: Data(json.utf8))
+        return try Self.decodeJSON(json)
     }
 
     nonisolated func setDisappearingTimer(chatJID: String, seconds: Int32) throws {
@@ -410,7 +417,7 @@ class WAClient: PhoneValidating, LIDResolving {
             ephemeralSec: ephemeralSeconds,
             error: &err)
         if let err { throw err }
-        return try JSONDecoder().decode(BridgeSendResult.self, from: Data(json.utf8))
+        return try Self.decodeJSON(json)
     }
 
     nonisolated func sendTextReply(_ chatJID: String, _ body: String,
@@ -430,7 +437,7 @@ class WAClient: PhoneValidating, LIDResolving {
             ephemeralSec: ephemeralSeconds,
             error: &err)
         if let err { throw err }
-        return try JSONDecoder().decode(BridgeSendResult.self, from: Data(json.utf8))
+        return try Self.decodeJSON(json)
     }
 
     nonisolated func forwardText(_ chatJID: String, text: String,
@@ -441,7 +448,7 @@ class WAClient: PhoneValidating, LIDResolving {
                                   ephemeralSec: ephemeralSeconds,
                                   error: &err)
         if let err { throw err }
-        return try JSONDecoder().decode(BridgeSendResult.self, from: Data(json.utf8))
+        return try Self.decodeJSON(json)
     }
 
     nonisolated func forwardMedia(_ chatJID: String, refJSON: String,
@@ -454,7 +461,7 @@ class WAClient: PhoneValidating, LIDResolving {
                                    ephemeralSec: ephemeralSeconds,
                                    error: &err)
         if let err { throw err }
-        return try JSONDecoder().decode(BridgeSendResult.self, from: Data(json.utf8))
+        return try Self.decodeJSON(json)
     }
 
     nonisolated func editText(_ chatJID: String, _ msgID: String, _ newBody: String,
@@ -467,7 +474,7 @@ class WAClient: PhoneValidating, LIDResolving {
                                ephemeralSec: ephemeralSeconds,
                                error: &err)
         if let err { throw err }
-        return try JSONDecoder().decode(BridgeSendResult.self, from: Data(json.utf8))
+        return try Self.decodeJSON(json)
     }
 
     func revokeMessage(_ chatJID: String, _ msgID: String,
@@ -478,7 +485,7 @@ class WAClient: PhoneValidating, LIDResolving {
                                     targetSenderJID: targetSenderJID,
                                     targetFromMe: targetFromMe, error: &err)
         if let err { throw err }
-        return try JSONDecoder().decode(BridgeSendResult.self, from: Data(json.utf8))
+        return try Self.decodeJSON(json)
     }
 
     func starMessage(chatJID: String,
@@ -518,7 +525,7 @@ class WAClient: PhoneValidating, LIDResolving {
                                  pin: pinned,
                                  error: &err)
         if let err { throw err }
-        return try JSONDecoder().decode(BridgeSendResult.self, from: Data(json.utf8))
+        return try Self.decodeJSON(json)
     }
 
     func archiveChat(chatJID: String, archived: Bool,
@@ -585,8 +592,7 @@ class WAClient: PhoneValidating, LIDResolving {
         var err: NSError?
         let json = go.getPrivacySettings(&err)
         if let err { throw err }
-        return try JSONDecoder().decode(BridgePrivacySettings.self,
-                                        from: Data(json.utf8))
+        return try Self.decodeJSON(json)
     }
 
     /// Updates one privacy knob. `name` is the wire PrivacySettingType
@@ -650,8 +656,7 @@ class WAClient: PhoneValidating, LIDResolving {
             ephemeralSec: ephemeralSeconds,
             error: &err)
         if let err { throw err }
-        return try JSONDecoder().decode(BridgeSendPollResult.self,
-                                        from: Data(json.utf8))
+        return try Self.decodeJSON(json)
     }
 
     nonisolated func sendPollVote(chatJID: String,
@@ -675,7 +680,7 @@ class WAClient: PhoneValidating, LIDResolving {
             ephemeralSec: ephemeralSeconds,
             error: &err)
         if let err { throw err }
-        return try JSONDecoder().decode(BridgeSendResult.self, from: Data(json.utf8))
+        return try Self.decodeJSON(json)
     }
 
     nonisolated func downloadMedia(_ refJSON: String, to outPath: String) throws -> String {
@@ -777,7 +782,7 @@ class WAClient: PhoneValidating, LIDResolving {
         var err: NSError?
         let json = go.listGroups(&err)
         if let err { throw err }
-        return try JSONDecoder().decode([BridgeGroupModel].self, from: Data(json.utf8))
+        return try Self.decodeJSON(json)
     }
 
     func getGroupInfo(jid: String) throws -> BridgeGroupModel {
@@ -785,7 +790,7 @@ class WAClient: PhoneValidating, LIDResolving {
         var err: NSError?
         let json = go.getGroupInfo(jid, error: &err)
         if let err { throw err }
-        return try JSONDecoder().decode(BridgeGroupModel.self, from: Data(json.utf8))
+        return try Self.decodeJSON(json)
     }
 
     /// Returns every sub-group linked under `parentJID` (a community
@@ -795,7 +800,7 @@ class WAClient: PhoneValidating, LIDResolving {
         var err: NSError?
         let json = go.listSubGroups(parentJID, error: &err)
         if let err { throw err }
-        return try JSONDecoder().decode([BridgeSubGroup].self, from: Data(json.utf8))
+        return try Self.decodeJSON(json)
     }
 
     /// Best-effort community-member self-join: fetches the sub-group's
@@ -818,7 +823,7 @@ class WAClient: PhoneValidating, LIDResolving {
         var err: NSError?
         let json = go.listContacts(&err)
         if let err { throw err }
-        return try JSONDecoder().decode([BridgeContact].self, from: Data(json.utf8))
+        return try Self.decodeJSON(json)
     }
 
     nonisolated func getUserInfo(jid: String) throws -> BridgeUserInfo {
@@ -826,7 +831,7 @@ class WAClient: PhoneValidating, LIDResolving {
         var err: NSError?
         let json = go.getUserInfo(jid, error: &err)
         if let err { throw err }
-        return try JSONDecoder().decode(BridgeUserInfo.self, from: Data(json.utf8))
+        return try Self.decodeJSON(json)
     }
 
     nonisolated func checkOnWhatsApp(_ phone: String) throws -> PhoneCheckResult {
@@ -834,7 +839,7 @@ class WAClient: PhoneValidating, LIDResolving {
         var err: NSError?
         let json = go.check(onWhatsApp: phone, error: &err)
         if let err { throw err }
-        return try JSONDecoder().decode(PhoneCheckResult.self, from: Data(json.utf8))
+        return try Self.decodeJSON(json)
     }
 
     /// Nonisolated so `NewGroupSheetModel` can call it from a detached task
@@ -911,8 +916,7 @@ class WAClient: PhoneValidating, LIDResolving {
         var err: NSError?
         let json = go.getGroupJoinRequests(chatJID, error: &err)
         if let err { throw err }
-        return try JSONDecoder().decode([BridgeJoinRequest].self,
-                                        from: Data(json.utf8))
+        return try Self.decodeJSON(json)
     }
 
     /// Applies "approve" or "reject" to a batch of pending join requests.
@@ -932,8 +936,7 @@ class WAClient: PhoneValidating, LIDResolving {
                                               participantJIDsJSON: jidsString,
                                               error: &err)
         if let err { throw err }
-        return try JSONDecoder().decode([BridgeJoinRequestResult].self,
-                                        from: Data(json.utf8))
+        return try Self.decodeJSON(json)
     }
 
     /// Flips the require-admin-approval gate on a group on or off.
@@ -1073,8 +1076,7 @@ class WAClient: PhoneValidating, LIDResolving {
                                               participantJIDsJSON: jidsString,
                                               error: &err)
         if let err { throw err }
-        return try JSONDecoder().decode([BridgeParticipantModel].self,
-                                        from: Data(json.utf8))
+        return try Self.decodeJSON(json)
     }
 
     func setGroupPhoto(chatJID: String, jpeg: Data) throws -> String {
@@ -1123,8 +1125,7 @@ class WAClient: PhoneValidating, LIDResolving {
         var err: NSError?
         let json = go.groupInfo(fromLink: code, error: &err)
         if let err { throw err }
-        return try JSONDecoder().decode(BridgeGroupModel.self,
-                                        from: Data(json.utf8))
+        return try Self.decodeJSON(json)
     }
 
     func joinGroupViaLink(code: String) throws -> String {
