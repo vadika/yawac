@@ -16,6 +16,7 @@ struct BridgeMessage: Codable, Identifiable {
     let location: BridgeLocationPayload?
     let locationSequence: Int64?
     let contact: BridgeContactPayload?
+    let contactsArray: BridgeContactsArrayPayload?
     let isViewOnce: Bool?
 
     enum CodingKeys: String, CodingKey {
@@ -29,6 +30,7 @@ struct BridgeMessage: Codable, Identifiable {
         case location
         case locationSequence = "location_sequence"
         case contact
+        case contactsArray = "contacts_array"
         case isViewOnce = "is_view_once"
     }
 
@@ -396,6 +398,16 @@ struct BridgeContactPayload: Codable, Hashable {
     enum CodingKeys: String, CodingKey {
         case vcard
         case displayName = "display_name"
+    }
+}
+
+struct BridgeContactsArrayPayload: Codable, Hashable {
+    let displayName: String
+    let contacts: [BridgeContactPayload]
+
+    enum CodingKeys: String, CodingKey {
+        case displayName = "display_name"
+        case contacts
     }
 }
 

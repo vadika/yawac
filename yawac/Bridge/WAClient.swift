@@ -359,6 +359,34 @@ class WAClient: PhoneValidating, LIDResolving {
         return try JSONDecoder().decode(BridgeSendResult.self, from: Data(json.utf8))
     }
 
+    /// Sends a multi-vCard ContactsArrayMessage (F104 — multi-contact
+    /// share). `vcards` is JSON-encoded then handed to the bridge as a
+    /// single string — gomobile cannot bridge `[]string` natively so the
+    /// Go side reads `vcardsJSON` and unmarshals (mirrors `createGroup`'s
+    /// `participantJIDsJSON` pattern).
+    ///
+    /// Build note: `go.sendContactsArray(...)` does not exist in the
+    /// XCFramework currently shipped on this branch; this wrapper goes
+    /// green after Task 7 rebuilds the bridge. The exact gomobile
+    /// parameter labels may differ from the best-guess shape below;
+    /// adjust to whatever the regenerated `Bridge.objc.h` declares.
+    nonisolated func sendContacts(chatJID: String,
+                                  displayName: String,
+                                  vcards: [String],
+                                  ephemeralSeconds: Int32 = 0) throws -> BridgeSendResult {
+        bump("sendContacts")
+        let encoded = try JSONEncoder().encode(vcards)
+        let vcardsJSON = String(data: encoded, encoding: .utf8) ?? "[]"
+        var err: NSError?
+        let json = go.sendContactsArray(chatJID,
+                                        displayName: displayName,
+                                        vcardsJSON: vcardsJSON,
+                                        ephemeralSec: ephemeralSeconds,
+                                        error: &err)
+        if let err { throw err }
+        return try JSONDecoder().decode(BridgeSendResult.self, from: Data(json.utf8))
+    }
+
     nonisolated func setDisappearingTimer(chatJID: String, seconds: Int32) throws {
         bump("setDisappearingTimer")
         try go.setDisappearingTimer(chatJID, seconds: seconds)

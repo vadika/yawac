@@ -483,6 +483,8 @@ struct ComposerView: View {
             return loc.name.isEmpty ? label : "\(label): \(loc.name)"
         case .contact(let c):
             return "Contact: \(c.displayName)"
+        case .contacts(let cs):
+            return "Contacts: \(cs.count)"
         case .system(let s):
             return s
         }

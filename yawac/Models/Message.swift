@@ -65,6 +65,7 @@ struct UIMessage: Identifiable, Hashable, Sendable {
         case poll(question: String, options: [BridgePollOption], selectableCount: Int)
         case location(LocationPayload, isLive: Bool, sequence: Int64?)
         case contact(ContactPayload)
+        case contacts([ContactPayload])
         case system(String)
     }
 }
@@ -150,6 +151,22 @@ extension UIMessage {
                     vcard: c.vcard))
             } else {
                 self.body = .system("(contact)")
+            }
+        case "contacts":
+            if let arr = b.contactsArray {
+                let cards = arr.contacts.map { c -> ContactPayload in
+                    let waid = VCardBuilder.parseWAID(c.vcard) ?? ""
+                    let jid = waid.isEmpty ? "" : "\(waid)@s.whatsapp.net"
+                    let phone = waid.isEmpty ? "" : "+\(waid)"
+                    return ContactPayload(
+                        jid: jid,
+                        displayName: c.displayName,
+                        phone: phone,
+                        vcard: c.vcard)
+                }
+                self.body = .contacts(cards)
+            } else {
+                self.body = .system("(contacts)")
             }
         default:
             // F35: surface synthetic system text when present (the

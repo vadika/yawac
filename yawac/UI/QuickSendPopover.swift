@@ -78,6 +78,7 @@ struct QuickSendPopover: View {
                     location: nil,
                     locationSequence: nil,
                     contact: nil,
+                    contactsArray: nil,
                     isViewOnce: false)
                 client.dispatchSynthetic(.message(synthetic))
             },

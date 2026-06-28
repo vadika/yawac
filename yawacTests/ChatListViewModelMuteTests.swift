@@ -105,6 +105,7 @@ private extension BridgeMessage {
                       location: nil,
                       locationSequence: nil,
                       contact: nil,
+                      contactsArray: nil,
                       isViewOnce: false)
     }
 }

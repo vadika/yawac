@@ -639,6 +639,15 @@ struct MessageRow: View {
             locationBubble(loc, isLive: isLive)
         case .contact(let c):
             contactBubble(c)
+        case .contacts(let cards):
+            // T3 placeholder — Task 6 closes the proper multi-card render.
+            // Fall back to single-card bubble of the first vCard so the row
+            // still paints something meaningful in the interim.
+            if let first = cards.first {
+                contactBubble(first)
+            } else {
+                Text("(contacts)").font(.caption).foregroundStyle(.secondary)
+            }
         case .system(let s):
             Text(s).font(.caption).foregroundStyle(.secondary)
         }

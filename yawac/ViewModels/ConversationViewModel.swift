@@ -461,6 +461,7 @@ final class ConversationViewModel {
         case .poll:                       return "poll"
         case .location(_, let isLive, _): return isLive ? "location_live" : "location"
         case .contact:                    return "contact"
+        case .contacts:                   return "contacts"
         case .system:                     return "system"
         }
     }
@@ -483,6 +484,8 @@ final class ConversationViewModel {
             return loc.name.isEmpty ? label : trunc("\(label): \(loc.name)")
         case .contact(let c):
             return trunc("Contact: \(c.displayName)")
+        case .contacts(let cs):
+            return trunc("Contacts: \(cs.count)")
         case .system:
             return ""
         }
@@ -525,7 +528,7 @@ final class ConversationViewModel {
         case .media(_, let caption, _, _, _, _):
             if let c = caption, !c.isEmpty { return true }
             return mediaRefJSON(for: m.id) != nil
-        case .poll, .location, .contact, .system:
+        case .poll, .location, .contact, .contacts, .system:
             return false
         }
     }
@@ -594,7 +597,7 @@ final class ConversationViewModel {
                     } else {
                         continue
                     }
-                case .poll, .location, .contact, .system:
+                case .poll, .location, .contact, .contacts, .system:
                     continue
                 }
                 persistForwarded(messageID: result.messageID, chatJID: chatJID,
