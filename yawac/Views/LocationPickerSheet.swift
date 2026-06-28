@@ -41,10 +41,13 @@ struct LocationPickerSheet: View {
 
             // F103: new Map(position:) API + MapReader. The legacy
             // Map(coordinateRegion:annotationItems:) exposes no per-pin
-            // drag; this version uses a DragGesture(minimumDistance: 0)
-            // over the whole map to convert any click/release point to
-            // a coordinate via the proxy. The pin re-anchors because
-            // it reads model.selectedCoord on every body eval.
+            // drag; this version uses .onTapGesture(coordinateSpace:)
+            // for tap-to-move and a simultaneousGesture(DragGesture) so
+            // drag-release also moves the pin without fighting Map's
+            // built-in pan/zoom recognizers (a plain .gesture loses
+            // priority to those and never fires). The pin re-anchors
+            // because Annotation reads model.selectedCoord on every
+            // body eval.
             MapReader { proxy in
                 Map(position: $camera) {
                     Annotation("", coordinate: model.selectedCoord) {
@@ -52,8 +55,13 @@ struct LocationPickerSheet: View {
                             .foregroundStyle(.red)
                     }
                 }
-                .gesture(
-                    DragGesture(minimumDistance: 0)
+                .onTapGesture(coordinateSpace: .local) { point in
+                    if let coord = proxy.convert(point, from: .local) {
+                        model.onPinDrag(to: coord)
+                    }
+                }
+                .simultaneousGesture(
+                    DragGesture(minimumDistance: 8)
                         .onEnded { value in
                             if let coord = proxy.convert(value.location, from: .local) {
                                 model.onPinDrag(to: coord)
