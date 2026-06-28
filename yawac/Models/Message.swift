@@ -14,6 +14,18 @@ struct ContactPayload: Hashable, Sendable {
     // TODO Task 14: switch to computed `var vcard: String { VCardBuilder.build(...) }`
     // once VCardBuilder lands; for now we accept a prebuilt vCard string.
     let vcard: String
+
+    /// Build from a raw vCard string + displayName. waid (if present)
+    /// becomes both the jid (`<waid>@s.whatsapp.net`) and the phone
+    /// (`+<waid>`); missing waid leaves both empty so the renderer
+    /// falls back to the name-only row.
+    static func fromVCard(_ vcard: String, displayName: String) -> ContactPayload {
+        let waid = VCardBuilder.parseWAID(vcard) ?? ""
+        let jid = waid.isEmpty ? "" : "\(waid)@s.whatsapp.net"
+        let phone = waid.isEmpty ? "" : "+\(waid)"
+        return ContactPayload(jid: jid, displayName: displayName,
+                              phone: phone, vcard: vcard)
+    }
 }
 
 struct UIMessage: Identifiable, Hashable, Sendable {
@@ -141,28 +153,15 @@ extension UIMessage {
             }
         case "contact":
             if let c = b.contact {
-                let waid = VCardBuilder.parseWAID(c.vcard) ?? ""
-                let jid = waid.isEmpty ? "" : "\(waid)@s.whatsapp.net"
-                let phone = waid.isEmpty ? "" : "+\(waid)"
-                self.body = .contact(ContactPayload(
-                    jid: jid,
-                    displayName: c.displayName,
-                    phone: phone,
-                    vcard: c.vcard))
+                self.body = .contact(ContactPayload.fromVCard(
+                    c.vcard, displayName: c.displayName))
             } else {
                 self.body = .system("(contact)")
             }
         case "contacts":
             if let arr = b.contactsArray {
-                let cards = arr.contacts.map { c -> ContactPayload in
-                    let waid = VCardBuilder.parseWAID(c.vcard) ?? ""
-                    let jid = waid.isEmpty ? "" : "\(waid)@s.whatsapp.net"
-                    let phone = waid.isEmpty ? "" : "+\(waid)"
-                    return ContactPayload(
-                        jid: jid,
-                        displayName: c.displayName,
-                        phone: phone,
-                        vcard: c.vcard)
+                let cards = arr.contacts.map {
+                    ContactPayload.fromVCard($0.vcard, displayName: $0.displayName)
                 }
                 self.body = .contacts(cards)
             } else {

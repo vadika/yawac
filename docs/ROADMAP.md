@@ -31,14 +31,17 @@ rare-use utilities) ships only when the important list is clear.
   Gaps:
     - ☐ Live-location SEND (CoreLocation continuous updates +
       LiveLocationMessage protocol). Receive-only today.
-    - ☐ Pin-drag re-geocode — model has `onPinDrag(to:)` wired but
-      the legacy `MapAnnotation` API doesn't expose drag; needs a
-      switch to the new `Map { Annotation { ... } }` shape.
+    - ✅ Pin-drag re-geocode — tap-to-move pin via the new
+      `MapReader { Map(position:) { Annotation } }` shape landed in
+      v0.10.35 as F103.
 - ◐ **Contact-card share (vCard)** — WhatsApp-formatted vCard with
   `waid` extension parameter, tappable "Message on WhatsApp"
   recipient action. Single-contact only. Shipped in v0.8.0.
   Gaps:
-    - ☐ Multi-contact share (`ContactsArrayMessage`).
+    - ✅ Multi-contact share (`ContactsArrayMessage`) — picker is
+      now a checkbox list; ≥2 selections fire one
+      `SendContactsArray` and render as a single multi-card bubble.
+      Landed in v0.10.35 as F104.
     - ☐ macOS Contacts.app source via `CNContactPickerViewController`
       (WA-contacts only today).
     - ☐ Inbound contacts missing the `waid` param (non-WA exports)
@@ -209,6 +212,41 @@ the important list is materially shorter.
 
 Kept here for context — flip back to open only if a regression
 surfaces.
+
+- ✅ **F103 + F104 — pin-drag re-geocode + multi-contact vCard** (v0.10.35) —
+  Two roadmap gaps closed without new protocol surface.
+  - **F103.** LocationPickerSheet swaps the legacy
+    `Map(coordinateRegion:annotationItems:)` for
+    `MapReader { Map(position:) { Annotation } }` and attaches
+    `.onTapGesture(coordinateSpace: .local)` + a
+    `.simultaneousGesture(DragGesture(minimumDistance: 8))` so a
+    click or drag-release anywhere on the map calls the
+    already-wired `model.onPinDrag(to:)`. A plain `.gesture(...)`
+    lost priority to Map's built-in pan/zoom recognizer and never
+    fired in smoke; `simultaneousGesture` runs alongside it. The
+    250ms-debounced reverse-geocode in the model updates
+    `resolvedName` / `resolvedAddress` on its own.
+  - **F104.** `Client.SendContactsArray` (whatsmeow
+    `ContactsArrayMessage` wrap) + inbound classifier arm in the Go
+    bridge. gomobile cannot bridge `[]string`, so the boundary
+    takes `vcardsJSON string` and unmarshals Go-side, mirroring
+    `createGroup`'s convention. New `UIMessage.Body.contacts([ContactPayload])`
+    case decodes from the new `contacts_array` JSON field.
+    `ContactPickerSheetModel` switches from single-`String?` to
+    `Set<String>` selection with `toggle(_:)` + `buildPayloads()`;
+    the sheet renders one toggle button per row with a SF Symbol
+    checkmark indicator; send label flips to "Send N contacts" at
+    N ≥ 2. `ConversationViewModel.sendPendingAttachments` branches
+    on `cards.count`: 1 keeps the existing single-contact path
+    (back-compat), ≥2 fires `WAClient.sendContacts` once and
+    appends one multi-card bubble. `PersistedMessage.contactsJSON`
+    (new optional column, lightweight migration) round-trips the
+    array across restarts; while wiring the hydration arm the
+    pre-existing single-`.contact` cold-start path was missing
+    too and got the same arm. `MessageRow` renders a "<N> contacts"
+    header plus one stacked row per card, each reusing the
+    single-contact helper so the per-row "Message on WhatsApp"
+    stays wired.
 
 - ✅ **F101 + F102 — composer image-paste + folder-rail drag-drop** (v0.10.34) —
   Two UI regressions: pasting any image into the chat composer was a

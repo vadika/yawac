@@ -359,17 +359,10 @@ class WAClient: PhoneValidating, LIDResolving {
         return try JSONDecoder().decode(BridgeSendResult.self, from: Data(json.utf8))
     }
 
-    /// Sends a multi-vCard ContactsArrayMessage (F104 — multi-contact
-    /// share). `vcards` is JSON-encoded then handed to the bridge as a
-    /// single string — gomobile cannot bridge `[]string` natively so the
-    /// Go side reads `vcardsJSON` and unmarshals (mirrors `createGroup`'s
-    /// `participantJIDsJSON` pattern).
-    ///
-    /// Build note: `go.sendContactsArray(...)` does not exist in the
-    /// XCFramework currently shipped on this branch; this wrapper goes
-    /// green after Task 7 rebuilds the bridge. The exact gomobile
-    /// parameter labels may differ from the best-guess shape below;
-    /// adjust to whatever the regenerated `Bridge.objc.h` declares.
+    /// Sends a multi-vCard ContactsArrayMessage. The vcards array is
+    /// JSON-encoded into a single string because gomobile cannot bridge
+    /// `[]string` natively — the Go side reads `vcardsJSON` and
+    /// unmarshals (mirrors `createGroup`'s `participantJIDsJSON`).
     nonisolated func sendContacts(chatJID: String,
                                   displayName: String,
                                   vcards: [String],

@@ -416,14 +416,8 @@ final class ConversationViewModel {
             // the receive path. Rebuild the ContactPayload directly from
             // the persisted vCard so the bubble survives a cold reopen.
             if let vcard = p.contactVCard {
-                let waid = VCardBuilder.parseWAID(vcard) ?? ""
-                let jid = waid.isEmpty ? "" : "\(waid)@s.whatsapp.net"
-                let phone = waid.isEmpty ? "" : "+\(waid)"
-                body = .contact(ContactPayload(
-                    jid: jid,
-                    displayName: p.contactDisplayName ?? "",
-                    phone: phone,
-                    vcard: vcard))
+                body = .contact(ContactPayload.fromVCard(
+                    vcard, displayName: p.contactDisplayName ?? ""))
             } else {
                 body = .system("(contact)")
             }
@@ -436,13 +430,8 @@ final class ConversationViewModel {
                let data = json.data(using: .utf8),
                let arr = try? JSONDecoder().decode([BridgeContactPayload].self,
                                                     from: data) {
-                let cards = arr.map { c -> ContactPayload in
-                    let waid = VCardBuilder.parseWAID(c.vcard) ?? ""
-                    let jid = waid.isEmpty ? "" : "\(waid)@s.whatsapp.net"
-                    let phone = waid.isEmpty ? "" : "+\(waid)"
-                    return ContactPayload(
-                        jid: jid, displayName: c.displayName,
-                        phone: phone, vcard: c.vcard)
+                let cards = arr.map {
+                    ContactPayload.fromVCard($0.vcard, displayName: $0.displayName)
                 }
                 body = .contacts(cards)
             } else {
