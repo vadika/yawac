@@ -213,6 +213,26 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **F108 — ponytail-audit renames + shrinks** (v0.10.39) —
+  Phase 2 of the audit. Zero behavior change, -90 LOC net across
+  21 files. Cuts: `SettingsPalette` deleted (3 unique keys folded
+  into `Theme` under a "Settings panels" section, 73 call sites
+  migrated to `Theme.*`); `JIDNormalize.key` deleted (10 sites
+  migrated to `JIDNormalize.canonical`); `Theme.icon` forwarder
+  deleted (call sites moved to `Theme.ui`); `MapSnapshotCache`'s
+  internal memory dict dropped (already cached by
+  `ThumbnailCache.mapCache` one layer up); `OrderedDict` (39-line
+  custom LRU) inlined into a fileprivate `PendingMap` at the
+  ConversationViewModel call site — only two ivars used it;
+  `WAClient.jsonArrayString` helper extracted, folding 11
+  duplicate JSON-encode call sites + the existing
+  `encodeMentionsJSON`; `BridgeMedia.init(from:)` custom decoder
+  replaced with a `var isPTT: Bool = false` defaulted field
+  (Swift 5.9+ honors stored-property defaults). Phase 3 (single-
+  impl protocols, `WAClient.bump()` counters,
+  `ContactPayload.vcard` field → computed, `WAClient.decode`
+  snake_case boilerplate) still open.
+
 - ✅ **F107 — ponytail-audit dead-code purge** (v0.10.38) —
   Phase 1 of a wider over-engineering pass. Zero behavior change,
   -575 LOC across 20 files. Cuts: `bridge/offline_drain.go`
