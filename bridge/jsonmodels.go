@@ -3,22 +3,23 @@ package bridge
 // All JSON payloads exchanged with Swift are defined here for review.
 
 type JMessage struct {
-	ID               string            `json:"id"`
-	ChatJID          string            `json:"chat_jid"`
-	SenderJID        string            `json:"sender_jid"`
-	SenderPushName   string            `json:"sender_push_name,omitempty"`
-	FromMe           bool              `json:"from_me"`
-	Timestamp        int64             `json:"timestamp"`
-	Kind             string            `json:"kind"` // text, image, video, audio, document, sticker, location, location_live, contact, poll, system
-	Text             string            `json:"text,omitempty"`
-	Media            *JMedia           `json:"media,omitempty"`
-	Poll             *JPoll            `json:"poll,omitempty"`
-	Location         *JLocationPayload `json:"location,omitempty"`
-	LocationSequence int64             `json:"location_sequence,omitempty"`
-	Contact          *JContactPayload  `json:"contact,omitempty"`
-	IsViewOnce       bool              `json:"is_view_once,omitempty"`
-	Quoted           *JQuoted          `json:"quoted,omitempty"`
-	IsForwarded      bool              `json:"is_forwarded,omitempty"`
+	ID               string                 `json:"id"`
+	ChatJID          string                 `json:"chat_jid"`
+	SenderJID        string                 `json:"sender_jid"`
+	SenderPushName   string                 `json:"sender_push_name,omitempty"`
+	FromMe           bool                   `json:"from_me"`
+	Timestamp        int64                  `json:"timestamp"`
+	Kind             string                 `json:"kind"` // text, image, video, audio, document, sticker, location, location_live, contact, poll, system
+	Text             string                 `json:"text,omitempty"`
+	Media            *JMedia                `json:"media,omitempty"`
+	Poll             *JPoll                 `json:"poll,omitempty"`
+	Location         *JLocationPayload      `json:"location,omitempty"`
+	LocationSequence int64                  `json:"location_sequence,omitempty"`
+	Contact          *JContactPayload       `json:"contact,omitempty"`
+	ContactsArray    *JContactsArrayPayload `json:"contacts_array,omitempty"`
+	IsViewOnce       bool                   `json:"is_view_once,omitempty"`
+	Quoted           *JQuoted               `json:"quoted,omitempty"`
+	IsForwarded      bool                   `json:"is_forwarded,omitempty"`
 }
 
 type JLocationPayload struct {
@@ -31,6 +32,11 @@ type JLocationPayload struct {
 type JContactPayload struct {
 	Vcard       string `json:"vcard"`
 	DisplayName string `json:"display_name"`
+}
+
+type JContactsArrayPayload struct {
+	DisplayName string            `json:"display_name"`
+	Contacts    []JContactPayload `json:"contacts"`
 }
 
 type JQuoted struct {

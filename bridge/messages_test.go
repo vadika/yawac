@@ -480,3 +480,50 @@ func TestForwardMediaSignatureCompiles(t *testing.T) {
 			return c.ForwardMedia
 		}
 }
+
+func TestSendContactsArrayUnpaired(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/sca.db")
+	defer c.Close()
+	vcards := []string{
+		"BEGIN:VCARD\nVERSION:3.0\nFN:Anna\nTEL;type=CELL;waid=11111:+11111\nEND:VCARD",
+		"BEGIN:VCARD\nVERSION:3.0\nFN:Bob\nTEL;type=CELL;waid=22222:+22222\nEND:VCARD",
+	}
+	_, err := c.SendContactsArray("1234@s.whatsapp.net", "Contacts", vcards, 0)
+	if err == nil {
+		t.Fatal("expected error on unpaired client")
+	}
+}
+
+func TestSendContactsArrayBadJID(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/sca2.db")
+	defer c.Close()
+	_, err := c.SendContactsArray("not a jid", "X", []string{"BEGIN:VCARD\nEND:VCARD"}, 0)
+	if err == nil {
+		t.Fatal("expected parse error")
+	}
+}
+
+func TestSendContactsArrayEmpty(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/sca3.db")
+	defer c.Close()
+	_, err := c.SendContactsArray("1234@s.whatsapp.net", "X", nil, 0)
+	if err == nil {
+		t.Fatal("expected error on empty vcards")
+	}
+}
+
+func TestClassifyInboundContactsArray(t *testing.T) {
+	m := &waE2E.Message{
+		ContactsArrayMessage: &waE2E.ContactsArrayMessage{
+			DisplayName: proto.String("Contacts"),
+			Contacts: []*waE2E.ContactMessage{
+				{DisplayName: proto.String("Anna"), Vcard: proto.String("BEGIN:VCARD\nFN:Anna\nEND:VCARD")},
+				{DisplayName: proto.String("Bob"), Vcard: proto.String("BEGIN:VCARD\nFN:Bob\nEND:VCARD")},
+			},
+		},
+	}
+	kind, _, _, _, _ := classifyMessage(m)
+	if kind != "contacts" {
+		t.Fatalf("kind=%s", kind)
+	}
+}

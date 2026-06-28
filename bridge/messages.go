@@ -565,6 +565,20 @@ func (c *Client) dispatchMessage(evt *events.Message) {
 	if p := extractPoll(inner); p != nil {
 		jm.Poll = p
 	}
+	if ca := inner.GetContactsArrayMessage(); ca != nil {
+		cards := ca.GetContacts()
+		payload := &JContactsArrayPayload{
+			DisplayName: ca.GetDisplayName(),
+			Contacts:    make([]JContactPayload, 0, len(cards)),
+		}
+		for _, card := range cards {
+			payload.Contacts = append(payload.Contacts, JContactPayload{
+				Vcard:       card.GetVcard(),
+				DisplayName: card.GetDisplayName(),
+			})
+		}
+		jm.ContactsArray = payload
+	}
 	b, _ := json.Marshal(jm)
 	c.dispatch("Message", string(b))
 }
@@ -633,6 +647,8 @@ func classifyMessage(m *waE2E.Message) (
 			Vcard:       cm.GetVcard(),
 			DisplayName: cm.GetDisplayName(),
 		}, isViewOnce
+	case m.GetContactsArrayMessage() != nil:
+		return "contacts", nil, 0, nil, isViewOnce
 	}
 	return classifyKindUnwrapped(m), nil, 0, nil, isViewOnce
 }
@@ -665,6 +681,8 @@ func classifyKindUnwrapped(m *waE2E.Message) string {
 		return "location_live"
 	case m.GetContactMessage() != nil:
 		return "contact"
+	case m.GetContactsArrayMessage() != nil:
+		return "contacts"
 	case m.GetReactionMessage() != nil:
 		return "reaction"
 	case isPollCreation(m):
@@ -1286,6 +1304,53 @@ func (c *Client) SendContact(
 		ContactMessage: &waE2E.ContactMessage{
 			DisplayName: proto.String(displayName),
 			Vcard:       proto.String(vcard),
+		},
+	}
+	msg := wrapForChat(inner, ephemeralSec, false)
+	resp, err := c.wa.SendMessage(context.Background(), jid, msg)
+	if err != nil {
+		return "", fmt.Errorf("send: %w", err)
+	}
+	out := JSendResult{MessageID: resp.ID, Timestamp: resp.Timestamp.Unix()}
+	b, _ := json.Marshal(out)
+	return string(b), nil
+}
+
+// SendContactsArray sends a ContactsArrayMessage (multiple vCards in
+// one bubble). displayName labels the array; each vcard is a full
+// VCARD 3.0 payload built Swift-side via VCardBuilder. When
+// ephemeralSec > 0, wraps in EphemeralMessage. Errors on an empty
+// vcards slice — sending zero contacts is never what the caller
+// wants and WhatsApp would reject it server-side anyway.
+func (c *Client) SendContactsArray(
+	chatJIDStr string,
+	displayName string,
+	vcards []string,
+	ephemeralSec int32,
+) (string, error) {
+	if c.wa == nil {
+		return "", errors.New("client closed")
+	}
+	if len(vcards) == 0 {
+		return "", errors.New("no vcards")
+	}
+	jid, err := types.ParseJID(chatJIDStr)
+	if err != nil {
+		return "", fmt.Errorf("parse jid: %w", err)
+	}
+	if jid.User == "" || jid.Server == "" {
+		return "", fmt.Errorf("parse jid: empty user or server")
+	}
+	cards := make([]*waE2E.ContactMessage, 0, len(vcards))
+	for _, v := range vcards {
+		cards = append(cards, &waE2E.ContactMessage{
+			Vcard: proto.String(v),
+		})
+	}
+	inner := &waE2E.Message{
+		ContactsArrayMessage: &waE2E.ContactsArrayMessage{
+			DisplayName: proto.String(displayName),
+			Contacts:    cards,
 		},
 	}
 	msg := wrapForChat(inner, ephemeralSec, false)
