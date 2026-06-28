@@ -38,19 +38,19 @@ struct BlockedPanel: View {
         HStack(spacing: 8) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 12))
-                .foregroundStyle(SettingsPalette.textFaint)
+                .foregroundStyle(Theme.textFaint)
             TextField("Search blocked", text: $query)
                 .textFieldStyle(.plain)
                 .font(.system(size: 13))
-                .foregroundStyle(SettingsPalette.text)
+                .foregroundStyle(Theme.text)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
-        .background(SettingsPalette.surface,
+        .background(Theme.surface,
                     in: RoundedRectangle(cornerRadius: 7))
         .overlay(
             RoundedRectangle(cornerRadius: 7)
-                .stroke(SettingsPalette.border, lineWidth: 1)
+                .stroke(Theme.border, lineWidth: 1)
         )
     }
 
@@ -64,7 +64,7 @@ struct BlockedPanel: View {
                          ? "No blocked contacts."
                          : "No matches.")
                         .font(.system(size: 12.5))
-                        .foregroundStyle(SettingsPalette.textMuted)
+                        .foregroundStyle(Theme.textMuted)
                     Spacer()
                 }
                 .padding(.horizontal, 16)
@@ -261,11 +261,11 @@ private struct BlockedRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(entry.display)
                     .font(.system(size: 13.5))
-                    .foregroundStyle(SettingsPalette.text)
+                    .foregroundStyle(Theme.text)
                     .lineLimit(1)
                 Text(entry.secondary)
                     .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(SettingsPalette.textFaint)
+                    .foregroundStyle(Theme.textFaint)
                     .lineLimit(1)
             }
             Spacer(minLength: 8)
@@ -282,10 +282,10 @@ private struct BlockedRow: View {
             initialAvatar
         } else {
             ZStack {
-                Circle().fill(SettingsPalette.surfaceAlt)
+                Circle().fill(Theme.surfaceAlt)
                 Image(systemName: "number")
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(SettingsPalette.textFaint)
+                    .foregroundStyle(Theme.textFaint)
             }
             .frame(width: 34, height: 34)
         }
@@ -294,7 +294,7 @@ private struct BlockedRow: View {
     private var initialAvatar: some View {
         ZStack {
             LinearGradient(
-                colors: [SettingsPalette.accent, SettingsPalette.accentText],
+                colors: [Theme.accent, Theme.accentText],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )

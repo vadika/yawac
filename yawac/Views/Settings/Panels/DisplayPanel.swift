@@ -17,7 +17,7 @@ import SwiftUI
 /// so the UI looks right once a second theme lands.
 ///
 /// **Accent** is purely cosmetic in v0.9.13 — the stored color isn't
-/// read by Theme/SettingsPalette yet. The swatch ring + binding is
+/// read by Theme yet. The swatch ring + binding is
 /// here so the design exists end-to-end and the wiring can land in a
 /// follow-up patch without re-shipping the Settings shell.
 struct DisplayPanel: View {
@@ -97,11 +97,11 @@ struct DisplayPanel: View {
         return HStack(spacing: 14) {
             Text("Aa")
                 .font(.system(size: 18))
-                .foregroundStyle(SettingsPalette.textFaint)
+                .foregroundStyle(Theme.textFaint)
                 .frame(width: 26, alignment: .leading)
             Text("The quick brown fox")
                 .font(.system(size: current.previewSize))
-                .foregroundStyle(SettingsPalette.text)
+                .foregroundStyle(Theme.text)
             Spacer()
         }
         .padding(.horizontal, 16)

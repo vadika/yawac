@@ -699,7 +699,7 @@ struct ChatInfoView: View {
                     NSLog("[yawac/uploadAvatar] ok pictureID=%@", pictureID)
                 }
                 await AvatarCache.shared.invalidate(
-                    jid: JIDNormalize.key(chatJID, client: client))
+                    jid: JIDNormalize.canonical(chatJID, client: client))
             } catch {
                 NSLog("[yawac/uploadAvatar] failed: %@",
                       String(describing: error))
@@ -725,7 +725,7 @@ struct ChatInfoView: View {
                     }.value
                 }
                 await AvatarCache.shared.invalidate(
-                    jid: JIDNormalize.key(chatJID, client: client))
+                    jid: JIDNormalize.canonical(chatJID, client: client))
             } catch {
                 avatarError = error.localizedDescription
                 scheduleAvatarErrorAutodismiss()
@@ -2011,7 +2011,7 @@ struct ChatInfoView: View {
         // PN-form entry of any pair since PN sends correctly in most groups.
         var byKey: [String: BridgeContact] = [:]
         for (jid, name) in session.contactNames {
-            let key = JIDNormalize.key(jid, client: client)
+            let key = JIDNormalize.canonical(jid, client: client)
             if existing.contains(key) { continue }
             if let existingEntry = byKey[key] {
                 if existingEntry.jid.hasSuffix("@lid"),
@@ -2128,10 +2128,10 @@ struct ChatInfoView: View {
     /// both are known, and drop self.
     private var contactsForPicker: [BridgeContact] {
         guard let client = session.client else { return [] }
-        let selfKey = JIDNormalize.key(client.ownJID, client: client)
+        let selfKey = JIDNormalize.canonical(client.ownJID, client: client)
         var byKey: [String: BridgeContact] = [:]
         for (jid, name) in session.contactNames {
-            let key = JIDNormalize.key(jid, client: client)
+            let key = JIDNormalize.canonical(jid, client: client)
             if key == selfKey { continue }
             if let existing = byKey[key] {
                 if existing.jid.hasSuffix("@lid"), !key.hasSuffix("@lid") {

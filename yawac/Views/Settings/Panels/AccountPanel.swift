@@ -65,17 +65,17 @@ struct AccountPanel: View {
                     .environment(session)
             } else {
                 Circle()
-                    .fill(SettingsPalette.surfaceAlt)
+                    .fill(Theme.surfaceAlt)
                     .frame(width: 64, height: 64)
             }
             VStack(alignment: .leading, spacing: 4) {
                 Text(pushName.isEmpty ? "Yawac account" : pushName)
                     .font(.system(size: 19, weight: .semibold))
-                    .foregroundStyle(SettingsPalette.text)
+                    .foregroundStyle(Theme.text)
                     .lineLimit(1)
                 Text(formattedPhone(for: ownJID))
                     .font(.system(size: 12, design: .monospaced))
-                    .foregroundStyle(SettingsPalette.textMuted)
+                    .foregroundStyle(Theme.textMuted)
                     .lineLimit(1)
                     .fixedSize(horizontal: true, vertical: false)
             }
@@ -203,7 +203,7 @@ struct AccountPanel: View {
             SettingsCard {
                 SettingsRow(
                     icon: "trash",
-                    iconTint: SettingsPalette.danger,
+                    iconTint: Theme.danger,
                     label: "Delete account",
                     sublabel: "Phone-only — see info",
                     showChevron: true,

@@ -7,6 +7,38 @@ import UniformTypeIdentifiers
 private let perfLog = Logger(subsystem: "dev.vadikas.yawac.yawac",
                              category: "perf")
 
+/// Tiny insertion-ordered dictionary with an LRU-by-insertion cap.
+/// Setting a new key appends; setting an existing key keeps its slot.
+/// Used by `ConversationViewModel` to stash out-of-order edits / revokes
+/// for messages we haven't loaded yet. Folded in from `OrderedDict` in
+/// F108 — only two callers, both in CVM.
+fileprivate struct PendingMap<Value> {
+    private var map: [String: Value] = [:]
+    private var order: [String] = []
+    let cap: Int
+    init(cap: Int) { self.cap = cap }
+    var count: Int { map.count }
+    subscript(key: String) -> Value? {
+        get { map[key] }
+        set {
+            if let v = newValue {
+                if map[key] == nil { order.append(key) }
+                map[key] = v
+                if order.count > cap {
+                    map.removeValue(forKey: order.removeFirst())
+                }
+            } else {
+                map.removeValue(forKey: key)
+                if let idx = order.firstIndex(of: key) { order.remove(at: idx) }
+            }
+        }
+    }
+    mutating func removeValue(forKey k: String) {
+        if let idx = order.firstIndex(of: k) { order.remove(at: idx) }
+        map.removeValue(forKey: k)
+    }
+}
+
 /// A file the user picked but hasn't sent yet — staged in the composer so a
 /// caption can be added and the set edited before sending.
 struct PendingAttachment: Identifiable, Equatable {
@@ -2692,8 +2724,8 @@ final class ConversationViewModel {
         chatList?.refreshPreview(chatJID: chatJID)
     }
 
-    private var pendingEdits:   OrderedDict<String, (text: String, ts: Date)> = .init(cap: 256)
-    private var pendingRevokes: OrderedDict<String, (by: String, ts: Date)>   = .init(cap: 256)
+    private var pendingEdits:   PendingMap<(text: String, ts: Date)> = .init(cap: 256)
+    private var pendingRevokes: PendingMap<(by: String, ts: Date)>   = .init(cap: 256)
 
     var pendingEditsCount: Int { pendingEdits.count }
     var pendingRevokesCount: Int { pendingRevokes.count }

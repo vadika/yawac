@@ -3,7 +3,7 @@ import SwiftUI
 // MARK: - SettingsCard
 //
 // Inset-grouped container in the System Settings style. A `VStack` of
-// `SettingsRow`s (or arbitrary children) sitting on `SettingsPalette.surface`
+// `SettingsRow`s (or arbitrary children) sitting on `Theme.surface`
 // with a 1pt border, 12pt corner radius, and a 1pt `hairline` divider between
 // children inset 16pt on the left only (matches macOS Settings, where the
 // leading 16pt aligns the divider with the row label rather than the icon).
@@ -29,17 +29,17 @@ private struct SettingsCardLayout: _VariadicView_UnaryViewRoot {
             ForEach(Array(children.enumerated()), id: \.element.id) { idx, child in
                 if idx > 0 {
                     Rectangle()
-                        .fill(SettingsPalette.hairline)
+                        .fill(Theme.hairline)
                         .frame(height: 1)
                         .padding(.leading, 16)
                 }
                 child
             }
         }
-        .background(SettingsPalette.surface)
+        .background(Theme.surface)
         .overlay(
             RoundedRectangle(cornerRadius: 12)
-                .stroke(SettingsPalette.border, lineWidth: 1)
+                .stroke(Theme.border, lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: 12))
     }
@@ -62,7 +62,7 @@ struct SettingsRow<Trailing: View>: View {
     @ViewBuilder var trailing: Trailing
 
     init(icon: String? = nil,
-         iconTint: Color = SettingsPalette.textMuted,
+         iconTint: Color = Theme.textMuted,
          label: String,
          sublabel: String? = nil,
          showChevron: Bool = false,
@@ -82,7 +82,7 @@ struct SettingsRow<Trailing: View>: View {
             if let icon {
                 ZStack {
                     RoundedRectangle(cornerRadius: 7)
-                        .fill(SettingsPalette.surfaceAlt)
+                        .fill(Theme.surfaceAlt)
                     Image(systemName: icon)
                         .font(.system(size: 13))
                         .foregroundStyle(iconTint)
@@ -92,11 +92,11 @@ struct SettingsRow<Trailing: View>: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(label)
                     .font(.system(size: 13.5))
-                    .foregroundStyle(SettingsPalette.text)
+                    .foregroundStyle(Theme.text)
                 if let sublabel {
                     Text(sublabel)
                         .font(.system(size: 11.5))
-                        .foregroundStyle(SettingsPalette.textFaint)
+                        .foregroundStyle(Theme.textFaint)
                         .lineLimit(1)
                 }
             }
@@ -105,7 +105,7 @@ struct SettingsRow<Trailing: View>: View {
             if showChevron {
                 Image(systemName: "chevron.right")
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(SettingsPalette.textFaint)
+                    .foregroundStyle(Theme.textFaint)
             }
         }
         .padding(.horizontal, 16)
@@ -128,7 +128,7 @@ extension SettingsRow where Trailing == EmptyView {
     /// call site doesn't trigger Swift's deprecated backward-trailing-closure
     /// match against the optional `onTap` parameter.
     init(icon: String? = nil,
-         iconTint: Color = SettingsPalette.textMuted,
+         iconTint: Color = Theme.textMuted,
          label: String,
          sublabel: String? = nil,
          showChevron: Bool = false,
@@ -161,14 +161,14 @@ struct SettingsSectionLabel: View {
             Text(text.uppercased())
                 .font(.system(size: 10.5, design: .monospaced))
                 .tracking(1.4)
-                .foregroundStyle(SettingsPalette.textFaint)
+                .foregroundStyle(Theme.textFaint)
                 .lineLimit(1)
             Spacer(minLength: 0)
             if let trailing {
                 Text(trailing.uppercased())
                     .font(.system(size: 10.5, design: .monospaced))
                     .tracking(1.4)
-                    .foregroundStyle(SettingsPalette.textFaint)
+                    .foregroundStyle(Theme.textFaint)
                     .lineLimit(1)
                     .fixedSize(horizontal: true, vertical: false)
             }
@@ -212,15 +212,15 @@ struct SettingsPillButton: View {
 
     private var bg: Color {
         switch style {
-        case .neutral: return SettingsPalette.surfaceAlt
-        case .danger:  return SettingsPalette.danger.opacity(0.10)
-        case .primary: return SettingsPalette.accent
+        case .neutral: return Theme.surfaceAlt
+        case .danger:  return Theme.danger.opacity(0.10)
+        case .primary: return Theme.accent
         }
     }
     private var textColor: Color {
         switch style {
-        case .neutral: return SettingsPalette.text
-        case .danger:  return SettingsPalette.danger
+        case .neutral: return Theme.text
+        case .danger:  return Theme.danger
         case .primary: return .white
         }
     }
@@ -247,15 +247,15 @@ struct SettingsSelect<T: Hashable>: View {
             HStack(spacing: 6) {
                 Text(currentLabel)
                     .font(.system(size: 12.5))
-                    .foregroundStyle(SettingsPalette.text)
+                    .foregroundStyle(Theme.text)
                     .lineLimit(1)
                 Image(systemName: "chevron.up.chevron.down")
                     .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(SettingsPalette.textMuted)
+                    .foregroundStyle(Theme.textMuted)
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
-            .background(SettingsPalette.surfaceAlt,
+            .background(Theme.surfaceAlt,
                         in: RoundedRectangle(cornerRadius: 7))
         }
         .menuStyle(.borderlessButton)
@@ -289,18 +289,18 @@ struct SettingsSegmented<T: Hashable & Identifiable>: View {
                 } label: {
                     Text(label(opt))
                         .font(.system(size: 12, weight: active ? .semibold : .regular))
-                        .foregroundStyle(active ? Color.white : SettingsPalette.textMuted)
+                        .foregroundStyle(active ? Color.white : Theme.textMuted)
                         .frame(minWidth: 36)
                         .padding(.vertical, 5)
                         .padding(.horizontal, 8)
-                        .background(active ? SettingsPalette.accent : Color.clear,
+                        .background(active ? Theme.accent : Color.clear,
                                     in: RoundedRectangle(cornerRadius: 6))
                 }
                 .buttonStyle(.plain)
             }
         }
         .padding(3)
-        .background(SettingsPalette.surfaceAlt,
+        .background(Theme.surfaceAlt,
                     in: RoundedRectangle(cornerRadius: 8))
     }
 }
@@ -317,7 +317,7 @@ struct SettingsSwitch: View {
         Toggle("", isOn: $isOn)
             .toggleStyle(.switch)
             .labelsHidden()
-            .tint(SettingsPalette.accent)
+            .tint(Theme.accent)
             .controlSize(.small)
     }
 }

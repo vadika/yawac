@@ -770,10 +770,10 @@ struct ChatListView: View {
     /// over `@lid` when both are known, and drop self.
     private var contactsForPicker: [BridgeContact] {
         guard let client = vm.clientRef else { return [] }
-        let selfKey = JIDNormalize.key(client.ownJID, client: client)
+        let selfKey = JIDNormalize.canonical(client.ownJID, client: client)
         var byKey: [String: BridgeContact] = [:]
         for (jid, name) in session.contactNames {
-            let key = JIDNormalize.key(jid, client: client)
+            let key = JIDNormalize.canonical(jid, client: client)
             if key == selfKey { continue }
             if let existing = byKey[key] {
                 if existing.jid.hasSuffix("@lid"), !key.hasSuffix("@lid") {

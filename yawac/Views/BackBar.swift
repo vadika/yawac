@@ -32,9 +32,9 @@ struct BackBar: View {
         .padding(.trailing, 14)
         .frame(height: 34)
         .frame(maxWidth: .infinity)
-        .background(SettingsPalette.sidebarBg)
+        .background(Theme.sidebarBg)
         .overlay(alignment: .bottom) {
-            Rectangle().fill(SettingsPalette.border).frame(height: 1)
+            Rectangle().fill(Theme.border).frame(height: 1)
         }
     }
 
@@ -51,11 +51,11 @@ struct BackBar: View {
                     .truncationMode(.tail)
             }
             .font(.system(size: 12.5, weight: .medium))
-            .foregroundStyle(SettingsPalette.accentText)
+            .foregroundStyle(Theme.accentText)
             .padding(.leading, 4)
             .padding(.trailing, 8)
             .padding(.vertical, 4)
-            .background(hovered ? SettingsPalette.accentSoft : .clear,
+            .background(hovered ? Theme.accentSoft : .clear,
                         in: RoundedRectangle(cornerRadius: 7))
             .contentShape(RoundedRectangle(cornerRadius: 7))
         }
@@ -67,24 +67,24 @@ struct BackBar: View {
     private var depthChip: some View {
         Text("\(depth) deep")
             .font(.system(size: 10, weight: .semibold, design: .monospaced))
-            .foregroundStyle(SettingsPalette.textFaint)
+            .foregroundStyle(Theme.textFaint)
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
             .overlay(
                 RoundedRectangle(cornerRadius: 4)
-                    .stroke(SettingsPalette.border, lineWidth: 1)
+                    .stroke(Theme.border, lineWidth: 1)
             )
     }
 
     private var shortcutHint: some View {
         Text("⌘[")
             .font(.system(size: 10.5, design: .monospaced))
-            .foregroundStyle(SettingsPalette.textFaint)
+            .foregroundStyle(Theme.textFaint)
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
             .overlay(
                 RoundedRectangle(cornerRadius: 4)
-                    .stroke(SettingsPalette.border, lineWidth: 1)
+                    .stroke(Theme.border, lineWidth: 1)
             )
     }
 }

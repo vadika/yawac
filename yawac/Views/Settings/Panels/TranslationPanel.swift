@@ -66,7 +66,7 @@ struct TranslationPanel: View {
                     HStack {
                         Text("No languages excluded.")
                             .font(.system(size: 12.5))
-                            .foregroundStyle(SettingsPalette.textMuted)
+                            .foregroundStyle(Theme.textMuted)
                         Spacer()
                     }
                     .padding(.horizontal, 16)
@@ -98,11 +98,11 @@ struct TranslationPanel: View {
             HStack(spacing: 12) {
                 Text("Add language")
                     .font(.system(size: 13.5))
-                    .foregroundStyle(SettingsPalette.text)
+                    .foregroundStyle(Theme.text)
                 Spacer()
                 Image(systemName: "chevron.down")
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(SettingsPalette.textFaint)
+                    .foregroundStyle(Theme.textFaint)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
@@ -136,10 +136,10 @@ struct TranslationPanel: View {
         HStack(alignment: .top, spacing: 14) {
             ZStack {
                 RoundedRectangle(cornerRadius: 9)
-                    .fill(SettingsPalette.accentSoft)
+                    .fill(Theme.accentSoft)
                 Image(systemName: "arrow.triangle.2.circlepath")
                     .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(SettingsPalette.accentText)
+                    .foregroundStyle(Theme.accentText)
             }
             .frame(width: 34, height: 34)
 
@@ -147,12 +147,12 @@ struct TranslationPanel: View {
                 HStack(spacing: 8) {
                     Text("Qwen2.5-3B-Instruct")
                         .font(.system(size: 13.5, weight: .semibold))
-                        .foregroundStyle(SettingsPalette.text)
+                        .foregroundStyle(Theme.text)
                     installedBadge
                 }
                 Text("4-bit · on-device · 1.9 GB")
                     .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(SettingsPalette.textFaint)
+                    .foregroundStyle(Theme.textFaint)
                 modelStateBody
             }
             Spacer(minLength: 0)
@@ -167,9 +167,9 @@ struct TranslationPanel: View {
             Text("INSTALLED")
                 .font(.system(size: 10, design: .monospaced))
                 .tracking(1.0)
-                .foregroundStyle(SettingsPalette.installed)
+                .foregroundStyle(Theme.installed)
                 .padding(.horizontal, 6).padding(.vertical, 2)
-                .background(SettingsPalette.installedSoft,
+                .background(Theme.installedSoft,
                             in: RoundedRectangle(cornerRadius: 4))
                 .lineLimit(1)
                 .fixedSize()
@@ -190,10 +190,10 @@ struct TranslationPanel: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Downloading model… \(Int(p * 100))%")
                     .font(.system(size: 11.5))
-                    .foregroundStyle(SettingsPalette.textMuted)
+                    .foregroundStyle(Theme.textMuted)
                 ProgressView(value: p)
                     .progressViewStyle(.linear)
-                    .tint(SettingsPalette.accent)
+                    .tint(Theme.accent)
                     .frame(maxWidth: 280)
             }
             .padding(.top, 6)
@@ -214,7 +214,7 @@ struct TranslationPanel: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Error: \(msg)")
                     .font(.system(size: 11.5))
-                    .foregroundStyle(SettingsPalette.danger)
+                    .foregroundStyle(Theme.danger)
                 SettingsPillButton("Retry", style: .neutral) {
                     Task { await translation.model.download() }
                 }

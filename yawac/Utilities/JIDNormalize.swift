@@ -94,14 +94,6 @@ enum JIDNormalize {
         return false
     }
 
-    /// Stable key suitable for dictionaries, set elements, and cache
-    /// filenames. Same person → same key whenever the LID map has the
-    /// mapping; falls back to the bare JID otherwise. Documented alias
-    /// for `canonical` so call sites read intent ("I'm keying by this").
-    static func key(_ jid: String, client: LIDResolving?) -> String {
-        canonical(jid, client: client)
-    }
-
     /// All known string forms of `jid` (bare, canonical, reverse-resolved
     /// variant). Use for membership tests against an externally-keyed set
     /// you can't rebuild with `key` (e.g. an existing group's participant

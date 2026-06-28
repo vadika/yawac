@@ -45,6 +45,11 @@ enum Theme {
     static let titlebarText  = Color(hex: 0x9aa1ad)
     static let onlineDot     = Color(hex: 0x22c55e)
 
+    // ─── Settings panels (F108: folded in from SettingsPalette) ──────
+    static let danger        = Color(hex: 0xe87167)
+    static let installed     = Color(hex: 0x34d4b7)
+    static let installedSoft = Color(hex: 0x34d4b7).opacity(0.14)
+
     // ─── Role badges ─────────────────────────────────────────────────
     static let superRole     = Color(hex: 0xa78bfa)
     static let adminRole     = accent
@@ -78,11 +83,6 @@ enum Theme {
         Font.custom(FontFamily.mono, size: size).weight(weight)
     }
 
-    /// Font for SF Symbols / glyphs (point size only matters for symbols, so
-    /// it reuses the ui() font). Interface scaling is applied via `.scaledIcon`.
-    static func icon(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
-        ui(size, weight: weight)
-    }
 }
 
 // MARK: - Color hex helper

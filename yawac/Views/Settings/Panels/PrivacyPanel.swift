@@ -63,7 +63,7 @@ struct PrivacyPanel: View {
             }
             Text("Changes sync to your phone and other linked devices.")
                 .font(.system(size: 11.5))
-                .foregroundStyle(SettingsPalette.textFaint)
+                .foregroundStyle(Theme.textFaint)
                 .padding(.horizontal, 4)
                 .padding(.top, 4)
             errorList
@@ -77,7 +77,7 @@ struct PrivacyPanel: View {
             ProgressView().controlSize(.small)
             Text("Loading…")
                 .font(.system(size: 12.5))
-                .foregroundStyle(SettingsPalette.textMuted)
+                .foregroundStyle(Theme.textMuted)
             Spacer()
         }
         .padding(.horizontal, 16)
@@ -89,7 +89,7 @@ struct PrivacyPanel: View {
         VStack(alignment: .leading, spacing: 8) {
             Text(err)
                 .font(.system(size: 12.5))
-                .foregroundStyle(SettingsPalette.danger)
+                .foregroundStyle(Theme.danger)
             SettingsPillButton("Retry", style: .neutral) {
                 Task { await reload() }
             }
@@ -105,7 +105,7 @@ struct PrivacyPanel: View {
                 ForEach(rowError.sorted(by: { $0.key < $1.key }), id: \.key) { entry in
                     Text("\(entry.key): \(entry.value)")
                         .font(.system(size: 11))
-                        .foregroundStyle(SettingsPalette.danger)
+                        .foregroundStyle(Theme.danger)
                 }
             }
             .padding(.horizontal, 4)

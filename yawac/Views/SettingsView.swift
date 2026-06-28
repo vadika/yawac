@@ -23,7 +23,7 @@ import SwiftUI
 ///   would require a `WindowGroup` modifier the app doesn't expose
 ///   here) — the standard macOS title bar sits above both columns.
 ///   This is the one spec deviation worth flagging.
-/// - `SettingsPalette.bg` is set on the outermost background so the
+/// - `Theme.bg` is set on the outermost background so the
 ///   gap between the two columns (the rare layouts where it shows)
 ///   matches the rest of the window instead of system gray.
 struct SettingsView: View {
@@ -71,7 +71,7 @@ struct SettingsView: View {
         } detail: {
             contentColumn
         }
-        .background(SettingsPalette.bg)
+        .background(Theme.bg)
         .frame(minWidth: 880, minHeight: 600)
         .onAppear {
             translation.model.refreshState()
@@ -85,7 +85,7 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Settings")
                 .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(SettingsPalette.text)
+                .foregroundStyle(Theme.text)
                 .padding(.horizontal, 14)
                 .padding(.top, 18)
             VStack(spacing: 2) {
@@ -97,7 +97,7 @@ struct SettingsView: View {
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(SettingsPalette.sidebarBg)
+        .background(Theme.sidebarBg)
     }
 
     @ViewBuilder
@@ -109,18 +109,18 @@ struct SettingsView: View {
             HStack(spacing: 9) {
                 Image(systemName: cat.icon)
                     .font(.system(size: 15))
-                    .foregroundStyle(active ? SettingsPalette.accent
-                                            : SettingsPalette.textMuted)
+                    .foregroundStyle(active ? Theme.accent
+                                            : Theme.textMuted)
                     .frame(width: 18)
                 Text(cat.label)
                     .font(.system(size: 13.5))
-                    .foregroundStyle(active ? SettingsPalette.accentText
-                                            : SettingsPalette.text)
+                    .foregroundStyle(active ? Theme.accentText
+                                            : Theme.text)
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 9)
             .padding(.vertical, 7)
-            .background(active ? SettingsPalette.accentSoft : .clear,
+            .background(active ? Theme.accentSoft : .clear,
                         in: RoundedRectangle(cornerRadius: 7))
             .contentShape(Rectangle())
         }
@@ -134,16 +134,16 @@ struct SettingsView: View {
             HStack {
                 Text(selection.label)
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(SettingsPalette.text)
+                    .foregroundStyle(Theme.text)
                 Spacer()
             }
             .padding(.horizontal, 28)
             .padding(.vertical, 12)
             .frame(height: 44)
-            .background(SettingsPalette.bg)
+            .background(Theme.bg)
             .overlay(alignment: .bottom) {
                 Rectangle()
-                    .fill(SettingsPalette.hairline)
+                    .fill(Theme.hairline)
                     .frame(height: 1)
             }
 
@@ -157,7 +157,7 @@ struct SettingsView: View {
                 .frame(maxWidth: .infinity)
             }
         }
-        .background(SettingsPalette.bg)
+        .background(Theme.bg)
     }
 
     @ViewBuilder

@@ -240,7 +240,16 @@ class WAClient: PhoneValidating, LIDResolving {
         guard !mentionedJIDs.isEmpty else { return "" }
         // JSONEncoder on [String] cannot fail in practice; on the off-chance,
         // fall through to empty so the bridge takes the no-mentions branch.
-        return (try? String(data: JSONEncoder().encode(mentionedJIDs), encoding: .utf8)) ?? ""
+        return Self.jsonArrayString(mentionedJIDs, empty: "")
+    }
+
+    /// JSON-encode `value` to a string for the Go bridge. gomobile cannot
+    /// pass `[]string` natively, so every array-typed param goes over the
+    /// wire as a JSON string. Encoding `[String]` / `[Codable]` cannot fail
+    /// in practice; `empty` is returned on the off-chance.
+    nonisolated private static func jsonArrayString<T: Encodable>(_ value: T, empty: String = "[]") -> String {
+        (try? JSONEncoder().encode(value))
+            .flatMap { String(data: $0, encoding: .utf8) } ?? empty
     }
 
     // Nonisolated to match sendTextReply — the CGo round-trip blocks
@@ -368,8 +377,7 @@ class WAClient: PhoneValidating, LIDResolving {
                                   vcards: [String],
                                   ephemeralSeconds: Int32 = 0) throws -> BridgeSendResult {
         bump("sendContacts")
-        let encoded = try JSONEncoder().encode(vcards)
-        let vcardsJSON = String(data: encoded, encoding: .utf8) ?? "[]"
+        let vcardsJSON = Self.jsonArrayString(vcards)
         var err: NSError?
         let json = go.sendContactsArray(chatJID,
                                         displayName: displayName,
@@ -596,8 +604,7 @@ class WAClient: PhoneValidating, LIDResolving {
     /// at startup since events.Pin isn't re-emitted on reconnect.
     func listPinnedChats(jids: [String]) throws -> [String] {
         bump("listPinnedChats")
-        let jidsJSON = (try? JSONEncoder().encode(jids))
-            .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+        let jidsJSON = Self.jsonArrayString(jids)
         var err: NSError?
         let json = go.listPinnedChats(jidsJSON, error: &err)
         if let err { throw err }
@@ -611,8 +618,7 @@ class WAClient: PhoneValidating, LIDResolving {
     /// reconnect.
     func listMutedChats(jids: [String]) throws -> [(jid: String, mutedUntilMs: Int64)] {
         bump("listMutedChats")
-        let jidsJSON = (try? JSONEncoder().encode(jids))
-            .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+        let jidsJSON = Self.jsonArrayString(jids)
         var err: NSError?
         let json = go.listMutedChats(jidsJSON, error: &err)
         if let err { throw err }
@@ -634,8 +640,7 @@ class WAClient: PhoneValidating, LIDResolving {
                           selectableCount: Int,
                           ephemeralSeconds: Int32 = 0) throws -> BridgeSendPollResult {
         bump("sendPollCreation")
-        let optsJSON = (try? JSONEncoder().encode(options))
-            .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+        let optsJSON = Self.jsonArrayString(options)
         var err: NSError?
         let json = go.sendPollCreation(
             chatJID,
@@ -657,10 +662,8 @@ class WAClient: PhoneValidating, LIDResolving {
                                   pollOptions: [BridgePollOption],
                                   ephemeralSeconds: Int32 = 0) throws -> BridgeSendResult {
         bump("sendPollVote")
-        let hashesJSON = (try? JSONEncoder().encode(optionHashes))
-            .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
-        let optionsJSON = (try? JSONEncoder().encode(pollOptions))
-            .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+        let hashesJSON = Self.jsonArrayString(optionHashes)
+        let optionsJSON = Self.jsonArrayString(pollOptions)
         var err: NSError?
         let json = go.sendPollVote(
             chatJID,
@@ -754,8 +757,7 @@ class WAClient: PhoneValidating, LIDResolving {
     nonisolated func markRead(chatJID: String, senderJID: String, messageIDs: [String]) throws {
         guard !messageIDs.isEmpty else { return }
         bump("markRead")
-        let idsJSON = (try? JSONEncoder().encode(messageIDs))
-            .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+        let idsJSON = Self.jsonArrayString(messageIDs)
         try go.markRead(chatJID, senderJID: senderJID, msgIDsJSON: idsJSON)
     }
 
@@ -840,8 +842,7 @@ class WAClient: PhoneValidating, LIDResolving {
     /// must not block the main actor.
     nonisolated func createGroup(name: String, participantJIDs: [String]) throws -> String {
         bump("createGroup")
-        let jids = try JSONEncoder().encode(participantJIDs)
-        let jidsString = String(data: jids, encoding: .utf8) ?? "[]"
+        let jidsString = Self.jsonArrayString(participantJIDs)
         var err: NSError?
         let out = go.createGroup(name, participantJIDs: jidsString, error: &err)
         if let err { throw err }
@@ -874,8 +875,7 @@ class WAClient: PhoneValidating, LIDResolving {
                                     name: String,
                                     participantJIDs: [String]) throws -> String {
         bump("createSubGroup")
-        let jids = try JSONEncoder().encode(participantJIDs)
-        let jidsString = String(data: jids, encoding: .utf8) ?? "[]"
+        let jidsString = Self.jsonArrayString(participantJIDs)
         var err: NSError?
         let out = go.createSubGroup(parentJID,
                                     name: name,
@@ -925,8 +925,7 @@ class WAClient: PhoneValidating, LIDResolving {
                                              action: String,
                                              jids: [String]) throws -> [BridgeJoinRequestResult] {
         bump("updateGroupJoinRequests")
-        let encoded = try JSONEncoder().encode(jids)
-        let jidsString = String(data: encoded, encoding: .utf8) ?? "[]"
+        let jidsString = Self.jsonArrayString(jids)
         var err: NSError?
         let json = go.updateGroupJoinRequests(chatJID,
                                               action: action,
@@ -1067,8 +1066,7 @@ class WAClient: PhoneValidating, LIDResolving {
                                  participantJIDs: [String])
         throws -> [BridgeParticipantModel] {
         bump("updateGroupParticipants")
-        let jids = try JSONEncoder().encode(participantJIDs)
-        let jidsString = String(data: jids, encoding: .utf8) ?? "[]"
+        let jidsString = Self.jsonArrayString(participantJIDs)
         var err: NSError?
         let json = go.updateGroupParticipants(chatJID,
                                               action: action,

@@ -57,7 +57,7 @@ actor AvatarCache {
     /// it, every on-screen avatar holding a stale URL would fall back to
     /// the initials placeholder (file deleted, NSImage(contentsOf:) nil).
     ///
-    /// **Caller contract**: pass the canonical key (`JIDNormalize.key(jid,
+    /// **Caller contract**: pass the canonical key (`JIDNormalize.canonical(jid,
     /// client:)`). On-screen `AvatarView`s file their bytes under the
     /// canonical key; invalidating the raw `@lid` form when the canonical
     /// stored form is `@s.whatsapp.net` would leave the file in place.

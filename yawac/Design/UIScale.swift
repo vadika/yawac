@@ -81,7 +81,7 @@ private struct ScaledFontModifier: ViewModifier {
         switch family {
         case .ui:   font = Theme.ui(s, weight: weight)
         case .mono: font = Theme.mono(s, weight: weight)
-        case .icon: font = Theme.icon(s, weight: weight)
+        case .icon: font = Theme.ui(s, weight: weight)
         }
         return content.font(font)
     }
@@ -96,7 +96,7 @@ extension View {
     func scaledMono(_ size: CGFloat, weight: Font.Weight = .regular) -> some View {
         modifier(ScaledFontModifier(family: .mono, size: size, weight: weight))
     }
-    /// `Theme.icon` (SF Symbols / glyphs) at the current interface scale.
+    /// `Theme.ui` for SF Symbols / glyphs at the current interface scale.
     func scaledIcon(_ size: CGFloat, weight: Font.Weight = .regular) -> some View {
         modifier(ScaledFontModifier(family: .icon, size: size, weight: weight))
     }

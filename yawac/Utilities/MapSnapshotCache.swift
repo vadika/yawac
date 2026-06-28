@@ -3,21 +3,17 @@ import MapKit
 
 /// Renders + disk-caches a 220×120 @2x map snapshot for a coord.
 /// On-disk path: ~/Library/Caches/<bundle>/MapSnapshots/<lat>_<lng>_<zoom>.png
+/// The hot-path memory cache lives in `ThumbnailCache.mapCache` one layer up;
+/// this class only owns the disk layer + the MKMapSnapshotter call.
 @MainActor
 final class MapSnapshotCache {
     static let shared = MapSnapshotCache()
     private init() {}
 
-    private var memory: [String: NSImage] = [:]
-
     func snapshot(lat: Double, lng: Double,
                   zoom: CLLocationDistance = 1000) async -> NSImage? {
         let key = "\(String(format: "%.6f", lat))_\(String(format: "%.6f", lng))_\(Int(zoom))"
-        if let cached = memory[key] { return cached }
-        if let disk = readDisk(key: key) {
-            memory[key] = disk
-            return disk
-        }
+        if let disk = readDisk(key: key) { return disk }
         let options = MKMapSnapshotter.Options()
         options.region = MKCoordinateRegion(
             center: CLLocationCoordinate2D(latitude: lat, longitude: lng),
@@ -27,7 +23,6 @@ final class MapSnapshotCache {
         do {
             let snap = try await snapshotter.start()
             let composed = composePin(on: snap.image)
-            memory[key] = composed
             writeDisk(key: key, image: composed)
             return composed
         } catch {
