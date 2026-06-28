@@ -30,4 +30,12 @@ final class LocationPickerSheetModelTests: XCTestCase {
         XCTAssertEqual(payload.lat, 60.17, accuracy: 0.0001)
         XCTAssertEqual(payload.name, "X")
     }
+
+    func test_onPinDrag_updates_selectedCoord() {
+        let m = LocationPickerSheetModel()
+        let target = CLLocationCoordinate2D(latitude: 48.8566, longitude: 2.3522)
+        m.onPinDrag(to: target)
+        XCTAssertEqual(m.selectedCoord.latitude, target.latitude, accuracy: 0.0001)
+        XCTAssertEqual(m.selectedCoord.longitude, target.longitude, accuracy: 0.0001)
+    }
 }
