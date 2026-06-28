@@ -90,36 +90,6 @@ final class ThumbnailCache {
 
     init() {}
 
-    /// Drop every NSCache + clear inflight + negative + cache sets.
-    /// No longer wired to didResignActive — F34's 5-minute idle flush
-    /// caused the "all images blink after long idle" symptom: every
-    /// visible body re-eval'd against empty caches on return, fired
-    /// cold decodes, then re-rendered as decodes settled. NSCache
-    /// already evicts under memory pressure via totalCostLimit, so
-    /// the manual flush only ever traded a visible regression for a
-    /// memory savings the system can produce on its own. Kept public
-    /// for a future "low memory" hook to call if measurements ever
-    /// show the OS is not reclaiming on its own.
-    func flushAll() {
-        cache.removeAllObjects()
-        videoCache.removeAllObjects()
-        avatarCache.removeAllObjects()
-        mapCache.removeAllObjects()
-        inflight.removeAll()
-        videoInflight.removeAll()
-        avatarInflight.removeAll()
-        avatarNegative.removeAll()
-        mapInflight.removeAll()
-        mapNegative.removeAll()
-        // Bump every revision so any observer that's currently in
-        // foreground (rare during a resignActive flush, but possible)
-        // re-evaluates and kicks fresh decodes regardless of which
-        // cache its body subscribed to.
-        imageRevision &+= 1
-        videoRevision &+= 1
-        avatarRevision &+= 1
-    }
-
     private let cache: NSCache<NSString, NSImage> = {
         let c = NSCache<NSString, NSImage>()
         // F31: bumped 256 / 64 MB → 1024 / 256 MB. The extendedHistoryLimit

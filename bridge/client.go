@@ -118,12 +118,6 @@ type Client struct {
 	// no-ops that simply succeed.
 	mediaConnMu       sync.Mutex
 	lastForceRefresh  time.Time
-
-	// F83: tracks an in-flight OfflineSync drain so we can compare what
-	// the server announced via OfflineSyncPreview against what actually
-	// arrives as *events.Message / *events.Receipt before
-	// OfflineSyncCompleted. Issue #6.
-	offlineDrain offlineDrainTracker
 }
 
 const mediaConnCooldown = 30 * time.Second

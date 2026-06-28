@@ -54,7 +54,6 @@ struct AvatarView: View {
             guard let invalid = note.userInfo?["jid"] as? String,
                   JIDNormalize.same(invalid, jid, client: session.client)
             else { return }
-            AvatarLog.write("[avatar-view size=\(Int(size))] invalidated by \(invalid) → reset jid=\(jid)")
             // Drop the in-memory NSImage so the next body eval misses
             // and the load path re-runs; revision bump wakes observers.
             ThumbnailCache.shared.invalidateAvatar(forCacheKey: key)

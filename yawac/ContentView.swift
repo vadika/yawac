@@ -157,10 +157,9 @@ struct ContentView: View {
                     session.openRootChat(lastSelectedChatJID)
                 }
             }
-            let groups = GroupsViewModel(client: client)
-            await groups.refresh()
-            vm.mergeGroups(groups.groups)
-            session.ingestGroups(groups.groups)
+            let groups = (try? client.listGroups()) ?? []
+            vm.mergeGroups(groups)
+            session.ingestGroups(groups)
             let contacts = (try? client.listContacts()) ?? []
             vm.resolveNames(contacts)
             vm.mergeContacts(contacts)

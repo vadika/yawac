@@ -251,15 +251,7 @@ final class SessionViewModel {
     func chatRef(forJID jid: String) -> ChatRef {
         let canonical = JIDNormalize.canonical(jid, client: client)
         let name = displayName(for: canonical)
-        // Treat any `@g.us` or broadcast list as "group-shaped" for the
-        // ChatRef.Kind discriminator. (BackBar uses AvatarView by JID so
-        // the avatar already disambiguates visually — this is just for
-        // any future style branching.)
-        let isGroup = canonical.hasSuffix("@g.us")
-            || canonical.hasSuffix("@broadcast")
-            || canonical == "status@broadcast"
-        return ChatRef(id: canonical, displayName: name,
-                       kind: isGroup ? .group : .direct)
+        return ChatRef(id: canonical, displayName: name)
     }
 
     /// Sidebar / search-hit / restore — reset the navigation trail to a

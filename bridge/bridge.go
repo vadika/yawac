@@ -7,13 +7,6 @@
 //   - complex payloads cross the boundary as JSON strings (see jsonmodels.go).
 package bridge
 
-const bridgeVersion = "yawac-bridge/0.1.0"
-
-// Version returns the bridge package's version string.
-func Version() string {
-	return bridgeVersion
-}
-
 // EventSink is implemented on the Swift side and receives bridge events as
 // JSON-encoded payloads. The type field discriminates the JSON shape.
 type EventSink interface {

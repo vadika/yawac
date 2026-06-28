@@ -1,33 +1,5 @@
 import Foundation
 
-/// Avatar-fetch diagnostic log. Opt-in via `YAWAC_AVATAR_LOG=1` in the
-/// process environment (Xcode scheme env, or `env YAWAC_AVATAR_LOG=1
-/// open yawac.app` from a shell). Appends to /tmp/yawac-avatar.log.
-/// NSLog is unreliable in shipped builds — privacy redaction + launchd
-/// stderr redirection — so a plain file is the most predictable path.
-enum AvatarLog {
-    private static let enabled: Bool =
-        ProcessInfo.processInfo.environment["YAWAC_AVATAR_LOG"] == "1"
-    private static let url = URL(fileURLWithPath: "/tmp/yawac-avatar.log")
-    private static let queue = DispatchQueue(label: "yawac.avatarlog")
-
-    static func write(_ s: String) {
-        guard enabled else { return }
-        queue.async {
-            let line = (s + "\n").data(using: .utf8) ?? Data()
-            if FileManager.default.fileExists(atPath: url.path) {
-                if let h = try? FileHandle(forWritingTo: url) {
-                    h.seekToEndOfFile()
-                    h.write(line)
-                    try? h.close()
-                }
-            } else {
-                try? line.write(to: url)
-            }
-        }
-    }
-}
-
 extension Notification.Name {
     /// Posted by `AvatarCache.invalidate(jid:)` so on-screen `AvatarView`s
     /// for that JID re-fetch instead of staying stuck on a deleted file.
@@ -109,29 +81,22 @@ actor AvatarCache {
 
     func ensure(jid: String, using client: WAClient) async -> URL? {
         if negativeCache.contains(jid) {
-            AvatarLog.write("[avatar-cache] \(jid) in negativeCache, skip")
             return nil
         }
         let url = file(for: jid)
         if FileManager.default.fileExists(atPath: url.path) {
-            AvatarLog.write("[avatar-cache] \(jid) disk hit")
             return url
         }
         if let t = inflight[jid] { return await t.value }
 
-        AvatarLog.write("[avatar-cache] \(jid) cold fetch")
         let sem = semaphore
         let task: Task<URL?, Never> = Task.detached(priority: .utility) {
             await sem.acquire()
             defer { Task { await sem.release() } }
             do {
                 let result = try client.fetchProfilePicture(jid: jid, outPath: url.path)
-                AvatarLog.write("[avatar-cache] \(jid) bridge returned " +
-                                (result.isEmpty ? "EMPTY" : result))
                 return result.isEmpty ? nil : URL(filePath: result)
             } catch {
-                AvatarLog.write("[avatar-cache] \(jid) bridge threw: " +
-                                String(describing: error))
                 return nil
             }
         }

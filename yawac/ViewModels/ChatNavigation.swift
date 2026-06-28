@@ -4,14 +4,10 @@ import SwiftUI
 
 /// Lightweight identity-and-trail entry for the chat navigation stack.
 /// `id` is the canonical JID; `displayName` is the resolved contact /
-/// group name (never a raw JID). `kind` lets the BackBar pick the right
-/// avatar style if it ever needs to (today both use `AvatarView` by JID).
+/// group name (never a raw JID).
 struct ChatRef: Identifiable, Equatable {
     let id: String
     let displayName: String
-    let kind: Kind
-
-    enum Kind: Equatable { case group, direct }
 }
 
 /// Navigation stack that backs the BackBar.
