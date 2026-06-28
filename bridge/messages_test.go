@@ -488,7 +488,8 @@ func TestSendContactsArrayUnpaired(t *testing.T) {
 		"BEGIN:VCARD\nVERSION:3.0\nFN:Anna\nTEL;type=CELL;waid=11111:+11111\nEND:VCARD",
 		"BEGIN:VCARD\nVERSION:3.0\nFN:Bob\nTEL;type=CELL;waid=22222:+22222\nEND:VCARD",
 	}
-	_, err := c.SendContactsArray("1234@s.whatsapp.net", "Contacts", vcards, 0)
+	vcardsJSON, _ := json.Marshal(vcards)
+	_, err := c.SendContactsArray("1234@s.whatsapp.net", "Contacts", string(vcardsJSON), 0)
 	if err == nil {
 		t.Fatal("expected error on unpaired client")
 	}
@@ -497,7 +498,8 @@ func TestSendContactsArrayUnpaired(t *testing.T) {
 func TestSendContactsArrayBadJID(t *testing.T) {
 	c, _ := NewClient(t.TempDir() + "/sca2.db")
 	defer c.Close()
-	_, err := c.SendContactsArray("not a jid", "X", []string{"BEGIN:VCARD\nEND:VCARD"}, 0)
+	vcardsJSON, _ := json.Marshal([]string{"BEGIN:VCARD\nEND:VCARD"})
+	_, err := c.SendContactsArray("not a jid", "X", string(vcardsJSON), 0)
 	if err == nil {
 		t.Fatal("expected parse error")
 	}
@@ -506,9 +508,18 @@ func TestSendContactsArrayBadJID(t *testing.T) {
 func TestSendContactsArrayEmpty(t *testing.T) {
 	c, _ := NewClient(t.TempDir() + "/sca3.db")
 	defer c.Close()
-	_, err := c.SendContactsArray("1234@s.whatsapp.net", "X", nil, 0)
+	_, err := c.SendContactsArray("1234@s.whatsapp.net", "X", "[]", 0)
 	if err == nil {
 		t.Fatal("expected error on empty vcards")
+	}
+}
+
+func TestSendContactsArrayBadJSON(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/sca4.db")
+	defer c.Close()
+	_, err := c.SendContactsArray("1234@s.whatsapp.net", "X", "not-json", 0)
+	if err == nil {
+		t.Fatal("expected error on malformed vcards json")
 	}
 }
 

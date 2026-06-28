@@ -1317,19 +1317,26 @@ func (c *Client) SendContact(
 }
 
 // SendContactsArray sends a ContactsArrayMessage (multiple vCards in
-// one bubble). displayName labels the array; each vcard is a full
-// VCARD 3.0 payload built Swift-side via VCardBuilder. When
-// ephemeralSec > 0, wraps in EphemeralMessage. Errors on an empty
-// vcards slice — sending zero contacts is never what the caller
-// wants and WhatsApp would reject it server-side anyway.
+// one bubble). displayName labels the array; vcardsJSON is a JSON
+// []string of full VCARD 3.0 payloads built Swift-side via
+// VCardBuilder (JSON-encoded because gomobile cannot bridge []string
+// across the framework boundary — mirrors createGroup's
+// participantJIDsJSON convention). When ephemeralSec > 0, wraps in
+// EphemeralMessage. Errors on an empty vcards slice — sending zero
+// contacts is never what the caller wants and WhatsApp would reject
+// it server-side anyway.
 func (c *Client) SendContactsArray(
 	chatJIDStr string,
 	displayName string,
-	vcards []string,
+	vcardsJSON string,
 	ephemeralSec int32,
 ) (string, error) {
 	if c.wa == nil {
 		return "", errors.New("client closed")
+	}
+	var vcards []string
+	if err := json.Unmarshal([]byte(vcardsJSON), &vcards); err != nil {
+		return "", fmt.Errorf("parse vcards json: %w", err)
 	}
 	if len(vcards) == 0 {
 		return "", errors.New("no vcards")
