@@ -740,7 +740,8 @@ struct MessageRow: View {
                     }
                 }
             }
-            if let waid = VCardBuilder.parseWAID(card.vcard) {
+            if !card.jid.isEmpty,
+               let waid = VCardBuilder.parseWAID(card.vcard) {
                 Divider()
                 Button("Message on WhatsApp") {
                     let jid = "\(waid)@s.whatsapp.net"

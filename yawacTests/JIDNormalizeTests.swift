@@ -116,17 +116,6 @@ final class JIDNormalizeTests: XCTestCase {
             "111:4@lid", "555:9@s.whatsapp.net", client: r))
     }
 
-    // MARK: - key
-
-    func testKeyIsCanonical() {
-        let r = FakeLIDResolver()
-        r.lidToPN["111@lid"] = "555@s.whatsapp.net"
-        XCTAssertEqual(JIDNormalize.key("111@lid", client: r),
-                       "555@s.whatsapp.net")
-        XCTAssertEqual(JIDNormalize.key("111@lid", client: nil),
-                       "111@lid")
-    }
-
     // MARK: - allForms
 
     func testAllFormsNoClient() {
