@@ -53,11 +53,7 @@ final class ContactPickerSheetModel {
             return ContactPayload(
                 jid: c.jid,
                 displayName: c.name,
-                phone: phone,
-                vcard: VCardBuilder.build(
-                    jid: c.jid,
-                    name: c.name,
-                    phone: phone))
+                phone: phone)
         }
     }
 }

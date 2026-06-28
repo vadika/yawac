@@ -83,8 +83,7 @@ final class ConversationViewModelMultiContactSendTests: XCTestCase {
                                        client: client)
         vm.stageContact(ContactPayload(
             jid: "11@s.whatsapp.net", displayName: "Anna",
-            phone: "+11",
-            vcard: "BEGIN:VCARD\nFN:Anna\nEND:VCARD"))
+            phone: "+11"))
         await vm.sendPendingAttachments()
         XCTAssertEqual(client.capture.single.count, 1)
         XCTAssertEqual(client.capture.array.count, 0)
@@ -96,12 +95,10 @@ final class ConversationViewModelMultiContactSendTests: XCTestCase {
                                        client: client)
         vm.stageContact(ContactPayload(
             jid: "11@s.whatsapp.net", displayName: "Anna",
-            phone: "+11",
-            vcard: "BEGIN:VCARD\nFN:Anna\nEND:VCARD"))
+            phone: "+11"))
         vm.stageContact(ContactPayload(
             jid: "22@s.whatsapp.net", displayName: "Bob",
-            phone: "+22",
-            vcard: "BEGIN:VCARD\nFN:Bob\nEND:VCARD"))
+            phone: "+22"))
         await vm.sendPendingAttachments()
         XCTAssertEqual(client.capture.single.count, 0)
         XCTAssertEqual(client.capture.array.count, 1)

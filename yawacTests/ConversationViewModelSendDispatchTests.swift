@@ -23,8 +23,7 @@ final class ConversationViewModelSendDispatchTests: XCTestCase {
     func testStageContactAppends() throws {
         let vm = try makeVM()
         vm.stageContact(ContactPayload(
-            jid: "1@s.whatsapp.net", displayName: "A", phone: "+1",
-            vcard: "BEGIN:VCARD\nFN:A\nEND:VCARD"))
+            jid: "1@s.whatsapp.net", displayName: "A", phone: "+1"))
         XCTAssertEqual(vm.pendingContacts.count, 1)
         XCTAssertEqual(vm.pendingContacts.first?.displayName, "A")
     }
@@ -40,9 +39,9 @@ final class ConversationViewModelSendDispatchTests: XCTestCase {
     func testRemovePendingContact() throws {
         let vm = try makeVM()
         vm.stageContact(ContactPayload(
-            jid: "1@s.whatsapp.net", displayName: "A", phone: "", vcard: ""))
+            jid: "1@s.whatsapp.net", displayName: "A", phone: ""))
         vm.stageContact(ContactPayload(
-            jid: "2@s.whatsapp.net", displayName: "B", phone: "", vcard: ""))
+            jid: "2@s.whatsapp.net", displayName: "B", phone: ""))
         vm.removePendingContact(at: 0)
         XCTAssertEqual(vm.pendingContacts.map(\.displayName), ["B"])
     }

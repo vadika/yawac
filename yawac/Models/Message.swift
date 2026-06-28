@@ -11,9 +11,14 @@ struct ContactPayload: Hashable, Sendable {
     let jid: String
     let displayName: String
     let phone: String
-    // TODO Task 14: switch to computed `var vcard: String { VCardBuilder.build(...) }`
-    // once VCardBuilder lands; for now we accept a prebuilt vCard string.
-    let vcard: String
+    /// Derived from (jid, name, phone). VCardBuilder.build is pure-
+    /// deterministic, so re-synthesizing on read costs less than
+    /// the per-payload string we used to keep around — and inbound
+    /// vCards collapsed to the same shape here anyway since yawac
+    /// never surfaced any field beyond name + phone + waid.
+    var vcard: String {
+        VCardBuilder.build(jid: jid, name: displayName, phone: phone)
+    }
 
     /// Build from a raw vCard string + displayName. waid (if present)
     /// becomes both the jid (`<waid>@s.whatsapp.net`) and the phone
@@ -23,8 +28,7 @@ struct ContactPayload: Hashable, Sendable {
         let waid = VCardBuilder.parseWAID(vcard) ?? ""
         let jid = waid.isEmpty ? "" : "\(waid)@s.whatsapp.net"
         let phone = waid.isEmpty ? "" : "+\(waid)"
-        return ContactPayload(jid: jid, displayName: displayName,
-                              phone: phone, vcard: vcard)
+        return ContactPayload(jid: jid, displayName: displayName, phone: phone)
     }
 }
 
