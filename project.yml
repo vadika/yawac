@@ -81,6 +81,24 @@ targets:
         SUFeedURL: https://github.com/vadika/yawac/releases/latest/download/appcast.xml
         SUPublicEDKey: YnHi982nr0r5CHtPBFeDiVttVsizvUQKlgH1TMeM0DE=
         SUEnableInstallerLauncherService: false
+        # F102: register custom UTIs so SwiftUI .draggable/.dropDestination
+        # actually carries dev.vadikas.yawac.chatjid + .folderid payloads
+        # across the drag-drop pipeline. Without this LaunchServices
+        # treats UTType(exportedAs:) calls as unknown identifiers and
+        # drop targets never get the items.
+        UTExportedTypeDeclarations:
+          - UTTypeIdentifier: dev.vadikas.yawac.chatjid
+            UTTypeDescription: yawac chat JID
+            UTTypeConformsTo:
+              - public.data
+            UTTypeTagSpecification:
+              public.mime-type: application/x-yawac-chatjid
+          - UTTypeIdentifier: dev.vadikas.yawac.folderid
+            UTTypeDescription: yawac folder ID
+            UTTypeConformsTo:
+              - public.data
+            UTTypeTagSpecification:
+              public.mime-type: application/x-yawac-folderid
   yawacTests:
     type: bundle.unit-test
     platform: macOS

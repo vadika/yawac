@@ -40,5 +40,38 @@
 	<string>https://github.com/vadika/yawac/releases/latest/download/appcast.xml</string>
 	<key>SUPublicEDKey</key>
 	<string>YnHi982nr0r5CHtPBFeDiVttVsizvUQKlgH1TMeM0DE=</string>
+	<key>UTExportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>yawac chat JID</string>
+			<key>UTTypeIdentifier</key>
+			<string>dev.vadikas.yawac.chatjid</string>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.mime-type</key>
+				<string>application/x-yawac-chatjid</string>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>yawac folder ID</string>
+			<key>UTTypeIdentifier</key>
+			<string>dev.vadikas.yawac.folderid</string>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.mime-type</key>
+				<string>application/x-yawac-folderid</string>
+			</dict>
+		</dict>
+	</array>
 </dict>
 </plist>

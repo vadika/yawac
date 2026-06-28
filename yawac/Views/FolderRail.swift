@@ -1,5 +1,4 @@
 import SwiftUI
-import AppKit
 
 /// F91: vertical rail on the left of the chat list. Custom folders
 /// on top (sorted by sortIndex), then "All chats" sentinel, then
@@ -25,40 +24,48 @@ struct FolderRail: View {
                             isSelected: vm.selection == .custom(folderID: folder.id),
                             badge: vm.unreadByFolderID[folder.id] ?? 0,
                             onTap: { vm.selection = .custom(folderID: folder.id) })
-                        // F91 v4: use .onDrag so the NSItemProvider fires at the
-                        // drag-gesture level rather than through SwiftUI's
-                        // .draggable, which competes with the Button tap-target
-                        // on macOS and loses before the drag threshold is met.
-                        .onDrag {
-                            let provider = NSItemProvider()
-                            provider.registerObject(
-                                FolderIDTransferNSObject(id: folder.id),
-                                visibility: .ownProcess)
-                            return provider
+                        .draggable(FolderIDTransfer(id: folder.id)) {
+                            FolderRailItem(kind: .custom(folder),
+                                           isSelected: true,
+                                           badge: 0,
+                                           onTap: {})
+                                .opacity(0.6)
                         }
-                        .dropDestination(for: ChatJIDTransfer.self) { transfers, _ in
-                            for t in transfers {
-                                vm.addChat(jid: t.jid, toFolderID: folder.id)
-                            }
-                            return !transfers.isEmpty
-                        } isTargeted: { _ in
-                            // visual feedback handled by FolderRailItem if needed
-                        }
-                        .onDrop(of: [.folderID], isTargeted: nil) { providers in
-                            guard let p = providers.first else { return false }
-                            p.loadDataRepresentation(
-                                forTypeIdentifier: FolderIDTransfer.utTypeIdentifier
-                            ) { data, _ in
-                                guard let data,
-                                      let payload = try? JSONDecoder().decode(
-                                          FolderIDTransfer.self, from: data)
-                                else { return }
-                                DispatchQueue.main.async {
-                                    guard
-                                        let from = vm.folders.firstIndex(where: { $0.id == payload.id }),
-                                        let to   = vm.folders.firstIndex(where: { $0.id == folder.id })
-                                    else { return }
-                                    vm.reorder(fromIndex: from, toIndex: to)
+                        // Single .onDrop accepting both UTTypes: stacking two
+                        // .dropDestination modifiers silently registered only
+                        // the first one, so the folder-reorder side never
+                        // got hover/drop callbacks. NSItemProvider lets us
+                        // dispatch by registered type within one handler.
+                        .onDrop(of: [.folderID, .chatJID], isTargeted: nil) { providers in
+                            for p in providers {
+                                if p.hasItemConformingToTypeIdentifier(FolderIDTransfer.utTypeIdentifier) {
+                                    p.loadDataRepresentation(
+                                        forTypeIdentifier: FolderIDTransfer.utTypeIdentifier
+                                    ) { data, _ in
+                                        guard let data,
+                                              let payload = try? JSONDecoder().decode(
+                                                  FolderIDTransfer.self, from: data)
+                                        else { return }
+                                        DispatchQueue.main.async {
+                                            guard
+                                                let from = vm.folders.firstIndex(where: { $0.id == payload.id }),
+                                                let to   = vm.folders.firstIndex(where: { $0.id == folder.id })
+                                            else { return }
+                                            vm.reorder(fromIndex: from, toIndex: to)
+                                        }
+                                    }
+                                } else if p.hasItemConformingToTypeIdentifier(ChatJIDTransfer.utTypeIdentifier) {
+                                    p.loadDataRepresentation(
+                                        forTypeIdentifier: ChatJIDTransfer.utTypeIdentifier
+                                    ) { data, _ in
+                                        guard let data,
+                                              let payload = try? JSONDecoder().decode(
+                                                  ChatJIDTransfer.self, from: data)
+                                        else { return }
+                                        DispatchQueue.main.async {
+                                            vm.addChat(jid: payload.jid, toFolderID: folder.id)
+                                        }
+                                    }
                                 }
                             }
                             return true

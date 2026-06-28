@@ -17,37 +17,38 @@ struct FolderRailItem: View {
     let onTap: () -> Void
 
     var body: some View {
-        Button(action: onTap) {
-            VStack(spacing: 4) {
-                ZStack(alignment: .topTrailing) {
-                    Image(systemName: iconName)
-                        .scaledIcon(20, weight: isSelected ? .semibold : .regular)
-                        .foregroundStyle(iconColor)
-                        .frame(width: 44, height: 36)
-                        .background(
-                            isSelected ? Theme.accentSoft : Color.clear,
-                            in: RoundedRectangle(cornerRadius: 8))
-                    if badge > 0 {
-                        Text(badgeText)
-                            .scaledMono(9, weight: .semibold)
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 4)
-                            .padding(.vertical, 1)
-                            .background(Color.red, in: Capsule())
-                            .offset(x: 4, y: -2)
-                    }
+        // Plain View + onTapGesture rather than Button so .draggable on
+        // the FolderRail parent gets the drag gesture without the
+        // Button's tap-target competing for it.
+        VStack(spacing: 4) {
+            ZStack(alignment: .topTrailing) {
+                Image(systemName: iconName)
+                    .scaledIcon(20, weight: isSelected ? .semibold : .regular)
+                    .foregroundStyle(iconColor)
+                    .frame(width: 44, height: 36)
+                    .background(
+                        isSelected ? Theme.accentSoft : Color.clear,
+                        in: RoundedRectangle(cornerRadius: 8))
+                if badge > 0 {
+                    Text(badgeText)
+                        .scaledMono(9, weight: .semibold)
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(Color.red, in: Capsule())
+                        .offset(x: 4, y: -2)
                 }
-                Text(label)
-                    .scaledUI(10.5, weight: isSelected ? .semibold : .regular)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.center)
-                    .foregroundStyle(labelColor)
             }
-            .frame(width: 72)
-            .padding(.vertical, 6)
-            .contentShape(Rectangle())
+            Text(label)
+                .scaledUI(10.5, weight: isSelected ? .semibold : .regular)
+                .lineLimit(2)
+                .multilineTextAlignment(.center)
+                .foregroundStyle(labelColor)
         }
-        .buttonStyle(.plain)
+        .frame(width: 72)
+        .padding(.vertical, 6)
+        .contentShape(Rectangle())
+        .onTapGesture { onTap() }
     }
 
     private var iconName: String {
