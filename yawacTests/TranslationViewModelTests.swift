@@ -6,13 +6,13 @@ final class TranslationViewModelTests: XCTestCase {
 
     // MARK: Fakes
 
-    actor FakeEngine: TranslationEngineProtocol {
+    /// Records `load` / `translate` calls and serves a canned result.
+    /// Replaces the old `FakeEngine` actor stub that conformed to the
+    /// (now-deleted) `TranslationEngineProtocol`.
+    actor FakeEngine {
         var loadCalls: [URL] = []
         var translateCalls: [(text: String, source: String, target: String)] = []
         var nextResult: Result<String, Error> = .success("HELLO")
-        var _state: TranslationEngineState = .ready
-
-        var stateSnapshot: TranslationEngineState { _state }
 
         func load(modelDir: URL) async throws {
             loadCalls.append(modelDir)
@@ -27,11 +27,10 @@ final class TranslationViewModelTests: XCTestCase {
             }
         }
         func setNext(_ r: Result<String, Error>) { nextResult = r }
-        func setState(_ s: TranslationEngineState) { _state = s }
     }
 
     private func makeVM(
-        engine: TranslationEngineProtocol = FakeEngine(),
+        engine: FakeEngine = FakeEngine(),
         modelReady: Bool = true,
         target: String = "en",
         denylist: Set<String> = []
@@ -60,7 +59,12 @@ final class TranslationViewModelTests: XCTestCase {
             data: JSONEncoder().encode(arr), encoding: .utf8)) ?? "[]"
         UserDefaults.standard.set(json, forKey: "yawac.translate.denyJSON")
         let vm = TranslationViewModel(
-            store: store, model: mgr, engine: engine)
+            store: store,
+            model: mgr,
+            loadEngine: { url in try await engine.load(modelDir: url) },
+            translateText: { text, source, target in
+                try await engine.translate(text, from: source, to: target)
+            })
         vm.refreshFromDefaults()
         return vm
     }
@@ -136,8 +140,7 @@ final class TranslationViewModelTests: XCTestCase {
     }
 
     func testTranslateDoesNotReenterWhileInFlight() async {
-        actor SlowEngine: TranslationEngineProtocol {
-            var stateSnapshot: TranslationEngineState = .ready
+        actor SlowEngine {
             var calls = 0
             var continuation: CheckedContinuation<String, Error>?
             func load(modelDir: URL) async throws {}
@@ -156,7 +159,32 @@ final class TranslationViewModelTests: XCTestCase {
             var callCount: Int { calls }
         }
         let engine = SlowEngine()
-        let vm = makeVM(engine: engine)
+        let store = TranslationStore()
+        let mgr = TranslationModelManager(
+            rootOverride: FileManager.default.temporaryDirectory
+                .appendingPathComponent("yawac-test-\(UUID().uuidString)"))
+        let dir = mgr.localDir
+        try? FileManager.default.createDirectory(
+            at: dir, withIntermediateDirectories: true)
+        try? Data("{}".utf8).write(
+            to: dir.appendingPathComponent("config.json"))
+        try? Data("{}".utf8).write(
+            to: dir.appendingPathComponent("tokenizer.json"))
+        try? Data("{}".utf8).write(
+            to: dir.appendingPathComponent("tokenizer_config.json"))
+        try? Data([0]).write(
+            to: dir.appendingPathComponent("model.safetensors"))
+        mgr.refreshState()
+        UserDefaults.standard.set("en", forKey: "yawac.translate.targetLang")
+        UserDefaults.standard.set("[]", forKey: "yawac.translate.denyJSON")
+        let vm = TranslationViewModel(
+            store: store,
+            model: mgr,
+            loadEngine: { url in try await engine.load(modelDir: url) },
+            translateText: { text, source, target in
+                try await engine.translate(text, from: source, to: target)
+            })
+        vm.refreshFromDefaults()
         async let first: Void = vm.translate(
             surfaceID: "msg1:text",
             text: "Hallo Welt schöner Tag heute",

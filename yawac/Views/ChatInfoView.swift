@@ -259,7 +259,9 @@ struct ChatInfoView: View {
                     parentChatJID: g.jid,
                     myJID: client.ownJID,
                     availableGroups: allGroups,
-                    linker: client,
+                    linkSubGroup: { parent, sub in
+                        try client.linkSubGroup(parentJID: parent, subJID: sub)
+                    },
                     client: client)
                 LinkSubGroupSheet(
                     model: model,
@@ -276,7 +278,13 @@ struct ChatInfoView: View {
         }
         .sheet(isPresented: $showingNewSubGroupSheet) {
             if let g = group, let client = session.client {
-                let model = NewSubGroupSheetModel(parentJID: g.jid, creator: client)
+                let model = NewSubGroupSheetModel(
+                    parentJID: g.jid,
+                    createSubGroup: { parent, name, jids in
+                        try client.createSubGroup(parentJID: parent,
+                                                  name: name,
+                                                  participantJIDs: jids)
+                    })
                 NewSubGroupSheet(
                     model: model,
                     parentName: g.name,
@@ -2192,7 +2200,10 @@ struct ChatInfoView: View {
                 if pendingRequestsModel?.chatJID != g.jid {
                     pendingRequestsModel = PendingRequestsSectionModel(
                         chatJID: g.jid,
-                        updater: client,
+                        updateRequests: { chatJID, action, jids in
+                            try client.updateGroupJoinRequests(
+                                chatJID: chatJID, action: action, jids: jids)
+                        },
                         store: session.joinRequestStore)
                 }
                 let chatJID = g.jid

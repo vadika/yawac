@@ -19,7 +19,7 @@ final class LinkSubGroupSheetModelTests: XCTestCase {
         let m = LinkSubGroupSheetModel(parentChatJID: parent,
                                        myJID: me,
                                        availableGroups: all,
-                                       linker: StubLinker())
+                                       linkSubGroup: { _, _ in })
         let jids = m.candidates.map(\.jid)
         XCTAssertFalse(jids.contains("linked-here@g.us"))
         XCTAssertFalse(jids.contains("non-admin@g.us"))
@@ -35,32 +35,35 @@ final class LinkSubGroupSheetModelTests: XCTestCase {
         let m = LinkSubGroupSheetModel(parentChatJID: "p@g.us",
                                        myJID: me,
                                        availableGroups: all,
-                                       linker: StubLinker())
+                                       linkSubGroup: { _, _ in })
         m.selected = "x@g.us"
         XCTAssertTrue(m.needsCrossCommunityConfirmation)
     }
 
     func testSuccessfulLink() async {
-        let linker = StubLinker()
+        let captured = Captured()
         let m = LinkSubGroupSheetModel(
             parentChatJID: "p@g.us",
             myJID: me,
             availableGroups: [.stub(jid: "x@g.us", amAdmin: true, meJID: me)],
-            linker: linker)
+            linkSubGroup: { parent, sub in
+                captured.record(parent: parent, sub: sub)
+            })
         m.selected = "x@g.us"
         await m.confirmLink()
-        XCTAssertEqual(linker.lastParent, "p@g.us")
-        XCTAssertEqual(linker.lastSub, "x@g.us")
+        XCTAssertEqual(captured.lastParent, "p@g.us")
+        XCTAssertEqual(captured.lastSub, "x@g.us")
         XCTAssertTrue(m.didLink)
         XCTAssertNil(m.error)
     }
-}
 
-final class StubLinker: SubGroupLinker, @unchecked Sendable {
-    var lastParent: String?
-    var lastSub: String?
-    func linkSubGroup(parentJID: String, subJID: String) throws {
-        lastParent = parentJID; lastSub = subJID
+    private final class Captured: @unchecked Sendable {
+        var lastParent: String?
+        var lastSub: String?
+        func record(parent: String, sub: String) {
+            lastParent = parent
+            lastSub = sub
+        }
     }
 }
 

@@ -1,17 +1,6 @@
 import Foundation
 import Observation
 
-/// Abstraction for the underlying link-sub-group bridge call. `WAClient`
-/// conforms in production; tests inject a stub that records the last
-/// `(parentJID, subJID)` pair. The bridge call is synchronous and
-/// `nonisolated` on `WAClient` so the model can dispatch it off the
-/// main actor.
-protocol SubGroupLinker: AnyObject {
-    func linkSubGroup(parentJID: String, subJID: String) throws
-}
-
-extension WAClient: SubGroupLinker {}
-
 /// Drives the "link an existing group as a community sub-group" sheet.
 ///
 /// Filters the caller-supplied list of joined groups down to viable
@@ -25,6 +14,12 @@ extension WAClient: SubGroupLinker {}
 @Observable
 final class LinkSubGroupSheetModel {
 
+    /// Bridge call signature: synchronous, throwing.
+    /// `WAClient.linkSubGroup` (`nonisolated`) wires through in
+    /// production; tests pass an inline closure that records the last
+    /// `(parentJID, subJID)` pair.
+    typealias LinkSubGroup = @Sendable (String, String) throws -> Void
+
     /// Community parent under which the selected sub-group will be linked.
     let parentChatJID: String
 
@@ -35,7 +30,7 @@ final class LinkSubGroupSheetModel {
     /// into `candidates` lazily.
     private let availableGroups: [BridgeGroupModel]
 
-    private let linker: SubGroupLinker
+    private let linkSubGroup: LinkSubGroup
 
     /// LID resolver used to match `myJID` against participant JIDs across
     /// the LID ↔ PN identity split. Optional so tests can pass `nil` and
@@ -62,12 +57,12 @@ final class LinkSubGroupSheetModel {
     init(parentChatJID: String,
          myJID: String,
          availableGroups: [BridgeGroupModel],
-         linker: SubGroupLinker,
+         linkSubGroup: @escaping LinkSubGroup,
          client: LIDResolving? = nil) {
         self.parentChatJID = parentChatJID
         self.myJID = myJID
         self.availableGroups = availableGroups
-        self.linker = linker
+        self.linkSubGroup = linkSubGroup
         self.client = client
     }
 
@@ -123,10 +118,10 @@ final class LinkSubGroupSheetModel {
         inFlight = true
         defer { inFlight = false }
         do {
-            let linker = self.linker
+            let call = self.linkSubGroup
             let parent = parentChatJID
             try await Task.detached {
-                try linker.linkSubGroup(parentJID: parent, subJID: selected)
+                try call(parent, selected)
             }.value
             didLink = true
             error = nil

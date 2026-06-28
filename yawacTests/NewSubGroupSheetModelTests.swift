@@ -5,43 +5,40 @@ import XCTest
 final class NewSubGroupSheetModelTests: XCTestCase {
 
     func testCreatePassesParentAndJIDs() async {
-        let stub = StubSubGroupCreator()
-        let m = NewSubGroupSheetModel(parentJID: "parent@g.us",
-                                      creator: stub)
+        let captured = Captured()
+        let m = NewSubGroupSheetModel(parentJID: "parent@g.us") { parent, name, jids in
+            captured.record(parent: parent, name: name, jids: jids)
+            return "sub@g.us"
+        }
         m.name = "Hiking"
         m.chips = [BridgeContact(jid: "a@s.whatsapp.net", name: "A",
                                  pushName: nil, fullName: nil,
                                  businessName: nil)]
         await m.create()
-        XCTAssertEqual(stub.lastParent, "parent@g.us")
-        XCTAssertEqual(stub.lastName, "Hiking")
-        XCTAssertEqual(stub.lastJIDs, ["a@s.whatsapp.net"])
+        XCTAssertEqual(captured.lastParent, "parent@g.us")
+        XCTAssertEqual(captured.lastName, "Hiking")
+        XCTAssertEqual(captured.lastJIDs, ["a@s.whatsapp.net"])
         XCTAssertEqual(m.createdJID, "sub@g.us")
     }
 
     func testFailureSurfacesError() async {
-        let stub = StubSubGroupCreator(throwError: TestError.boom)
-        let m = NewSubGroupSheetModel(parentJID: "parent@g.us",
-                                      creator: stub)
+        let m = NewSubGroupSheetModel(parentJID: "parent@g.us") { _, _, _ in
+            throw TestError.boom
+        }
         m.name = "Hiking"
         await m.create()
         XCTAssertNotNil(m.error)
         XCTAssertNil(m.createdJID)
     }
-}
 
-final class StubSubGroupCreator: SubGroupCreator, @unchecked Sendable {
-    var lastParent: String?
-    var lastName: String?
-    var lastJIDs: [String]?
-    var throwError: Error?
-    init(throwError: Error? = nil) { self.throwError = throwError }
-    func createSubGroup(parentJID: String, name: String,
-                        participantJIDs: [String]) throws -> String {
-        if let throwError { throw throwError }
-        lastParent = parentJID
-        lastName = name
-        lastJIDs = participantJIDs
-        return "sub@g.us"
+    private final class Captured: @unchecked Sendable {
+        var lastParent: String?
+        var lastName: String?
+        var lastJIDs: [String]?
+        func record(parent: String, name: String, jids: [String]) {
+            lastParent = parent
+            lastName = name
+            lastJIDs = jids
+        }
     }
 }

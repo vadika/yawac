@@ -485,7 +485,9 @@ struct ChatListView: View {
         .sheet(isPresented: $showingNewGroup) {
             if let client = vm.clientRef {
                 NewGroupSheet(
-                    model: NewGroupSheetModel(creator: client),
+                    model: NewGroupSheetModel(createGroup: { name, jids in
+                        try client.createGroup(name: name, participantJIDs: jids)
+                    }),
                     contacts: contactsForPicker,
                     onCreated: { newJID in
                         mergeNewlyCreatedChat(jid: newJID, client: client)
@@ -496,7 +498,9 @@ struct ChatListView: View {
         .sheet(isPresented: $showingNewCommunity) {
             if let client = vm.clientRef {
                 NewCommunitySheet(
-                    model: NewCommunitySheetModel(creator: client),
+                    model: NewCommunitySheetModel(createCommunity: { name in
+                        try client.createCommunity(name: name)
+                    }),
                     onCreated: { newJID in
                         mergeNewlyCreatedChat(jid: newJID, client: client)
                     }

@@ -1,16 +1,6 @@
 import Foundation
 import Observation
 
-/// Abstraction for the underlying community-create call. `WAClient`
-/// conforms in production; tests inject a stub that records the name.
-/// Method is synchronous and `nonisolated` on `WAClient` so the model
-/// can dispatch it off the main actor.
-protocol CommunityCreator: AnyObject {
-    func createCommunity(name: String) throws -> String
-}
-
-extension WAClient: CommunityCreator {}
-
 /// Drives the "new community" sheet: a single name field capped at the
 /// server-side 25-character limit and an async `create()` that returns
 /// the new community parent's JID via `createdJID`. Unlike groups, a
@@ -19,6 +9,12 @@ extension WAClient: CommunityCreator {}
 @MainActor
 @Observable
 final class NewCommunitySheetModel {
+
+    /// Bridge call signature: synchronous, throwing, returns the new
+    /// community parent's JID. `WAClient.createCommunity` (`nonisolated`)
+    /// wires through in production; tests pass an inline closure that
+    /// records the name.
+    typealias CreateCommunity = @Sendable (String) throws -> String
 
     /// Community name. Self-trimming to 25 chars via `didSet` so the
     /// bound `TextField` cannot drift past the cap even if the user
@@ -40,10 +36,10 @@ final class NewCommunitySheetModel {
     /// observes this to dismiss and navigate to the new community.
     private(set) var createdJID: String?
 
-    private let creator: CommunityCreator
+    private let createCommunity: CreateCommunity
 
-    init(creator: CommunityCreator) {
-        self.creator = creator
+    init(createCommunity: @escaping CreateCommunity) {
+        self.createCommunity = createCommunity
     }
 
     /// True iff a trimmed name is present and no create is in flight.
@@ -60,9 +56,9 @@ final class NewCommunitySheetModel {
         inFlight = true
         defer { inFlight = false }
         do {
-            let creator = self.creator
+            let call = self.createCommunity
             let jid = try await Task.detached {
-                try creator.createCommunity(name: trimmed)
+                try call(trimmed)
             }.value
             createdJID = jid
             error = nil

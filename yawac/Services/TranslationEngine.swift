@@ -10,15 +10,6 @@ enum TranslationEngineState: Equatable {
     case failed(String)
 }
 
-/// Protocol surface consumed by the translation view-model (T6).
-protocol TranslationEngineProtocol: Sendable {
-    var stateSnapshot: TranslationEngineState { get async }
-    func load(modelDir: URL) async throws
-    func translate(_ text: String,
-                   from source: String,
-                   to target: String) async throws -> String
-}
-
 enum TranslationError: Error {
     case notReady
 }
@@ -36,7 +27,7 @@ enum TranslationError: Error {
 /// `UserInput` → token-iteration → string-output pipeline. We single-turn
 /// each request (no chat history retention) because translation prompts
 /// are independent.
-actor TranslationEngine: TranslationEngineProtocol {
+actor TranslationEngine {
     private var state: TranslationEngineState = .unloaded
     private var container: ModelContainer?
 

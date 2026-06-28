@@ -1,18 +1,6 @@
 import Foundation
 import Observation
 
-/// Abstraction for the underlying sub-group-create call. `WAClient`
-/// conforms in production; tests inject a stub that records
-/// `(parentJID, name, participantJIDs)`. Method is synchronous and
-/// `nonisolated` on `WAClient` so the model can dispatch it off the
-/// main actor.
-protocol SubGroupCreator: AnyObject {
-    func createSubGroup(parentJID: String, name: String,
-                        participantJIDs: [String]) throws -> String
-}
-
-extension WAClient: SubGroupCreator {}
-
 /// Drives the "new sub-group in community" sheet: parent-scoped name
 /// field with a 25-character cap (the server-side WhatsApp limit), a
 /// chip list of selected contacts, and an async `create()` that
@@ -21,6 +9,12 @@ extension WAClient: SubGroupCreator {}
 @MainActor
 @Observable
 final class NewSubGroupSheetModel {
+
+    /// Bridge call signature: synchronous, throwing, returns the new
+    /// sub-group's JID. `WAClient.createSubGroup` (`nonisolated`) wires
+    /// through in production; tests pass an inline closure that records
+    /// `(parentJID, name, participantJIDs)`.
+    typealias CreateSubGroup = @Sendable (String, String, [String]) throws -> String
 
     /// Sub-group name. Self-trimming to 25 chars via `didSet` so the
     /// bound `TextField` cannot drift past the cap even if the user
@@ -53,11 +47,11 @@ final class NewSubGroupSheetModel {
     /// argument-free.
     let parentJID: String
 
-    private let creator: SubGroupCreator
+    private let createSubGroup: CreateSubGroup
 
-    init(parentJID: String, creator: SubGroupCreator) {
+    init(parentJID: String, createSubGroup: @escaping CreateSubGroup) {
         self.parentJID = parentJID
-        self.creator = creator
+        self.createSubGroup = createSubGroup
     }
 
     /// True iff a trimmed name is present and no create is in flight.
@@ -79,11 +73,9 @@ final class NewSubGroupSheetModel {
         inFlight = true
         defer { inFlight = false }
         do {
-            let creator = self.creator
+            let call = self.createSubGroup
             let jid = try await Task.detached {
-                try creator.createSubGroup(parentJID: parent,
-                                           name: trimmed,
-                                           participantJIDs: jids)
+                try call(parent, trimmed, jids)
             }.value
             createdJID = jid
             error = nil

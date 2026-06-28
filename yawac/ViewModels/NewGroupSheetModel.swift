@@ -1,22 +1,18 @@
 import Foundation
 import Observation
 
-/// Abstraction for the underlying group-create call. `WAClient` conforms in
-/// production; tests inject a stub that records `(name, participantJIDs)`.
-/// Method is synchronous and `nonisolated` on `WAClient` so the model can
-/// dispatch it off the main actor.
-protocol GroupCreator: AnyObject {
-    func createGroup(name: String, participantJIDs: [String]) throws -> String
-}
-
-extension WAClient: GroupCreator {}
-
 /// Drives the "new group" sheet: name field with a 25-character cap (the
 /// server-side WhatsApp limit), a chip list of selected contacts, and an
 /// async `create()` that returns the new group's JID via `createdJID`.
 @MainActor
 @Observable
 final class NewGroupSheetModel {
+
+    /// Bridge call signature: synchronous, throwing, returns the new
+    /// group's JID. `WAClient.createGroup` (`nonisolated`) wires through
+    /// in production; tests pass an inline closure that records the
+    /// `(name, jids)` pair.
+    typealias CreateGroup = @Sendable (String, [String]) throws -> String
 
     /// Group name. Self-trimming to 25 chars via `didSet` so the bound
     /// `TextField` cannot drift past the cap even if the user pastes.
@@ -43,10 +39,10 @@ final class NewGroupSheetModel {
     /// observes this to dismiss and navigate to the new chat.
     private(set) var createdJID: String?
 
-    private let creator: GroupCreator
+    private let createGroup: CreateGroup
 
-    init(creator: GroupCreator) {
-        self.creator = creator
+    init(createGroup: @escaping CreateGroup) {
+        self.createGroup = createGroup
     }
 
     /// True iff a trimmed name is present and no create is in flight.
@@ -66,9 +62,9 @@ final class NewGroupSheetModel {
         inFlight = true
         defer { inFlight = false }
         do {
-            let creator = self.creator
+            let call = self.createGroup
             let jid = try await Task.detached {
-                try creator.createGroup(name: trimmed, participantJIDs: jids)
+                try call(trimmed, jids)
             }.value
             createdJID = jid
             error = nil

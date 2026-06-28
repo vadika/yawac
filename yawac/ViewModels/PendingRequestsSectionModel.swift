@@ -1,21 +1,6 @@
 import Foundation
 import Observation
 
-/// Abstraction for batch-approving / rejecting join requests.
-/// `WAClient` conforms in production; tests inject a stub that returns
-/// canned per-row results so we can exercise the partial-failure path
-/// without touching the bridge.
-protocol RequestUpdater: AnyObject {
-    /// Synchronous bridge call. Implementations must be safe to invoke
-    /// from a detached task — the section model drives this off-main so
-    /// a slow bridge round-trip never blocks the admin panel UI.
-    func updateGroupJoinRequests(chatJID: String,
-                                 action: String,
-                                 jids: [String]) throws -> [BridgeJoinRequestResult]
-}
-
-extension WAClient: RequestUpdater {}
-
 /// One row in the pending-requests section of the admin panel. Carries
 /// just enough display state to render the row and surface a per-row
 /// failure badge after a partial-failure batch.
@@ -34,18 +19,28 @@ struct PendingRequestRow: Identifiable, Hashable {
 @MainActor
 @Observable
 final class PendingRequestsSectionModel {
+
+    /// Bridge call signature: synchronous, throwing.
+    /// `WAClient.updateGroupJoinRequests` (`nonisolated`) wires through
+    /// in production; tests pass an inline closure that returns canned
+    /// per-row results to exercise the partial-failure path without
+    /// touching the bridge.
+    typealias UpdateRequests = @Sendable (String, String, [String]) throws -> [BridgeJoinRequestResult]
+
     let chatJID: String
     var requests: [PendingRequestRow] = []
     var inFlightJIDs: Set<String> = []
     var bulkInFlight: Bool = false
     var error: String?
 
-    private let updater: RequestUpdater
+    private let updateRequests: UpdateRequests
     private let store: JoinRequestStore
 
-    init(chatJID: String, updater: RequestUpdater, store: JoinRequestStore) {
+    init(chatJID: String,
+         updateRequests: @escaping UpdateRequests,
+         store: JoinRequestStore) {
         self.chatJID = chatJID
-        self.updater = updater
+        self.updateRequests = updateRequests
         self.store = store
     }
 
@@ -69,9 +64,10 @@ final class PendingRequestsSectionModel {
             bulkInFlight = false
         }
         do {
-            let results = try await Task.detached { [updater, chatJID] in
-                try updater.updateGroupJoinRequests(
-                    chatJID: chatJID, action: action, jids: jids)
+            let call = self.updateRequests
+            let chatJID = self.chatJID
+            let results = try await Task.detached {
+                try call(chatJID, action, jids)
             }.value
             var failed: [String] = []
             for r in results {

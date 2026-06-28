@@ -23,7 +23,13 @@ struct YawacApp: App {
         let mgr = TranslationModelManager()
         mgr.refreshState()
         let engine = TranslationEngine()
-        let vm = TranslationViewModel(store: store, model: mgr, engine: engine)
+        let vm = TranslationViewModel(
+            store: store,
+            model: mgr,
+            loadEngine: { url in try await engine.load(modelDir: url) },
+            translateText: { text, source, target in
+                try await engine.translate(text, from: source, to: target)
+            })
         // Kick off engine load in the background if model is on disk
         // already. First translate after launch is then instant.
         if case .ready(let dir) = mgr.state {

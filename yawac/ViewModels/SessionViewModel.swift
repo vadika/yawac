@@ -18,7 +18,7 @@ final class SessionViewModel {
     /// Pending join-request counts per group, surfaced in the chat list
     /// badge and admin panel header. Recreated when the WAClient is built
     /// in `boot()` so the store can fan out queue refreshes via the bridge.
-    private(set) var joinRequestStore: JoinRequestStore = JoinRequestStore(client: nil)
+    private(set) var joinRequestStore: JoinRequestStore = JoinRequestStore()
     /// SwiftData context injected from `ContentView.task` once the
     /// environment is in scope. Read by `requestHistoryBackfillIfNeeded`
     /// to find the globally-oldest persisted message before issuing a
@@ -580,8 +580,10 @@ final class SessionViewModel {
             let c = try WAClient(dbPath: url.path)
             self.client = c
             // Rebind the join-request store now that the bridge client exists.
-            // `JoinRequestStore.client` is immutable, so we swap the instance.
-            self.joinRequestStore = JoinRequestStore(client: c)
+            // The fetch closure is immutable on the store, so we swap the instance.
+            self.joinRequestStore = JoinRequestStore { chatJID in
+                try c.getGroupJoinRequests(chatJID: chatJID)
+            }
             try c.connect()
             self.state = c.isLoggedIn ? .ready : .needsPair
             hydratePushNamesFromStore()

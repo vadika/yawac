@@ -4,9 +4,16 @@ import SwiftUI
 
 @Observable @MainActor
 final class TranslationViewModel {
+    /// MLX engine call signatures. `TranslationEngine` provides both in
+    /// production; tests pass inline closures that record arguments and
+    /// return canned results.
+    typealias LoadEngine = @Sendable (URL) async throws -> Void
+    typealias TranslateText = @Sendable (String, String, String) async throws -> String
+
     let store: TranslationStore
     let model: TranslationModelManager
-    let engine: TranslationEngineProtocol
+    let loadEngine: LoadEngine
+    let translateText: TranslateText
 
     /// Backing storage for AppStorage. The actual `@AppStorage` wrapper
     /// lives in views — we expose them as plain properties here so the
@@ -21,10 +28,12 @@ final class TranslationViewModel {
 
     init(store: TranslationStore,
          model: TranslationModelManager,
-         engine: TranslationEngineProtocol) {
+         loadEngine: @escaping LoadEngine,
+         translateText: @escaping TranslateText) {
         self.store = store
         self.model = model
-        self.engine = engine
+        self.loadEngine = loadEngine
+        self.translateText = translateText
         refreshFromDefaults()
     }
 
@@ -73,15 +82,15 @@ final class TranslationViewModel {
         // model arrived after app launch and the AppRoot preload never
         // ran.
         do {
-            try await engine.load(modelDir: modelDir)
+            try await loadEngine(modelDir)
         } catch {
             NSLog("[yawac/translate] engine load failed: %@", "\(error)")
             store.fail(surfaceID)
             return
         }
         do {
-            let translated = try await engine.translate(
-                text, from: source, to: targetLang)
+            let translated = try await translateText(
+                text, source, targetLang)
             store.finish(surfaceID, with: TranslationStore.Entry(
                 original: text,
                 translated: translated,

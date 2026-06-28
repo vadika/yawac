@@ -19,11 +19,10 @@ final class JoinRequestStoreTests: XCTestCase {
     }
 
     func testRefreshSetsCountFromClient() async {
-        let client = StubJoinRequestClient(responses: [
-            "g1@g.us": [BridgeJoinRequest(jid: "u@s.whatsapp.net",
-                                          requestedAt: 1)]
-        ])
-        let store = JoinRequestStore(client: client)
+        let store = JoinRequestStore { chatJID in
+            guard chatJID == "g1@g.us" else { return [] }
+            return [BridgeJoinRequest(jid: "u@s.whatsapp.net", requestedAt: 1)]
+        }
         await store.refresh(chatJID: "g1@g.us")
         XCTAssertEqual(store.counts["g1@g.us"], 1)
     }
@@ -31,9 +30,12 @@ final class JoinRequestStoreTests: XCTestCase {
     func testRefreshAllAdminBoundedConcurrency() async {
         let probe = ConcurrencyProbe()
         let chats = (0..<10).map { "g\($0)@g.us" }
-        let client = StubJoinRequestClient(probe: probe,
-                                           responsesFor: chats)
-        let store = JoinRequestStore(client: client)
+        let store = JoinRequestStore { _ in
+            probe.enter()
+            defer { probe.leave() }
+            Thread.sleep(forTimeInterval: 0.02)
+            return [BridgeJoinRequest(jid: "u@s.whatsapp.net", requestedAt: 1)]
+        }
         await store.refreshAllAdmin(chatJIDs: chats)
         XCTAssertLessThanOrEqual(probe.peakConcurrency, 4)
         for chat in chats {
@@ -54,27 +56,5 @@ final class ConcurrencyProbe: @unchecked Sendable {
     func leave() {
         lock.lock(); defer { lock.unlock() }
         inFlight -= 1
-    }
-}
-
-final class StubJoinRequestClient: JoinRequestClient, @unchecked Sendable {
-    private let responses: [String: [BridgeJoinRequest]]
-    private let probe: ConcurrencyProbe?
-    init(responses: [String: [BridgeJoinRequest]] = [:],
-         probe: ConcurrencyProbe? = nil) {
-        self.responses = responses
-        self.probe = probe
-    }
-    convenience init(probe: ConcurrencyProbe, responsesFor chats: [String]) {
-        let map = Dictionary(uniqueKeysWithValues: chats.map {
-            ($0, [BridgeJoinRequest(jid: "u@s.whatsapp.net", requestedAt: 1)])
-        })
-        self.init(responses: map, probe: probe)
-    }
-    func getGroupJoinRequests(chatJID: String) throws -> [BridgeJoinRequest] {
-        probe?.enter()
-        defer { probe?.leave() }
-        Thread.sleep(forTimeInterval: 0.02)
-        return responses[chatJID] ?? []
     }
 }
