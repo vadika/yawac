@@ -52,6 +52,15 @@ final class PersistedMessage {
     // Contact card (vCard payload + parsed display name).
     var contactVCard: String? = nil
     var contactDisplayName: String? = nil
+    /// F104: JSON-encoded `[BridgeContactPayload]` for multi-contact
+    /// (ContactsArrayMessage) bubbles. nil for single-contact and
+    /// non-contact kinds. Stored as a single column so the SwiftData
+    /// migration stays lightweight — a new optional field with a
+    /// default `nil` is back-compatible without a VersionedSchema
+    /// bump (see `project_swiftdata_index_migration.md` — VersionedSchema
+    /// for additive optionals crashes at launch with duplicate-checksum
+    /// because the attribute graph hash is identical).
+    var contactsJSON: String? = nil
     // Delivery state for fromMe messages: "sent" | "delivered" | "read" | "played".
     // Defaulted so existing rows migrate lightweight.
     var deliveryStatus: String = "sent"
@@ -116,6 +125,7 @@ final class PersistedMessage {
          locationSequence: Int64? = nil,
          contactVCard: String? = nil,
          contactDisplayName: String? = nil,
+         contactsJSON: String? = nil,
          deliveryStatus: String = "sent",
          senderPushName: String? = nil,
          quotedMessageID: String? = nil,
@@ -157,6 +167,7 @@ final class PersistedMessage {
         self.locationSequence = locationSequence
         self.contactVCard = contactVCard
         self.contactDisplayName = contactDisplayName
+        self.contactsJSON = contactsJSON
         self.deliveryStatus = deliveryStatus
         self.senderPushName = senderPushName
         self.quotedMessageID = quotedMessageID

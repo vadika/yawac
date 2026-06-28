@@ -411,6 +411,43 @@ final class ConversationViewModel {
             } else {
                 body = .system(p.kind)
             }
+        case "contact":
+            // Single ContactMessage row written by persistOutgoingContact /
+            // the receive path. Rebuild the ContactPayload directly from
+            // the persisted vCard so the bubble survives a cold reopen.
+            if let vcard = p.contactVCard {
+                let waid = VCardBuilder.parseWAID(vcard) ?? ""
+                let jid = waid.isEmpty ? "" : "\(waid)@s.whatsapp.net"
+                let phone = waid.isEmpty ? "" : "+\(waid)"
+                body = .contact(ContactPayload(
+                    jid: jid,
+                    displayName: p.contactDisplayName ?? "",
+                    phone: phone,
+                    vcard: vcard))
+            } else {
+                body = .system("(contact)")
+            }
+        case "contacts":
+            // F104: ContactsArrayMessage row — decode the JSON-encoded
+            // [BridgeContactPayload] back into `[ContactPayload]` so the
+            // stacked bubble renders without a round-trip through the
+            // bridge.
+            if let json = p.contactsJSON,
+               let data = json.data(using: .utf8),
+               let arr = try? JSONDecoder().decode([BridgeContactPayload].self,
+                                                    from: data) {
+                let cards = arr.map { c -> ContactPayload in
+                    let waid = VCardBuilder.parseWAID(c.vcard) ?? ""
+                    let jid = waid.isEmpty ? "" : "\(waid)@s.whatsapp.net"
+                    let phone = waid.isEmpty ? "" : "+\(waid)"
+                    return ContactPayload(
+                        jid: jid, displayName: c.displayName,
+                        phone: phone, vcard: c.vcard)
+                }
+                body = .contacts(cards)
+            } else {
+                body = .system("(contacts)")
+            }
         default:
             if let t = p.text, !t.isEmpty {
                 body = .system(t)
@@ -2171,8 +2208,18 @@ final class ConversationViewModel {
         for loc in locs {
             await sendOneLocation(loc)
         }
-        for card in cards {
-            await sendOneContact(card)
+        // F104d: WhatsApp distinguishes ContactMessage (one card) from
+        // ContactsArrayMessage (N cards in a single envelope). Match the
+        // server-side shape — a lone card stays on the single-message
+        // path (back-compat with rows persisted before F104 + readable
+        // by older clients), while ≥2 cards fire one ContactsArrayMessage
+        // so the recipient sees one stacked bubble instead of N rows.
+        if cards.count >= 2 {
+            await sendManyContacts(cards)
+        } else {
+            for card in cards {
+                await sendOneContact(card)
+            }
         }
     }
 
@@ -2295,6 +2342,51 @@ final class ConversationViewModel {
                 fromMe: false,
                 timestamp: .now,
                 body: .system("send failed: \(error.localizedDescription)"))
+            messages.append(sys)
+            messageIDs.insert(sys.id)
+            invalidateTimeline()
+        }
+    }
+
+    /// Dispatch ≥2 staged contact cards through the bridge as a single
+    /// ContactsArrayMessage and append one bubble carrying all of them.
+    /// Display name is the first card's name + " and N other(s)" so the
+    /// recipient list-view preview line is human-readable (mirrors how
+    /// WhatsApp summarises array-contact threads in the chat list).
+    private func sendManyContacts(_ cards: [ContactPayload]) async {
+        let displayName: String = {
+            guard let first = cards.first else { return "Contacts" }
+            let extra = cards.count - 1
+            return extra > 0
+                ? "\(first.displayName) and \(extra) other\(extra == 1 ? "" : "s")"
+                : first.displayName
+        }()
+        do {
+            let res = try client.sendContacts(
+                chatJID: chatJID,
+                displayName: displayName,
+                vcards: cards.map { $0.vcard },
+                ephemeralSeconds: ephemeralExpirationSeconds)
+            let m = UIMessage(
+                id: res.messageID,
+                chatJID: chatJID,
+                senderJID: "me",
+                fromMe: true,
+                timestamp: Date(timeIntervalSince1970: TimeInterval(res.timestamp)),
+                body: .contacts(cards))
+            messages.append(m)
+            messageIDs.insert(m.id)
+            invalidateTimeline()
+            receiptStatus[res.messageID] = .sent
+            persistOutgoingContacts(m, contacts: cards)
+        } catch {
+            let sys = UIMessage(
+                id: UUID().uuidString,
+                chatJID: chatJID,
+                senderJID: "system",
+                fromMe: false,
+                timestamp: .now,
+                body: .system("Failed to send contacts: \(error.localizedDescription)"))
             messages.append(sys)
             messageIDs.insert(sys.id)
             invalidateTimeline()
@@ -2508,6 +2600,28 @@ final class ConversationViewModel {
             text: nil,
             contactVCard: contact.vcard,
             contactDisplayName: contact.displayName)
+        context.insert(row)
+        try? context.save()
+        MessageIndex.shared.upsert(row.indexFields)
+    }
+
+    /// Outbound multi-contact persistence. Stores the array of vCard
+    /// payloads as a single JSON column so a cold reopen can re-hydrate
+    /// the same `UIMessage.Body.contacts(...)` bubble. Schema-wise this
+    /// is a new optional column with a `nil` default — lightweight
+    /// migration handles it (no VersionedSchema bump, no #Index — both
+    /// would burn the store per `project_swiftdata_index_migration.md`).
+    private func persistOutgoingContacts(_ m: UIMessage, contacts: [ContactPayload]) {
+        guard let context else { return }
+        let payloads = contacts.map { c -> BridgeContactPayload in
+            BridgeContactPayload(vcard: c.vcard, displayName: c.displayName)
+        }
+        let data = (try? JSONEncoder().encode(payloads)) ?? Data()
+        let row = PersistedMessage(
+            id: m.id, chatJID: m.chatJID, senderJID: m.senderJID,
+            fromMe: m.fromMe, timestamp: m.timestamp, kind: "contacts",
+            text: nil,
+            contactsJSON: String(data: data, encoding: .utf8))
         context.insert(row)
         try? context.save()
         MessageIndex.shared.upsert(row.indexFields)
