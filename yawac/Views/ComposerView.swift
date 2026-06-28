@@ -201,7 +201,11 @@ struct ComposerView: View {
     @discardableResult
     private func pasteAttachmentsFromPasteboard() -> Bool {
         let pb = NSPasteboard.general
-        if let urls = pb.readObjects(forClasses: [NSURL.self], options: nil) as? [URL],
+        // File URLs only — Chrome/Safari "Copy Image" puts its https source
+        // URL on the pasteboard alongside the bitmap; without this filter
+        // the URL branch wins and we try to stage the web URL as a file.
+        let fileOnly: [NSPasteboard.ReadingOptionKey: Any] = [.urlReadingFileURLsOnly: true]
+        if let urls = pb.readObjects(forClasses: [NSURL.self], options: fileOnly) as? [URL],
            !urls.isEmpty {
             for url in urls { vm.stageAttachment(at: url) }
             return true
