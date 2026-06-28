@@ -210,6 +210,34 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **F101 + F102 — composer image-paste + folder-rail drag-drop** (v0.10.34) —
+  Two UI regressions: pasting any image into the chat composer was a
+  no-op, and reordering folder icons / dragging chats onto folders had
+  silently never worked since F91 shipped.
+  - **F101 (paste).** `ComposerView.pasteAttachmentsFromPasteboard`
+    read NSURL with no options, so Chrome/Safari "Copy Image" (which
+    puts the source `https://` URL on the pasteboard alongside the
+    bitmap) hit the URL branch first and tried to stage the web URL
+    as a local file. Added `.urlReadingFileURLsOnly: true` so the URL
+    branch only fires for `file://` (Finder copy), and web-image /
+    screenshot paste falls through to the NSImage→PNG branch.
+  - **F102 (folder rail).** Three layered bugs all hit at once:
+    (1) the custom UTIs `dev.vadikas.yawac.chatjid` + `.folderid`
+    were declared via `UTType(exportedAs:)` but never registered in
+    `UTExportedTypeDeclarations`, so LaunchServices treated them as
+    unknown and `.dropDestination(for:)` / `.onDrop(of:)` never got
+    items; (2) two `.dropDestination` modifiers stacked on the same
+    view registered only the first, so the folder-reorder target was
+    shadowed by the chat-add target; (3) `FolderRailItem` was a
+    Button — its tap-target competed with `.draggable` (same root
+    cause as the v0.10.22 `.draggable → .onDrag/NSItemProvider`
+    workaround). Plist entries added, two `.dropDestination`s
+    collapsed into one `.onDrop([.folderID, .chatJID])` that
+    dispatches by NSItemProvider type, and `FolderRailItem` is now a
+    plain View with `.onTapGesture`. The dead
+    `FolderIDTransferNSObject` wrapper from the v0.10.22 workaround
+    is removed.
+
 - ✅ **F100 — Issue #6 ROOT CAUSE: late-subscriber misses pump fan-out** (v0.10.33) —
   GitHub issue #6 chased through F83/F84/F89/F92/F93/F94 — each closed a
   different failure mode, none was the actual root. F99 debug session
