@@ -213,6 +213,43 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **F109 + F111 + F112 — ponytail-audit phase 3 (partial)** (v0.10.40) —
+  Three independent refactor passes from the audit, no behavior
+  change. F110 (drop `WAClient.bump()` counters + Diagnostics
+  call-counts section) deferred — touches a user-visible panel.
+  - **F111.** `ContactPayload.vcard` is now a computed property
+    deriving from `VCardBuilder.build(jid:name:phone:)` rather
+    than a stored String. The builder is pure-deterministic and
+    yawac never surfaces any vCard field beyond name / phone /
+    waid (MessageRow only reads the waid for the "Message on
+    WhatsApp" button). `fromVCard` keeps the inbound `vcard:`
+    parameter to extract the waid → jid + phone, but drops the
+    field from the returned struct. The follow-up commit adds a
+    `!card.jid.isEmpty` guard on the WhatsApp button so an
+    inbound vCard without a waid doesn't render a button that
+    routes to "@s.whatsapp.net", and deletes
+    `JIDNormalizeTests.testKeyIsCanonical` (orphaned by F108).
+  - **F109.** Seven single-impl protocols deleted: GroupCreator,
+    RequestUpdater, CommunityCreator, SubGroupLinker,
+    SubGroupCreator, JoinRequestClient,
+    TranslationEngineProtocol. Each existed solely as a test
+    seam with `WAClient` (or the TranslationEngine actor) as the
+    sole production conformer. Closure injection delivers the
+    same testability with less abstraction surface: each
+    consumer takes the `@Sendable` closure(s) it actually
+    calls, production wires `client.<method>`, tests pass inline
+    literals recording the call. Real implementations on
+    WAClient and TranslationEngine stay where they were.
+  - **F112.** Extracted `WAClient.decodeJSON` generic helper to
+    fold 29 identical `try JSONDecoder().decode(X.self, from:
+    Data(json.utf8))` call sites in WAClient. The audit's
+    original `.convertFromSnakeCase` suggestion was unsafe —
+    Swift converts `chat_jid` → `chatJid` (lowercase d), not
+    `chatJID`; applying it would force a cascading rename of
+    every property on every type. The per-event local structs
+    inside `decode(kind:payload:)` and `try?`-flavored sites
+    are intentionally untouched.
+
 - ✅ **F108 — ponytail-audit renames + shrinks** (v0.10.39) —
   Phase 2 of the audit. Zero behavior change, -90 LOC net across
   21 files. Cuts: `SettingsPalette` deleted (3 unique keys folded
