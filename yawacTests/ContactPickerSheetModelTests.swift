@@ -4,28 +4,38 @@ import XCTest
 @MainActor
 final class ContactPickerSheetModelTests: XCTestCase {
 
-    func testCanSendRequiresSelection() {
-        let m = ContactPickerSheetModel(contacts: [])
-        XCTAssertFalse(m.canSend)
-        m.selectedJID = "1@s.whatsapp.net"
-        XCTAssertTrue(m.canSend)
+    private func make(_ jids: [String]) -> ContactPickerSheetModel {
+        let contacts = jids.map {
+            BridgeContact(jid: $0, name: $0.prefix(2).uppercased(),
+                          pushName: nil, fullName: nil, businessName: nil)
+        }
+        return ContactPickerSheetModel(contacts: contacts)
     }
 
-    func testBuildPayloadFromSelection() {
-        let contacts = [
-            BridgeContact(jid: "358405551234@s.whatsapp.net",
-                          name: "Anna",
-                          pushName: nil,
-                          fullName: nil,
-                          businessName: nil)
-        ]
-        let m = ContactPickerSheetModel(contacts: contacts)
-        m.selectedJID = "358405551234@s.whatsapp.net"
-        let payload = m.buildPayload()
-        XCTAssertNotNil(payload)
-        XCTAssertEqual(payload?.displayName, "Anna")
-        XCTAssertEqual(payload?.jid, "358405551234@s.whatsapp.net")
-        XCTAssertEqual(payload?.phone, "+358405551234")
-        XCTAssertTrue(payload?.vcard.contains("waid=358405551234") ?? false)
+    func test_toggle_adds_then_removes() {
+        let m = make(["111@s.whatsapp.net", "222@s.whatsapp.net"])
+        XCTAssertTrue(m.selectedJIDs.isEmpty)
+        XCTAssertFalse(m.canSend)
+        m.toggle("111@s.whatsapp.net")
+        XCTAssertEqual(m.selectedJIDs, ["111@s.whatsapp.net"])
+        XCTAssertTrue(m.canSend)
+        m.toggle("111@s.whatsapp.net")
+        XCTAssertTrue(m.selectedJIDs.isEmpty)
+        XCTAssertFalse(m.canSend)
+    }
+
+    func test_buildPayloads_preserves_contacts_order_not_selection_order() {
+        let m = make(["111@s.whatsapp.net", "222@s.whatsapp.net", "333@s.whatsapp.net"])
+        // Select in reverse order.
+        m.toggle("333@s.whatsapp.net")
+        m.toggle("111@s.whatsapp.net")
+        let payloads = m.buildPayloads()
+        XCTAssertEqual(payloads.map { $0.jid },
+                       ["111@s.whatsapp.net", "333@s.whatsapp.net"])
+    }
+
+    func test_buildPayloads_empty_when_nothing_selected() {
+        let m = make(["111@s.whatsapp.net"])
+        XCTAssertEqual(m.buildPayloads(), [])
     }
 }

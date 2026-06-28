@@ -3,23 +3,23 @@ import Observation
 
 /// Drives the "send a WhatsApp contact" composer sheet.
 ///
-/// Holds the contact list, the search query, and the currently
-/// selected JID. `buildPayload()` produces a `ContactPayload` whose
-/// vCard is built via `VCardBuilder.build`, carrying the `waid`
-/// parameter so the recipient sees a tappable "Message on WhatsApp"
-/// button.
+/// Holds the contact list, the search query, and the set of currently
+/// selected JIDs. `buildPayloads()` produces a stable-ordered array of
+/// `ContactPayload`s (one per selected contact, in original contacts
+/// list order). Each vCard is built via `VCardBuilder.build` so the
+/// recipient sees a tappable "Message on WhatsApp" button per card.
 @MainActor
 @Observable
 final class ContactPickerSheetModel {
     let contacts: [BridgeContact]
     var query: String = ""
-    var selectedJID: String?
+    var selectedJIDs: Set<String> = []
 
     init(contacts: [BridgeContact]) {
         self.contacts = contacts
     }
 
-    var canSend: Bool { selectedJID != nil }
+    var canSend: Bool { !selectedJIDs.isEmpty }
 
     var filtered: [BridgeContact] {
         guard !query.isEmpty else { return contacts }
@@ -30,20 +30,34 @@ final class ContactPickerSheetModel {
         }
     }
 
-    func buildPayload() -> ContactPayload? {
-        guard let jid = selectedJID,
-              let contact = contacts.first(where: { $0.jid == jid }) else {
-            return nil
+    func toggle(_ jid: String) {
+        if selectedJIDs.contains(jid) {
+            selectedJIDs.remove(jid)
+        } else {
+            selectedJIDs.insert(jid)
         }
-        let phoneDigits = String(jid.split(separator: "@").first ?? "")
-        let phone = "+" + phoneDigits
-        return ContactPayload(
-            jid: jid,
-            displayName: contact.name,
-            phone: phone,
-            vcard: VCardBuilder.build(
-                jid: jid,
-                name: contact.name,
-                phone: phone))
+    }
+
+    func isSelected(_ jid: String) -> Bool {
+        selectedJIDs.contains(jid)
+    }
+
+    /// Build payloads in the original contacts list order (NOT
+    /// selection order) so the resulting bubble reads predictably and
+    /// the composer chip strip stays stable across re-selections.
+    func buildPayloads() -> [ContactPayload] {
+        contacts.compactMap { c -> ContactPayload? in
+            guard selectedJIDs.contains(c.jid) else { return nil }
+            let phoneDigits = String(c.jid.split(separator: "@").first ?? "")
+            let phone = "+" + phoneDigits
+            return ContactPayload(
+                jid: c.jid,
+                displayName: c.name,
+                phone: phone,
+                vcard: VCardBuilder.build(
+                    jid: c.jid,
+                    name: c.name,
+                    phone: phone))
+        }
     }
 }

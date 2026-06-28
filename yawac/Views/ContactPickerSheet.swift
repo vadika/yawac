@@ -3,7 +3,7 @@ import SwiftUI
 struct ContactPickerSheet: View {
     @Bindable var model: ContactPickerSheetModel
     @Environment(\.dismiss) private var dismiss
-    var onSend: (ContactPayload) -> Void
+    var onSend: ([ContactPayload]) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -12,20 +12,32 @@ struct ContactPickerSheet: View {
             TextField("Search", text: $model.query)
                 .textFieldStyle(.roundedBorder)
 
-            List(model.filtered, id: \.jid,
-                 selection: $model.selectedJID) { contact in
-                Text(contact.name).tag(contact.jid as String?)
+            List(model.filtered, id: \.jid) { contact in
+                Button {
+                    model.toggle(contact.jid)
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: model.isSelected(contact.jid)
+                              ? "checkmark.circle.fill" : "circle")
+                            .foregroundStyle(model.isSelected(contact.jid)
+                                             ? Theme.accent : Theme.textMuted)
+                        Text(contact.name)
+                        Spacer()
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
             }
             .frame(minHeight: 280)
 
             HStack {
                 Spacer()
                 Button("Cancel") { dismiss() }
-                Button("Send") {
-                    if let p = model.buildPayload() {
-                        onSend(p)
-                        dismiss()
-                    }
+                Button(sendButtonLabel) {
+                    let payloads = model.buildPayloads()
+                    guard !payloads.isEmpty else { return }
+                    onSend(payloads)
+                    dismiss()
                 }
                 .keyboardShortcut(.defaultAction)
                 .disabled(!model.canSend)
@@ -33,5 +45,11 @@ struct ContactPickerSheet: View {
         }
         .padding(20)
         .frame(width: 420)
+    }
+
+    private var sendButtonLabel: String {
+        model.selectedJIDs.count >= 2
+            ? "Send \(model.selectedJIDs.count) contacts"
+            : "Send"
     }
 }

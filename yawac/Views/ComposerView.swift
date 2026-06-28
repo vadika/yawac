@@ -128,8 +128,8 @@ struct ComposerView: View {
         .sheet(isPresented: $showContactPicker) {
             ContactPickerSheet(
                 model: ContactPickerSheetModel(contacts: contactsForPicker),
-                onSend: { payload in
-                    vm.stageContact(payload)
+                onSend: { payloads in
+                    for p in payloads { vm.stageContact(p) }
                 }
             )
         }
