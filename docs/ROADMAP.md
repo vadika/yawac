@@ -213,6 +213,30 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **F107 — ponytail-audit dead-code purge** (v0.10.38) —
+  Phase 1 of a wider over-engineering pass. Zero behavior change,
+  -575 LOC across 20 files. Cuts: `bridge/offline_drain.go`
+  (issue-#6 diagnostic, F100 fixed the underlying race), the
+  paired `bridge/offline_drain_test.go`, the OfflineSyncCompleted
+  payload trimmed to just `server_count` (Swift never read the
+  other fields); `yawac/Services/WakeRateProbe.swift` +
+  `WakeRateProbe.start()` boot wire (post-audit instrumentation);
+  `AvatarLog` enum + every call site in `AvatarCache.swift`,
+  `AvatarView.swift`, and `bridge/avatars.go` (env-gated logger
+  never enabled in ship); `ThumbnailCache.flushAll()` (zero
+  callers post-F105); `yawac/Utilities/ImageEncoders.swift` (zero
+  callers); `bridge.Version()` + `bridgeVersion` constant + paired
+  `bridge_test.go` (zero Swift consumers);
+  `yawac/ViewModels/GroupsViewModel.swift` (15-line @Observable
+  wrapper inlined at its sole caller);
+  `ChatRef.Kind` enum + field (written, never read);
+  `yawacTests/OwnProfileEditTests.swift` (covered by
+  SessionViewModelSelfChatTests), `yawacTests/SmokeTests.swift`,
+  `yawacTests/AppPathsTests.swift` (test framework guarantees,
+  not us). Phase 2 (rename / alias sweep: SettingsPalette →
+  Theme, JIDNormalize.key → canonical, etc.) and Phase 3 (single-
+  impl protocols + bump counters) remain.
+
 - ✅ **F106 — mirror push-name across LID↔PN forms** (v0.10.37) —
   Group bubbles for a 1:1 contact fell back to the bare LID digits
   ("+<15-digit-lid>") instead of the saved push-name because
