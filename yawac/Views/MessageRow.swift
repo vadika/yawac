@@ -639,15 +639,8 @@ struct MessageRow: View {
             locationBubble(loc, isLive: isLive)
         case .contact(let c):
             contactBubble(c)
-        case .contacts(let cards):
-            // T3 placeholder — Task 6 closes the proper multi-card render.
-            // Fall back to single-card bubble of the first vCard so the row
-            // still paints something meaningful in the interim.
-            if let first = cards.first {
-                contactBubble(first)
-            } else {
-                Text("(contacts)").font(.caption).foregroundStyle(.secondary)
-            }
+        case .contacts(let cs):
+            contactsBubble(cs)
         case .system(let s):
             Text(s).font(.caption).foregroundStyle(.secondary)
         }
@@ -759,6 +752,30 @@ struct MessageRow: View {
         }
         .padding(10)
         .frame(width: 220, alignment: .leading)
+        .background(Theme.surface)
+        .clipShape(RoundedRectangle(cornerRadius: Theme.bubbleRadius))
+    }
+
+    @ViewBuilder
+    private func contactsBubble(_ cards: [ContactPayload]) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: "person.2.fill")
+                    .scaledIcon(13)
+                    .foregroundStyle(Theme.textMuted)
+                Text("\(cards.count) contacts")
+                    .scaledUI(11, weight: .semibold)
+                    .foregroundStyle(Theme.textMuted)
+            }
+            Divider()
+            // One row per card, reusing the single-contact render so
+            // tappable "Message on WhatsApp" stays wired per row.
+            ForEach(Array(cards.enumerated()), id: \.offset) { _, c in
+                contactBubble(c)
+            }
+        }
+        .padding(10)
+        .frame(width: 240, alignment: .leading)
         .background(Theme.surface)
         .clipShape(RoundedRectangle(cornerRadius: Theme.bubbleRadius))
     }
