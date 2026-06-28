@@ -88,55 +88,18 @@ final class ThumbnailCache {
     static let videoThumbMaxPixelExternal = 720
     static let avatarMaxPixelExternal = 200
 
-    init() {
-        // F34: flush every cache when the app has been inactive for 5
-        // minutes. Original F34 flushed instantly on
-        // didResignActiveNotification — i.e. the moment the user
-        // Cmd-Tabbed away — which made every return-to-yawac repaint
-        // every visible bubble from a cold decode (all media + avatar
-        // bubbles blinked). The 5-minute idle gate keeps the memory-
-        // reclaim win on genuinely-backgrounded sessions while making
-        // quick app switches free. didBecomeActive cancels the
-        // pending flush so the caches survive across rapid back-and-
-        // forth.
-        NotificationCenter.default.addObserver(
-            forName: NSApplication.didResignActiveNotification,
-            object: nil, queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                self?.scheduleIdleFlush()
-            }
-        }
-        NotificationCenter.default.addObserver(
-            forName: NSApplication.didBecomeActiveNotification,
-            object: nil, queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                self?.pendingFlush?.cancel()
-                self?.pendingFlush = nil
-            }
-        }
-    }
-
-    /// Coalesced 5-minute idle flush. Cancelled when the app comes
-    /// back to the foreground before the sleep elapses.
-    @ObservationIgnored private var pendingFlush: Task<Void, Never>?
-
-    private func scheduleIdleFlush() {
-        pendingFlush?.cancel()
-        pendingFlush = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .seconds(5 * 60))
-            guard let self else { return }
-            if Task.isCancelled { return }
-            self.pendingFlush = nil
-            self.flushAll()
-        }
-    }
+    init() {}
 
     /// Drop every NSCache + clear inflight + negative + cache sets.
-    /// Called when the app resigns active so an idle yawac in the
-    /// background doesn't keep a few hundred MB of NSImage backing
-    /// resident. Public so a future "low memory" hook can call it too.
+    /// No longer wired to didResignActive — F34's 5-minute idle flush
+    /// caused the "all images blink after long idle" symptom: every
+    /// visible body re-eval'd against empty caches on return, fired
+    /// cold decodes, then re-rendered as decodes settled. NSCache
+    /// already evicts under memory pressure via totalCostLimit, so
+    /// the manual flush only ever traded a visible regression for a
+    /// memory savings the system can produce on its own. Kept public
+    /// for a future "low memory" hook to call if measurements ever
+    /// show the OS is not reclaiming on its own.
     func flushAll() {
         cache.removeAllObjects()
         videoCache.removeAllObjects()

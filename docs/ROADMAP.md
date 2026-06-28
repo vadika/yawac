@@ -213,6 +213,18 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **F105 — drop ThumbnailCache idle flush** (v0.10.36) —
+  `ThumbnailCache.scheduleIdleFlush` (F34) wiped every NSCache 5
+  minutes after `didResignActive` then bumped all three revisions
+  on return, so coming back to a long-idle yawac repainted every
+  visible bubble from a cold decode — the "all pictures and avatars
+  blink" symptom. `NSCache.totalCostLimit` already caps memory and
+  the OS reclaims under pressure, so the manual flush only ever
+  traded a visible regression for a savings the system can produce
+  on its own. Deleted the resign/become-active observers + the
+  scheduler + the pendingFlush field; kept `flushAll()` for a
+  hypothetical future low-memory hook.
+
 - ✅ **F103 + F104 — pin-drag re-geocode + multi-contact vCard** (v0.10.35) —
   Two roadmap gaps closed without new protocol surface.
   - **F103.** LocationPickerSheet swaps the legacy
