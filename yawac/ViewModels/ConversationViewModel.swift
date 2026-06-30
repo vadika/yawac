@@ -118,15 +118,15 @@ final class ConversationViewModel {
     var downloadErrors: [String: String] = [:]
     let client: WAClient
     private let context: ModelContext?
-    private var downloadTasks: [String: Task<Void, Never>] = [:]
+    @ObservationIgnored private var downloadTasks: [String: Task<Void, Never>] = [:]
     // One retry-request per message id per session — avoids hammering the
     // phone with redundant SendMediaRetryReceipt calls if download retries
     // keep failing.
-    private var retriesRequested: Set<String> = []
+    @ObservationIgnored private var retriesRequested: Set<String> = []
     /// Set once per chat session after an auto-backfill burst for
     /// expired media. Stops the loadHistory pass from re-firing the
     /// burst on every refresh.
-    private var didAutoRefetchExpired = false
+    @ObservationIgnored private var didAutoRefetchExpired = false
     // On-demand older-history state. `loadingOlder` is private(set) so the
     // view can read it for the spinner; `olderUnavailable` is set when a
     // RequestOlderHistory call produced no new rows within the wait window,
@@ -254,7 +254,7 @@ final class ConversationViewModel {
         }
     }
 
-    private var findTask: Task<Void, Never>?
+    @ObservationIgnored private var findTask: Task<Void, Never>?
     private let findDebounceMs: Int = 120
 
     private func scheduleFind() {
@@ -1293,38 +1293,7 @@ final class ConversationViewModel {
         let displayable = rows.filter { p in
             p.kind != "reaction" && p.kind != "protocol" && p.kind != "system"
         }
-        let messages: [UIMessage] = displayable.map { p in
-            let body: UIMessage.Body
-            switch p.kind {
-            case "text":
-                body = .text(p.text ?? "")
-            case "image", "video", "audio", "document", "sticker":
-                body = .media(kind: p.kind, caption: p.mediaCaption,
-                              fileName: p.mediaFileName, localPath: p.mediaPath,
-                              waveform: p.audioWaveform, isPTT: p.isPTT)
-            case "poll":
-                if let json = p.pollJSON,
-                   let data = json.data(using: .utf8),
-                   let poll = try? JSONDecoder().decode(BridgePoll.self, from: data) {
-                    body = .poll(question: poll.question,
-                                 options: poll.options,
-                                 selectableCount: poll.selectableCount)
-                } else {
-                    body = .system(p.kind)
-                }
-            default:
-                // F35: same fallback as the other two snapshot sites —
-                // surface the synthetic system text when present.
-                if let t = p.text, !t.isEmpty {
-                    body = .system(t)
-                } else {
-                    body = .system(p.kind)
-                }
-            }
-            return UIMessage(
-                id: p.id, chatJID: p.chatJID, senderJID: p.senderJID,
-                fromMe: p.fromMe, timestamp: p.timestamp, body: body)
-        }
+        let messages: [UIMessage] = displayable.map { Self.uiMessage(from: $0) }
         return .init(messages: messages)
     }
 
@@ -2724,8 +2693,8 @@ final class ConversationViewModel {
         chatList?.refreshPreview(chatJID: chatJID)
     }
 
-    private var pendingEdits:   PendingMap<(text: String, ts: Date)> = .init(cap: 256)
-    private var pendingRevokes: PendingMap<(by: String, ts: Date)>   = .init(cap: 256)
+    @ObservationIgnored private var pendingEdits:   PendingMap<(text: String, ts: Date)> = .init(cap: 256)
+    @ObservationIgnored private var pendingRevokes: PendingMap<(by: String, ts: Date)>   = .init(cap: 256)
 
     var pendingEditsCount: Int { pendingEdits.count }
     var pendingRevokesCount: Int { pendingRevokes.count }
@@ -3290,7 +3259,7 @@ final class ConversationViewModel {
 
     // MARK: - Draft persistence
 
-    private var draftSaveTask: Task<Void, Never>?
+    @ObservationIgnored private var draftSaveTask: Task<Void, Never>?
 
     /// Debounced PersistedChat.draft write triggered by every `draft`
     /// mutation. Coalesces rapid typing into a single SwiftData save

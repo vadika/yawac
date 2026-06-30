@@ -213,6 +213,36 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **F113 — ponytail-audit-2 phase A (correctness + perf)** (v0.10.41) —
+  Four surgical fixes from the second targeted audit pass over the
+  five largest components (ConversationViewModel, ChatInfoView,
+  ChatListViewModel, WAClient, messages.go).
+  - **@ObservationIgnored** on `ChatListViewModel.session` (weak
+    back-pointer set post-init, never read in a body) and on seven
+    internal-only `var`s in `ConversationViewModel`
+    (`downloadTasks`, `retriesRequested`, `didAutoRefetchExpired`,
+    `findTask`, `pendingEdits`, `pendingRevokes`, `draftSaveTask`).
+    Per the @Observable trap memory, every plain `var` on an
+    @Observable class fires willSet→invalidate on mutation; these
+    eight were silently re-bodying any view that touched the
+    enclosing model.
+  - **Quadratic merges → linear** in
+    `ChatListViewModel.mergeGroups` and `mergeContacts`. Both used
+    `chats.firstIndex(where:)` / `chats.contains(where:)` per
+    incoming item — initial group / contact sync after pair ships
+    hundreds to thousands of items. Now hoist an `idxByJID`
+    Dictionary / `known` Set once and mutate in-place across the
+    batch. O(n·k) → O(n+k).
+  - **buildEarlierSnapshot dedup.** The older-page body switch was
+    a 32-line copy of the centralized `Self.uiMessage(from:)`
+    builder, missing the contact / contacts arms and the full
+    metadata projection (edited, revoked, star, pin, forwarded,
+    viewOnce, quote). Replaced with a one-line
+    `displayable.map { Self.uiMessage(from: $0) }`. Earlier-page
+    rows now show the same metadata as first-page rows — corrective
+    behavior change, strictly additive (no removed rows).
+  - Diff: +15/-42 LOC across two files; all tests green.
+
 - ✅ **F109 + F111 + F112 — ponytail-audit phase 3 (partial)** (v0.10.40) —
   Three independent refactor passes from the audit, no behavior
   change. F110 (drop `WAClient.bump()` counters + Diagnostics

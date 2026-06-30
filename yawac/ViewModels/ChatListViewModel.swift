@@ -19,7 +19,7 @@ final class ChatListViewModel {
     /// Weak link back to the global session so the menubar icon can
     /// reflect the chats' aggregate unread count without subscribing
     /// to vm.chats directly from app-level scope.
-    weak var session: SessionViewModel?
+    @ObservationIgnored weak var session: SessionViewModel?
 
     init(client: WAClient?, context: ModelContext? = nil) {
         self.client = client
@@ -810,6 +810,7 @@ final class ChatListViewModel {
     }
 
     func mergeGroups(_ gs: [BridgeGroupModel]) {
+        var idxByJID = Dictionary(uniqueKeysWithValues: chats.enumerated().map { ($1.jid, $0) })
         for g in gs {
             let jid = JIDNormalize.canonical(g.jid, client: client)
             let parentJID: String? = {
@@ -818,7 +819,7 @@ final class ChatListViewModel {
                 return p
             }()
             let amAdmin = isCurrentUserAdmin(group: g)
-            if let idx = chats.firstIndex(where: { $0.jid == jid }) {
+            if let idx = idxByJID[jid] {
                 // Refresh community fields on existing chats so a previously
                 // synced regular-group row gets promoted to a community
                 // parent / sub-group if whatsmeow now reports it that way.
@@ -854,6 +855,7 @@ final class ChatListViewModel {
             fresh.isLocked = g.isLocked
             fresh.isAllMemberAdd = g.isAllMemberAdd
             chats.append(fresh)
+            idxByJID[jid] = chats.count - 1
             upsertPersisted(chats[chats.count - 1])
         }
         sortChats()
@@ -873,9 +875,10 @@ final class ChatListViewModel {
     }
 
     func mergeContacts(_ cs: [BridgeContact]) {
+        var known = Set(chats.map(\.jid))
         for c in cs {
             let jid = JIDNormalize.bare(c.jid)
-            if chats.contains(where: { $0.jid == jid }) { continue }
+            if known.contains(jid) { continue }
             if isTombstoned(jid) { continue }
             let chat = Chat(
                 jid: jid,
@@ -884,6 +887,7 @@ final class ChatListViewModel {
                 lastTimestamp: 0,
                 unread: 0)
             chats.append(chat)
+            known.insert(jid)
             upsertPersisted(chat)
         }
         sortChats()
