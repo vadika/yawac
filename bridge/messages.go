@@ -948,46 +948,9 @@ func extractContextInfoExpiration(m *waE2E.Message) uint32 {
 	if em := m.GetEphemeralMessage(); em != nil && em.Message != nil {
 		m = em.Message
 	}
-	if etm := m.GetExtendedTextMessage(); etm != nil {
-		if ci := etm.GetContextInfo(); ci != nil {
-			if e := ci.GetExpiration(); e > 0 {
-				return e
-			}
-		}
-	}
-	if im := m.GetImageMessage(); im != nil {
-		if ci := im.GetContextInfo(); ci != nil {
-			if e := ci.GetExpiration(); e > 0 {
-				return e
-			}
-		}
-	}
-	if vm := m.GetVideoMessage(); vm != nil {
-		if ci := vm.GetContextInfo(); ci != nil {
-			if e := ci.GetExpiration(); e > 0 {
-				return e
-			}
-		}
-	}
-	if am := m.GetAudioMessage(); am != nil {
-		if ci := am.GetContextInfo(); ci != nil {
-			if e := ci.GetExpiration(); e > 0 {
-				return e
-			}
-		}
-	}
-	if dm := m.GetDocumentMessage(); dm != nil {
-		if ci := dm.GetContextInfo(); ci != nil {
-			if e := ci.GetExpiration(); e > 0 {
-				return e
-			}
-		}
-	}
-	if sm := m.GetStickerMessage(); sm != nil {
-		if ci := sm.GetContextInfo(); ci != nil {
-			if e := ci.GetExpiration(); e > 0 {
-				return e
-			}
+	if ci := contextInfoFromMessage(m); ci != nil {
+		if e := ci.GetExpiration(); e > 0 {
+			return e
 		}
 	}
 	if cm := m.GetContactMessage(); cm != nil {

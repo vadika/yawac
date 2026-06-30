@@ -213,6 +213,34 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **F114 — ponytail-audit-2 phase B (mass dedup)** (v0.10.42) —
+  Two structural dedups from the same audit pass. Net -160 LOC.
+  - **ChatInfoView admin toggles → one helper.** Three identical
+    `applyAnnounceToggle` / `applyLockedToggle` /
+    `applyMemberAddModeToggle` funcs collapsed into a single
+    `applyGroupBoolToggle(_:keyPath:errorBinding:persist:)`. The
+    four admin toggle cards (ANNOUNCE / LOCKED / MEMBER ADD /
+    JOIN APPROVAL) collapsed into a single `adminBoolToggleCard`
+    view. The two `Disappearing messages` cards (1:1 path and
+    group-admin path) collapsed into a single
+    `disappearingMessagesCard(currentSeconds:chatJID:)`. The two
+    `schedule…ErrorAutodismiss` raw Task.sleep helpers were
+    replaced with the existing `.autodismiss($binding)` modifier
+    already used 8 other places in the file. ChatInfoView.swift:
+    -123 LOC.
+  - **bridge/messages.go** `extractContextInfoExpiration` was 8
+    near-identical `if X := m.GetX(); X != nil { if ci :=
+    X.GetContextInfo(); ci != nil { ... }}` arms. Folded to one
+    `contextInfoFromMessage(m)` call (covers 6 of 8 types) plus
+    two short inline arms for the missing types
+    (ContactMessage, LocationMessage). bridge/messages.go: -37
+    LOC. The B5 `resolveTargetSender` helper was scoped out
+    after reading the three call sites side-by-side — the third
+    (`SendTextReply`) diverges (returns String, different
+    fallback) and a 2-caller helper saves less LOC than the
+    helper itself adds. The other phase-B-and-C audit items
+    remain on the table for a later pass.
+
 - ✅ **F113 — ponytail-audit-2 phase A (correctness + perf)** (v0.10.41) —
   Four surgical fixes from the second targeted audit pass over the
   five largest components (ConversationViewModel, ChatInfoView,

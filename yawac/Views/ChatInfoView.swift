@@ -464,84 +464,35 @@ struct ChatInfoView: View {
         }
     }
 
-    /// Flip the "Restrict messages to admins" toggle on `chatJID`.
-    /// Mirrors `applyDisappearingTimer`: optimistically flips the local
-    /// `group` shadow before the bridge call so the toggle reflects the
-    /// change immediately, then reverts and surfaces the error on
-    /// failure. The server-side success path emits
-    /// `GroupAnnounceChanged`, which the ContentView event arm routes
-    /// into `Chat.isAnnounce` for the canonical refresh.
-    private func applyAnnounceToggle(_ on: Bool, chatJID: String) {
-        guard let client = session.client else { return }
-        let prior = group?.isAnnounce ?? false
+    /// Optimistic-flip + revert-on-failure shared by ANNOUNCE / LOCKED /
+    /// MEMBER ADD / JOIN APPROVAL toggles. Mirrors `applyDisappearingTimer`:
+    /// flips the local `group` shadow before the bridge call so the toggle
+    /// reflects the change immediately, then reverts and surfaces the error
+    /// on failure. Each toggle's success path is event-driven server-side
+    /// (`GroupAnnounceChanged` / `GroupLockedChanged` / `GroupMemberAddModeChanged`
+    /// / `GroupJoinApprovalModeChanged`) and refreshes the canonical `Chat`
+    /// row via the ContentView event arm.
+    @MainActor
+    private func applyGroupBoolToggle(
+        _ on: Bool,
+        keyPath: WritableKeyPath<BridgeGroupModel, Bool>,
+        errorBinding: Binding<String?>,
+        persist: @escaping @Sendable (Bool) throws -> Void
+    ) {
+        let prior = group?[keyPath: keyPath] ?? false
         if var s = group {
-            s.isAnnounce = on
+            s[keyPath: keyPath] = on
             group = s
         }
-        Task {
+        Task { @MainActor in
             do {
-                try await Task.detached {
-                    try client.setGroupAnnounce(chatJID: chatJID, on: on)
-                }.value
+                try await Task.detached { try persist(on) }.value
             } catch {
                 if var s = group {
-                    s.isAnnounce = prior
+                    s[keyPath: keyPath] = prior
                     group = s
                 }
-                announceError = (error as NSError).localizedDescription
-            }
-        }
-    }
-
-    /// Flip the "Lock name / description / avatar to admins" toggle on
-    /// `chatJID`. Same optimistic-flip + revert-on-failure pattern as
-    /// `applyAnnounceToggle`. Success path: `GroupLockedChanged` ->
-    /// `Chat.isLocked`.
-    private func applyLockedToggle(_ on: Bool, chatJID: String) {
-        guard let client = session.client else { return }
-        let prior = group?.isLocked ?? false
-        if var s = group {
-            s.isLocked = on
-            group = s
-        }
-        Task {
-            do {
-                try await Task.detached {
-                    try client.setGroupLocked(chatJID: chatJID, on: on)
-                }.value
-            } catch {
-                if var s = group {
-                    s.isLocked = prior
-                    group = s
-                }
-                lockedError = (error as NSError).localizedDescription
-            }
-        }
-    }
-
-    /// Optimistic flip + revert-on-failure for the
-    /// "Members can add new members" toggle. Mirrors the
-    /// `applyAnnounceToggle` / `applyLockedToggle` shape. Success
-    /// path: `GroupMemberAddModeChanged` -> `Chat.isAllMemberAdd`.
-    private func applyMemberAddModeToggle(_ on: Bool, chatJID: String) {
-        guard let client = session.client else { return }
-        let prior = group?.isAllMemberAdd ?? false
-        if var s = group {
-            s.isAllMemberAdd = on
-            group = s
-        }
-        Task {
-            do {
-                try await Task.detached {
-                    try client.setGroupMemberAddMode(chatJID: chatJID,
-                                                     allMembersCanAdd: on)
-                }.value
-            } catch {
-                if var s = group {
-                    s.isAllMemberAdd = prior
-                    group = s
-                }
-                memberAddError = (error as NSError).localizedDescription
+                errorBinding.wrappedValue = (error as NSError).localizedDescription
             }
         }
     }
@@ -606,6 +557,7 @@ struct ChatInfoView: View {
                     .scaledUI(11)
                     .foregroundStyle(Color.red.opacity(0.9))
                     .multilineTextAlignment(.center)
+                    .autodismiss($avatarError)
             }
         }
         .frame(maxWidth: .infinity)
@@ -712,7 +664,6 @@ struct ChatInfoView: View {
                 NSLog("[yawac/uploadAvatar] failed: %@",
                       String(describing: error))
                 avatarError = error.localizedDescription
-                scheduleAvatarErrorAutodismiss()
             }
         }
     }
@@ -736,15 +687,7 @@ struct ChatInfoView: View {
                     jid: JIDNormalize.canonical(chatJID, client: client))
             } catch {
                 avatarError = error.localizedDescription
-                scheduleAvatarErrorAutodismiss()
             }
-        }
-    }
-
-    private func scheduleAvatarErrorAutodismiss() {
-        Task { @MainActor in
-            try? await Task.sleep(for: .seconds(6))
-            avatarError = nil
         }
     }
 
@@ -863,41 +806,8 @@ struct ChatInfoView: View {
         let currentSeconds: Int32 = session.chatList?.chats
             .first(where: { $0.jid == chatJID })?
             .ephemeralExpirationSeconds ?? 0
-        sectionCard(label: "DISAPPEARING MESSAGES") {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(alignment: .top, spacing: 8) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Auto-delete new messages")
-                            .scaledUI(13)
-                            .foregroundStyle(Theme.text)
-                        Text("Applies to messages sent after the timer changes.")
-                            .scaledUI(11)
-                            .foregroundStyle(Theme.textMuted)
-                    }
-                    Spacer()
-                    Picker("", selection: Binding<Int32>(
-                        get: { currentSeconds },
-                        set: { newValue in
-                            applyDisappearingTimer(newValue, chatJID: chatJID)
-                        }
-                    )) {
-                        Text("Off").tag(Int32(0))
-                        Text("24 hours").tag(Int32(86_400))
-                        Text("7 days").tag(Int32(604_800))
-                        Text("90 days").tag(Int32(7_776_000))
-                    }
-                    .pickerStyle(.menu)
-                    .labelsHidden()
-                    .controlSize(.small)
-                }
-                if let err = disappearingError {
-                    Text(err)
-                        .scaledUI(11)
-                        .foregroundStyle(Color.red.opacity(0.9))
-                        .autodismiss($disappearingError)
-                }
-            }
-        }
+        disappearingMessagesCard(currentSeconds: currentSeconds,
+                                 chatJID: chatJID)
 
         // F74: MUTE — preset durations + "Until…" custom date picker.
         // Wraps `ChatListViewModel.muteChat`; mirrors the chat-row context
@@ -1141,45 +1051,10 @@ struct ChatInfoView: View {
         // selection immediately, and revert + surface the error on
         // failure (mirrors the JOIN APPROVAL pattern).
         if isCurrentUserAdmin(g) {
-            sectionCard(label: "DISAPPEARING MESSAGES") {
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(alignment: .top, spacing: 8) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Auto-delete new messages")
-                                .scaledUI(13)
-                                .foregroundStyle(Theme.text)
-                            Text("Applies to messages sent after the timer changes.")
-                                .scaledUI(11)
-                                .foregroundStyle(Theme.textMuted)
-                        }
-                        Spacer()
-                        Picker("", selection: Binding<Int32>(
-                            get: {
-                                group?.ephemeralExpirationSeconds
-                                    ?? g.ephemeralExpirationSeconds
-                            },
-                            set: { newValue in
-                                applyDisappearingTimer(newValue,
-                                                       chatJID: g.jid)
-                            }
-                        )) {
-                            Text("Off").tag(Int32(0))
-                            Text("24 hours").tag(Int32(86_400))
-                            Text("7 days").tag(Int32(604_800))
-                            Text("90 days").tag(Int32(7_776_000))
-                        }
-                        .pickerStyle(.menu)
-                        .labelsHidden()
-                        .controlSize(.small)
-                    }
-                    if let err = disappearingError {
-                        Text(err)
-                            .scaledUI(11)
-                            .foregroundStyle(Color.red.opacity(0.9))
-                            .autodismiss($disappearingError)
-                    }
-                }
-            }
+            disappearingMessagesCard(
+                currentSeconds: group?.ephemeralExpirationSeconds
+                    ?? g.ephemeralExpirationSeconds,
+                chatJID: g.jid)
         }
 
         // APPROVAL MODE — sub-group admin only. Hidden on the parent
@@ -1191,145 +1066,71 @@ struct ChatInfoView: View {
         // inherit from the parent (server returns 400 bad-request).
         if isCurrentUserAdmin(g),
            g.isParent || (g.linkedParentJID ?? "").isEmpty {
-            sectionCard(label: "JOIN APPROVAL") {
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(alignment: .top, spacing: 8) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Require admin approval to join")
-                                .scaledUI(13)
-                                .foregroundStyle(Theme.text)
-                            Text("New members request to join; admins approve.")
-                                .scaledUI(11)
-                                .foregroundStyle(Theme.textMuted)
-                        }
-                        Spacer()
-                        Toggle("", isOn: Binding(
-                            get: { (group?.joinApprovalMode ?? g.joinApprovalMode) },
-                            set: { newValue in
-                                let prior = group?.joinApprovalMode
-                                    ?? g.joinApprovalMode
-                                // Optimistic flip on the @State shadow
-                                // copy so the UI reflects the new
-                                // state immediately.
-                                if var s = group {
-                                    s.joinApprovalMode = newValue
-                                    group = s
-                                }
-                                guard let client = session.client else { return }
-                                let jid = g.jid
-                                Task {
-                                    do {
-                                        try await Task.detached {
-                                            try client.setGroupJoinApprovalMode(
-                                                chatJID: jid, on: newValue)
-                                        }.value
-                                    } catch {
-                                        if var s = group {
-                                            s.joinApprovalMode = prior
-                                            group = s
-                                        }
-                                        toggleError = (error as NSError)
-                                            .localizedDescription
-                                    }
-                                }
-                            }
-                        ))
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                        .controlSize(.small)
-                    }
-                    if let err = toggleError {
-                        Text(err)
-                            .scaledUI(11)
-                            .foregroundStyle(Color.red.opacity(0.9))
-                            .autodismiss($toggleError)
-                    }
-                }
+            adminBoolToggleCard(
+                label: "JOIN APPROVAL",
+                title: "Require admin approval to join",
+                subtitle: "New members request to join; admins approve.",
+                isOn: group?.joinApprovalMode ?? g.joinApprovalMode,
+                errorBinding: $toggleError
+            ) { newValue in
+                guard let client = session.client else { return }
+                applyGroupBoolToggle(
+                    newValue,
+                    keyPath: \.joinApprovalMode,
+                    errorBinding: $toggleError
+                ) { try client.setGroupJoinApprovalMode(chatJID: g.jid, on: $0) }
             }
         }
 
-        // ANNOUNCE + LOCKED — admin-only toggles for sub-groups and
-        // standalone groups. Hidden on the parent shell: announce/lock
-        // semantics on a community parent are surfaced through the
-        // community itself, and the parent's own toggle is rarely the
-        // user's mental model. Optimistic flip on the @State shadow;
-        // revert + surface error on backend failure.
+        // ANNOUNCE + LOCKED + MEMBER ADD — admin-only toggles for
+        // sub-groups and standalone groups. Hidden on the parent shell:
+        // announce/lock semantics on a community parent are surfaced
+        // through the community itself, and the parent's own toggle is
+        // rarely the user's mental model. Optimistic flip on the @State
+        // shadow; revert + surface error on backend failure.
         if isCurrentUserAdmin(g) && !g.isParent {
-            sectionCard(label: "ADMINS ONLY — SEND MESSAGES") {
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack {
-                        Text("Restrict messages to admins")
-                            .scaledUI(13)
-                            .foregroundStyle(Theme.text)
-                        Spacer()
-                        Toggle("", isOn: Binding(
-                            get: { group?.isAnnounce ?? g.isAnnounce },
-                            set: { newValue in
-                                applyAnnounceToggle(newValue, chatJID: g.jid)
-                            }
-                        ))
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                        .controlSize(.small)
-                    }
-                    if let err = announceError {
-                        Text(err)
-                            .scaledUI(11)
-                            .foregroundStyle(Color.red.opacity(0.9))
-                            .autodismiss($announceError)
-                    }
-                }
+            adminBoolToggleCard(
+                label: "ADMINS ONLY — SEND MESSAGES",
+                title: "Restrict messages to admins",
+                isOn: group?.isAnnounce ?? g.isAnnounce,
+                errorBinding: $announceError
+            ) { newValue in
+                guard let client = session.client else { return }
+                applyGroupBoolToggle(
+                    newValue,
+                    keyPath: \.isAnnounce,
+                    errorBinding: $announceError
+                ) { try client.setGroupAnnounce(chatJID: g.jid, on: $0) }
             }
 
-            sectionCard(label: "ADMINS ONLY — EDIT GROUP INFO") {
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack {
-                        Text("Lock name / description / avatar to admins")
-                            .scaledUI(13)
-                            .foregroundStyle(Theme.text)
-                        Spacer()
-                        Toggle("", isOn: Binding(
-                            get: { group?.isLocked ?? g.isLocked },
-                            set: { newValue in
-                                applyLockedToggle(newValue, chatJID: g.jid)
-                            }
-                        ))
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                        .controlSize(.small)
-                    }
-                    if let err = lockedError {
-                        Text(err)
-                            .scaledUI(11)
-                            .foregroundStyle(Color.red.opacity(0.9))
-                            .autodismiss($lockedError)
-                    }
-                }
+            adminBoolToggleCard(
+                label: "ADMINS ONLY — EDIT GROUP INFO",
+                title: "Lock name / description / avatar to admins",
+                isOn: group?.isLocked ?? g.isLocked,
+                errorBinding: $lockedError
+            ) { newValue in
+                guard let client = session.client else { return }
+                applyGroupBoolToggle(
+                    newValue,
+                    keyPath: \.isLocked,
+                    errorBinding: $lockedError
+                ) { try client.setGroupLocked(chatJID: g.jid, on: $0) }
             }
 
-            sectionCard(label: "MEMBERS CAN ADD NEW MEMBERS") {
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack {
-                        Text("Let any member add participants")
-                            .scaledUI(13)
-                            .foregroundStyle(Theme.text)
-                        Spacer()
-                        Toggle("", isOn: Binding(
-                            get: { group?.isAllMemberAdd ?? g.isAllMemberAdd },
-                            set: { newValue in
-                                applyMemberAddModeToggle(newValue, chatJID: g.jid)
-                            }
-                        ))
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                        .controlSize(.small)
-                    }
-                    if let err = memberAddError {
-                        Text(err)
-                            .scaledUI(11)
-                            .foregroundStyle(Color.red.opacity(0.9))
-                            .autodismiss($memberAddError)
-                    }
+            adminBoolToggleCard(
+                label: "MEMBERS CAN ADD NEW MEMBERS",
+                title: "Let any member add participants",
+                isOn: group?.isAllMemberAdd ?? g.isAllMemberAdd,
+                errorBinding: $memberAddError
+            ) { newValue in
+                guard let client = session.client else { return }
+                applyGroupBoolToggle(
+                    newValue,
+                    keyPath: \.isAllMemberAdd,
+                    errorBinding: $memberAddError
+                ) {
+                    try client.setGroupMemberAddMode(
+                        chatJID: g.jid, allMembersCanAdd: $0)
                 }
             }
         }
@@ -1394,6 +1195,7 @@ struct ChatInfoView: View {
                 .scaledUI(11)
                 .foregroundStyle(Color.red.opacity(0.9))
                 .padding(.bottom, 4)
+                .autodismiss($participantOpError)
         }
         VStack(spacing: 0) {
             ForEach(sortedParticipants(g.participants), id: \.jid) { p in
@@ -1761,6 +1563,90 @@ struct ChatInfoView: View {
         }
     }
 
+    /// Shared layout for the four admin Bool toggles (ANNOUNCE /
+    /// LOCKED / MEMBER ADD / JOIN APPROVAL). Each call site supplies
+    /// its own error binding so transient failures don't bleed across
+    /// unrelated toggles.
+    @ViewBuilder
+    private func adminBoolToggleCard(
+        label: String,
+        title: String,
+        subtitle: String? = nil,
+        isOn: Bool,
+        errorBinding: Binding<String?>,
+        apply: @escaping (Bool) -> Void
+    ) -> some View {
+        sectionCard(label: label) {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .top, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(title)
+                            .scaledUI(13)
+                            .foregroundStyle(Theme.text)
+                        if let subtitle {
+                            Text(subtitle)
+                                .scaledUI(11)
+                                .foregroundStyle(Theme.textMuted)
+                        }
+                    }
+                    Spacer()
+                    Toggle("", isOn: Binding(get: { isOn }, set: apply))
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+                }
+                if let err = errorBinding.wrappedValue {
+                    Text(err)
+                        .scaledUI(11)
+                        .foregroundStyle(Color.red.opacity(0.9))
+                        .autodismiss(errorBinding)
+                }
+            }
+        }
+    }
+
+    /// Shared DISAPPEARING MESSAGES picker for the 1:1 chat path and
+    /// the group-admin path. Both surface the same 4-preset picker
+    /// (Off / 24h / 7d / 90d) and route changes through
+    /// `applyDisappearingTimer`.
+    @ViewBuilder
+    private func disappearingMessagesCard(currentSeconds: Int32,
+                                          chatJID: String) -> some View {
+        sectionCard(label: "DISAPPEARING MESSAGES") {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .top, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Auto-delete new messages")
+                            .scaledUI(13)
+                            .foregroundStyle(Theme.text)
+                        Text("Applies to messages sent after the timer changes.")
+                            .scaledUI(11)
+                            .foregroundStyle(Theme.textMuted)
+                    }
+                    Spacer()
+                    Picker("", selection: Binding<Int32>(
+                        get: { currentSeconds },
+                        set: { applyDisappearingTimer($0, chatJID: chatJID) }
+                    )) {
+                        Text("Off").tag(Int32(0))
+                        Text("24 hours").tag(Int32(86_400))
+                        Text("7 days").tag(Int32(604_800))
+                        Text("90 days").tag(Int32(7_776_000))
+                    }
+                    .pickerStyle(.menu)
+                    .labelsHidden()
+                    .controlSize(.small)
+                }
+                if let err = disappearingError {
+                    Text(err)
+                        .scaledUI(11)
+                        .foregroundStyle(Color.red.opacity(0.9))
+                        .autodismiss($disappearingError)
+                }
+            }
+        }
+    }
+
     @ViewBuilder
     private func sectionLabel(_ text: String, trailing: String? = nil) -> some View {
         HStack(spacing: 8) {
@@ -2077,15 +1963,7 @@ struct ChatInfoView: View {
             } catch {
                 NSLog("[yawac/commitAdd] failed: %@", String(describing: error))
                 participantOpError = error.localizedDescription
-                scheduleParticipantErrorAutodismiss()
             }
-        }
-    }
-
-    private func scheduleParticipantErrorAutodismiss() {
-        Task { @MainActor in
-            try? await Task.sleep(for: .seconds(6))
-            participantOpError = nil
         }
     }
 
@@ -2113,7 +1991,6 @@ struct ChatInfoView: View {
                 NSLog("[yawac/applyParticipantOp] failed action=%@ jid=%@ err=%@",
                       action, bare, String(describing: error))
                 participantOpError = error.localizedDescription
-                scheduleParticipantErrorAutodismiss()
             }
         }
     }
