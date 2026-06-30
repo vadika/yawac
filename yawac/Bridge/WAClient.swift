@@ -237,10 +237,7 @@ class WAClient: PhoneValidating, LIDResolving {
     /// so the bridge accepts a JSON array string instead. Returns "" for
     /// empty input — the Go side treats "" as "no mentions".
     nonisolated private func encodeMentionsJSON(_ mentionedJIDs: [String]) -> String {
-        guard !mentionedJIDs.isEmpty else { return "" }
-        // JSONEncoder on [String] cannot fail in practice; on the off-chance,
-        // fall through to empty so the bridge takes the no-mentions branch.
-        return Self.jsonArrayString(mentionedJIDs, empty: "")
+        mentionedJIDs.isEmpty ? "" : Self.jsonArrayString(mentionedJIDs, empty: "")
     }
 
     /// JSON-encode `value` to a string for the Go bridge. gomobile cannot
@@ -566,7 +563,7 @@ class WAClient: PhoneValidating, LIDResolving {
         var err: NSError?
         let json = go.listBlocked(&err)
         if let err { throw err }
-        return (try? JSONDecoder().decode([String].self, from: Data(json.utf8))) ?? []
+        return (try? Self.decodeJSON(json)) ?? []
     }
 
     /// Lists every device paired to the account — phone (`deviceID = 0`)
@@ -578,8 +575,7 @@ class WAClient: PhoneValidating, LIDResolving {
         var err: NSError?
         let json = go.listLinkedDevices(&err)
         if let err { throw err }
-        return (try? JSONDecoder().decode([BridgeLinkedDevice].self,
-                                          from: Data(json.utf8))) ?? []
+        return (try? Self.decodeJSON(json)) ?? []
     }
 
     /// Returns the paired account's current privacy settings. First call
@@ -614,7 +610,7 @@ class WAClient: PhoneValidating, LIDResolving {
         var err: NSError?
         let json = go.listPinnedChats(jidsJSON, error: &err)
         if let err { throw err }
-        return (try? JSONDecoder().decode([String].self, from: Data(json.utf8))) ?? []
+        return (try? Self.decodeJSON(json)) ?? []
     }
 
     /// Returns each input JID that whatsmeow's local appstate store
@@ -629,14 +625,10 @@ class WAClient: PhoneValidating, LIDResolving {
         let json = go.listMutedChats(jidsJSON, error: &err)
         if let err { throw err }
         struct E: Codable {
-            let chatJID: String
-            let mutedUntilMs: Int64
-            enum CodingKeys: String, CodingKey {
-                case chatJID = "chat_jid"
-                case mutedUntilMs = "muted_until_ms"
-            }
+            let chatJID: String, mutedUntilMs: Int64
+            enum CodingKeys: String, CodingKey { case chatJID = "chat_jid", mutedUntilMs = "muted_until_ms" }
         }
-        let decoded = (try? JSONDecoder().decode([E].self, from: Data(json.utf8))) ?? []
+        let decoded: [E] = (try? Self.decodeJSON(json)) ?? []
         return decoded.map { ($0.chatJID, $0.mutedUntilMs) }
     }
 

@@ -16,6 +16,21 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+// parseChatJID parses a JID string and rejects values with an empty
+// user or server component. WhatsApp's stanza id allocator silently
+// accepts an empty JID and the send fails far downstream with a
+// confusing error; the call sites all wrap the returned error.
+func parseChatJID(s string) (types.JID, error) {
+	jid, err := types.ParseJID(s)
+	if err != nil {
+		return types.JID{}, err
+	}
+	if jid.User == "" || jid.Server == "" {
+		return types.JID{}, errors.New("invalid jid")
+	}
+	return jid, nil
+}
+
 // wrapForChat optionally wraps inner in ViewOnceMessageV2 and then
 // EphemeralMessage. ViewOnce wrap is only meaningful for
 // ImageMessage / VideoMessage; the UI gates other kinds, but if a
@@ -191,12 +206,9 @@ func (c *Client) SendText(chatJID, body string, mentionedJIDsJSON string, epheme
 	if c.wa == nil {
 		return "", errors.New("client closed")
 	}
-	jid, err := types.ParseJID(chatJID)
+	jid, err := parseChatJID(chatJID)
 	if err != nil {
 		return "", fmt.Errorf("parse jid: %w", err)
-	}
-	if jid.User == "" || jid.Server == "" {
-		return "", fmt.Errorf("parse jid: %q is not a valid jid", chatJID)
 	}
 	var mentionedJIDs []string
 	if mentionedJIDsJSON != "" {
@@ -232,12 +244,9 @@ func (c *Client) ForwardText(chatJID, text string, ephemeralSec int32) (string, 
 	if c.wa == nil {
 		return "", errors.New("client closed")
 	}
-	chat, err := types.ParseJID(chatJID)
+	chat, err := parseChatJID(chatJID)
 	if err != nil {
 		return "", fmt.Errorf("parse chat: %w", err)
-	}
-	if chat.User == "" || chat.Server == "" {
-		return "", fmt.Errorf("parse chat: %q is not a valid jid", chatJID)
 	}
 	inner := &waE2E.Message{ExtendedTextMessage: &waE2E.ExtendedTextMessage{
 		Text:        proto.String(text),
@@ -261,12 +270,9 @@ func (c *Client) ForwardMedia(chatJID, refJSON, caption, fileName string, epheme
 	if c.wa == nil {
 		return "", errors.New("client closed")
 	}
-	chat, err := types.ParseJID(chatJID)
+	chat, err := parseChatJID(chatJID)
 	if err != nil {
 		return "", fmt.Errorf("parse chat: %w", err)
-	}
-	if chat.User == "" || chat.Server == "" {
-		return "", fmt.Errorf("parse chat: %q is not a valid jid", chatJID)
 	}
 	var ref MediaRef
 	if err := json.Unmarshal([]byte(refJSON), &ref); err != nil {
@@ -1117,9 +1123,6 @@ func (c *Client) dispatchReaction(chatJID, senderJID string, ts int64, r *waE2E.
 	if key == nil {
 		return
 	}
-	fmt.Fprintf(os.Stderr,
-		"[yawac/reaction] dispatch chat=%s sender=%s target=%s emoji=%q\n",
-		chatJID, senderJID, key.GetID(), r.GetText())
 	payload := JReaction{
 		ChatJID:         chatJID,
 		TargetMessageID: key.GetID(),
@@ -1162,12 +1165,9 @@ func (c *Client) SendTextReply(
 	if c.wa == nil {
 		return "", errors.New("client closed")
 	}
-	chat, err := types.ParseJID(chatJID)
+	chat, err := parseChatJID(chatJID)
 	if err != nil {
 		return "", fmt.Errorf("parse chat: %w", err)
-	}
-	if chat.User == "" || chat.Server == "" {
-		return "", fmt.Errorf("parse chat: %q is not a valid jid", chatJID)
 	}
 	senderForCtx := quotedSenderJID
 	if quotedFromMe {
@@ -1218,12 +1218,9 @@ func (c *Client) SendLocation(
 	if c.wa == nil {
 		return "", errors.New("client closed")
 	}
-	jid, err := types.ParseJID(chatJIDStr)
+	jid, err := parseChatJID(chatJIDStr)
 	if err != nil {
 		return "", fmt.Errorf("parse jid: %w", err)
-	}
-	if jid.User == "" || jid.Server == "" {
-		return "", fmt.Errorf("parse jid: %q is not a valid jid", chatJIDStr)
 	}
 	inner := &waE2E.Message{
 		LocationMessage: &waE2E.LocationMessage{
@@ -1254,14 +1251,9 @@ func (c *Client) SendContact(
 	if c.wa == nil {
 		return "", errors.New("client closed")
 	}
-	jid, err := types.ParseJID(chatJIDStr)
+	jid, err := parseChatJID(chatJIDStr)
 	if err != nil {
 		return "", fmt.Errorf("parse jid: %w", err)
-	}
-	// Empty-jid guard matches SendText / SendLocation pattern
-	// so bad inputs surface as parse errors not send errors.
-	if jid.User == "" || jid.Server == "" {
-		return "", fmt.Errorf("parse jid: empty user or server")
 	}
 	inner := &waE2E.Message{
 		ContactMessage: &waE2E.ContactMessage{
@@ -1304,12 +1296,9 @@ func (c *Client) SendContactsArray(
 	if len(vcards) == 0 {
 		return "", errors.New("no vcards")
 	}
-	jid, err := types.ParseJID(chatJIDStr)
+	jid, err := parseChatJID(chatJIDStr)
 	if err != nil {
 		return "", fmt.Errorf("parse jid: %w", err)
-	}
-	if jid.User == "" || jid.Server == "" {
-		return "", fmt.Errorf("parse jid: empty user or server")
 	}
 	cards := make([]*waE2E.ContactMessage, 0, len(vcards))
 	for _, v := range vcards {

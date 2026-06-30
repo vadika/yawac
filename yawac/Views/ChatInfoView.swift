@@ -57,7 +57,6 @@ struct ChatInfoView: View {
     @State private var editingDescription: Bool = false
     @State private var nameDraft: String = ""
     @State private var descriptionDraft: String = ""
-    @State private var addPanelOpen: Bool = false
     @State private var addPanelModel: AddParticipantsPanelModel? = nil
     @State private var addPanelError: String? = nil
     @State private var participantOpError: String? = nil
@@ -605,22 +604,19 @@ struct ChatInfoView: View {
             Button("Remove", role: .destructive) { removePhoto() }
             Button("Cancel", role: .cancel) {}
         }
-        .sheet(item: Binding(
-            get: { pickedImage.map { ImageBox(image: $0) } },
-            set: { pickedImage = $0?.image })
-        ) { box in
-            AvatarCropSheet(original: box.image,
-                            onApply: { data in
-                                pickedImage = nil
-                                uploadAvatar(data)
-                            },
-                            onCancel: { pickedImage = nil })
+        .sheet(isPresented: Binding(
+            get: { pickedImage != nil },
+            set: { if !$0 { pickedImage = nil } })
+        ) {
+            if let img = pickedImage {
+                AvatarCropSheet(original: img,
+                                onApply: { data in
+                                    pickedImage = nil
+                                    uploadAvatar(data)
+                                },
+                                onCancel: { pickedImage = nil })
+            }
         }
-    }
-
-    private struct ImageBox: Identifiable {
-        let id = UUID()
-        let image: NSImage
     }
 
     private func pickPhoto() {
@@ -727,16 +723,14 @@ struct ChatInfoView: View {
     // ─── User body (1:1) ─────────────────────────────────────────────
     @ViewBuilder
     private var userBody: some View {
-        if let pushName = session.contactNames[chatJID] {
-            metadataRow([
-                .init(label: "PUSH NAME", value: pushName),
-                .init(label: "TYPE", value: "Direct chat"),
-            ])
-        } else {
-            metadataRow([
-                .init(label: "TYPE", value: "Direct chat"),
-            ])
-        }
+        let items: [MetaItem] = {
+            var arr: [MetaItem] = [.init(label: "TYPE", value: "Direct chat")]
+            if let pn = session.contactNames[chatJID] {
+                arr.insert(.init(label: "PUSH NAME", value: pn), at: 0)
+            }
+            return arr
+        }()
+        metadataRow(items)
         actionRow(actions: [
             .init(label: "Mute", icon: "speaker.slash"),
             .init(label: "Search", icon: "magnifyingglass"),
@@ -1182,7 +1176,7 @@ struct ChatInfoView: View {
                 .padding(.horizontal, 6)
             }
         }
-        if addPanelOpen, let model = addPanelModel {
+        if let model = addPanelModel {
             AddParticipantsPanel(
                 model: model,
                 onCommit: { jids in commitAdd(group: g, jids: jids) },
@@ -1936,11 +1930,9 @@ struct ChatInfoView: View {
             existingParticipantJIDs: existing,
             allContacts: contacts,
             validator: client)
-        addPanelOpen = true
     }
 
     private func closeAddPanel() {
-        addPanelOpen = false
         addPanelModel = nil
     }
 

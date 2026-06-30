@@ -844,25 +844,13 @@ final class ConversationViewModel {
         }
         // Rebuild the dedupe Set after the wholesale assignment.
         self.messageIDs = Set(self.messages.map(\.id))
-        for (id, status) in snap.receiptStatus {
-            self.receiptStatus[id] = status
-        }
-        for (id, byHash) in snap.reactionsBySender {
-            self.reactionsBySender[id] = byHash
-        }
-        for (id, byHash) in snap.pollVotes {
-            self.pollVotes[id] = byHash
-        }
-        for (id, path) in snap.localPaths {
-            self.localPaths[id] = path
-        }
-        for (id, err) in snap.downloadErrors {
-            self.downloadErrors[id] = err
-        }
+        self.receiptStatus.merge(snap.receiptStatus) { _, new in new }
+        self.reactionsBySender.merge(snap.reactionsBySender) { _, new in new }
+        self.pollVotes.merge(snap.pollVotes) { _, new in new }
+        self.localPaths.merge(snap.localPaths) { _, new in new }
+        self.downloadErrors.merge(snap.downloadErrors) { _, new in new }
         self.initialAnchorID = snap.initialAnchorID
-        for id in snap.unreadInboundIDs {
-            self.unreadInboundIDs.insert(id)
-        }
+        self.unreadInboundIDs.formUnion(snap.unreadInboundIDs)
         // Kick downloads now that we're on MainActor (downloadTasks lives here).
         for target in snap.downloadTargets {
             if self.downloadTasks[target.id] != nil { continue }
@@ -2823,34 +2811,20 @@ final class ConversationViewModel {
     /// Senders grouped by emoji for a message — chips use this to surface
     /// who reacted with what on hover/popover.
     func reactors(for messageID: String) -> [String: [String]] {
-        guard let bySender = reactionsBySender[messageID] else { return [:] }
-        var out: [String: [String]] = [:]
-        for (senderJID, emoji) in bySender {
-            out[emoji, default: []].append(senderJID)
-        }
-        return out
+        Dictionary(grouping: reactionsBySender[messageID] ?? [:], by: \.value)
+            .mapValues { $0.map(\.key) }
     }
 
     /// Per-option vote counts for a given poll, keyed by option hash.
     func voteCounts(for pollMessageID: String) -> [String: Int] {
-        guard let byHash = pollVotes[pollMessageID] else { return [:] }
-        var out: [String: Int] = [:]
-        for (hash, voters) in byHash {
-            out[hash] = voters.count
-        }
-        return out
+        (pollVotes[pollMessageID] ?? [:]).mapValues(\.count)
     }
 
     /// Per-option voter JIDs (sorted) for a given poll, keyed by option
     /// hash. The Swift side renders these via `mentionResolver` so the
     /// list shows display names rather than raw JIDs.
     func voters(for pollMessageID: String) -> [String: [String]] {
-        guard let byHash = pollVotes[pollMessageID] else { return [:] }
-        var out: [String: [String]] = [:]
-        for (hash, voters) in byHash {
-            out[hash] = voters.sorted()
-        }
-        return out
+        (pollVotes[pollMessageID] ?? [:]).mapValues { $0.sorted() }
     }
 
     /// Option hashes the current user has selected (used to highlight the
@@ -3238,23 +3212,10 @@ final class ConversationViewModel {
         if batch.isEmpty { return }
         // Resolve to final-status-per-id before writing so a burst that
         // bumps sent→delivered→read collapses to one subscript write.
-        var resolved: [String: UIMessage.Status] = [:]
-        for (id, status) in batch {
-            if let existing = resolved[id] {
-                if status.sortOrder > existing.sortOrder { resolved[id] = status }
-            } else {
-                resolved[id] = status
-            }
-        }
-        for (id, status) in resolved {
-            if let existing = receiptStatus[id] {
-                if status.sortOrder > existing.sortOrder {
-                    receiptStatus[id] = status
-                }
-            } else {
-                receiptStatus[id] = status
-            }
-        }
+        receiptStatus.merge(
+            Dictionary(batch.map { ($0.id, $0.status) },
+                       uniquingKeysWith: { $1.sortOrder > $0.sortOrder ? $1 : $0 })
+        ) { old, new in new.sortOrder > old.sortOrder ? new : old }
     }
 
     // MARK: - Draft persistence

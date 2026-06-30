@@ -213,6 +213,41 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **F115 — ponytail-audit-2 phase C (stdlib polish)** (v0.10.43) —
+  Twelve micro-cleanups across four files. Net -66 LOC.
+  - **ConversationViewModel.swift**: `reactors` / `voteCounts` /
+    `voters` rewritten to one-line stdlib (`Dictionary(grouping:by:)`
+    + `.mapValues`). `flushReceipts` two-pass max-bump collapsed to
+    one `merge` call. `applyHistorySnapshot` five `for` overwrite
+    loops + one unread-id loop folded into `merge` /
+    `formUnion`. -39 LOC.
+  - **bridge/messages.go**: dropped reaction-dispatch success
+    log noise. Added `parseChatJID` helper and collapsed 7 empty-
+    component guards across SendText, ForwardText, ForwardMedia,
+    SendTextReply, SendLocation, SendContact, SendContactsArray.
+    Collapsed 11 `classifyKindUnwrapped` "text" arms into one
+    multi-condition case (same shape as `dispatchMessage`).
+    Dropped two `_ = X` no-op lines in `extractSnippet`. Hoisted
+    duplicate `contextInfoFromMessage(inner)` call in
+    `dispatchMessage`. Dropped redundant base64 guard in
+    `mediaFromAudio` (`base64.EncodeToString` returns `""` for
+    nil/empty). -11 LOC.
+  - **ChatInfoView.swift**: dropped redundant `addPanelOpen`
+    Bool (always in lockstep with `addPanelModel != nil`).
+    Collapsed `userBody` push-name if/else into one
+    `metadataRow` call. Replaced `ImageBox` Identifiable
+    wrapper with `.sheet(isPresented:)` + the
+    `confirmRemoveBinding` pattern already used 3x in the file
+    — incidentally fixed a latent UUID-regen bug where the
+    `.sheet(item:)` `get` returned a fresh `ImageBox(image:
+    ...)` with a new UUID every body eval. -8 LOC.
+  - **WAClient.swift**: F112 missed 4 `?? []` decode sites
+    still calling raw `JSONDecoder().decode` — folded to
+    `Self.decodeJSON(json)`. Shrunk `encodeMentionsJSON` to
+    one-line ternary, dropped duplicate doc comment. Collapsed
+    `listMutedChats` inline struct `E` to one-line fields +
+    one-line CodingKeys. -8 LOC.
+
 - ✅ **F114 — ponytail-audit-2 phase B (mass dedup)** (v0.10.42) —
   Two structural dedups from the same audit pass. Net -160 LOC.
   - **ChatInfoView admin toggles → one helper.** Three identical
