@@ -5,9 +5,9 @@ Pinned via a `replace` directive in `bridge/go.mod` pointing at the
 github.com/vadika/whatsmeow fork. The fork mirrors upstream tip with
 cherry-picked patches on top.
 
-Current fork tip: `69b126129f1b` (pseudo-version
-`v0.0.0-20260617085916-69b126129f1b`), based on upstream
-`eaa388b4e537` (Jun 16 2026).
+Current fork tip: `e4ae908359c8` (pseudo-version
+`v0.0.0-20260704061232-e4ae908359c8`), based on upstream
+`b572e5bcb92b` (Jun 30 2026).
 
 ## Applied patches
 

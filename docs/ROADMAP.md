@@ -213,6 +213,20 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **F116 — whatsmeow fork rebase on upstream 2026-06-30** (v0.10.44) —
+  Fork branch `yawac-2026-07-04` (tip `e4ae908359c8`) cherry-picks the
+  four carried patches (PR #1151 poll-vote extractor, PR #1160 binary
+  decoder resilience, PR #1168 signal session lock, SkipBrokenAppState
+  opt-in) onto upstream `b572e5bcb92b` (Jun 30). Pulls in:
+  `client: ignore connect success before pairing is completed` (may
+  reduce reconnect-loop message drops when the socket flaps
+  mid-authenticate), two proto refreshes (v1041871181, v1042386815),
+  timelock mex notification handling, tctokens on more request paths,
+  cstoken cleanup, passkey pairing scaffolding. Bridge tests: 186/186.
+  Does NOT close the group-media-retry gap (still upstream-open) —
+  offline drains of group image messages still get dropped when the
+  socket flaps during delivery.
+
 - ✅ **F115 — ponytail-audit-2 phase C (stdlib polish)** (v0.10.43) —
   Twelve micro-cleanups across four files. Net -66 LOC.
   - **ConversationViewModel.swift**: `reactors` / `voteCounts` /

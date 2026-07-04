@@ -3,7 +3,7 @@ module github.com/vadikas/yawac/bridge
 go 1.26.3
 
 require (
-	go.mau.fi/whatsmeow v0.0.0-20260616120636-eaa388b4e537
+	go.mau.fi/whatsmeow v0.0.0-20260630180629-b572e5bcb92b
 	golang.org/x/mobile v0.0.0-20260514233045-7de0a8fa7f4d
 	google.golang.org/protobuf v1.36.11
 	modernc.org/sqlite v1.50.1
@@ -43,4 +43,4 @@ require (
 // #1160 binary-decoder panic resilience, #1168 signal session lock
 // (likely closes our issue #6), and #1171 SkipBrokenAppStatePatches
 // opt-in. See docs/whatsmeow-patches.md.
-replace go.mau.fi/whatsmeow => github.com/vadika/whatsmeow v0.0.0-20260617085916-69b126129f1b
+replace go.mau.fi/whatsmeow => github.com/vadika/whatsmeow v0.0.0-20260704061232-e4ae908359c8
