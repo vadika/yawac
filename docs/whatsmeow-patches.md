@@ -1,24 +1,15 @@
 # Local whatsmeow patches
 
-We carry four upstream PRs that haven't merged into whatsmeow main.
+We carry three upstream PRs that haven't merged into whatsmeow main.
 Pinned via a `replace` directive in `bridge/go.mod` pointing at the
 github.com/vadika/whatsmeow fork. The fork mirrors upstream tip with
 cherry-picked patches on top.
 
-Current fork tip: `e4ae908359c8` (pseudo-version
-`v0.0.0-20260704061232-e4ae908359c8`), based on upstream
+Current fork tip: `a0d4b7e975f9` (pseudo-version
+`v0.0.0-20260704062504-a0d4b7e975f9`), based on upstream
 `b572e5bcb92b` (Jun 30 2026).
 
 ## Applied patches
-
-- **PR #1151** — historical poll-vote tally extractor.
-  Upstream: https://github.com/tulir/whatsmeow/pull/1151
-
-  Adds `events.HistorySync.HistoricalPollUpdates()` which flattens
-  `WebMessageInfo.PollUpdates` records across all conversations in a
-  HistorySync blob into `[]events.HistoricalPollVote`. Used by
-  `bridge/history.go` so newly-paired companions can render existing
-  poll tallies they never received as live `PollUpdateMessage` events.
 
 - **PR #1160** — binary decoder doesn't panic on malformed nodes.
   Upstream: https://github.com/tulir/whatsmeow/pull/1160
@@ -36,7 +27,7 @@ Current fork tip: `e4ae908359c8` (pseudo-version
   overwrites the other's session advance, causing either silent
   "old counter" drops at the recipient or a permanent record bloat
   from spurious skipped-message keys (22.5 MB observed on the
-  upstream profile). Likely closes our issue #6.
+  upstream profile).
 
 - **PR #1171** — `Client.SkipBrokenAppStatePatches` opt-in.
   Upstream: https://github.com/tulir/whatsmeow/pull/1171
@@ -56,22 +47,30 @@ Current fork tip: `e4ae908359c8` (pseudo-version
   Merged upstream as `595ceb0` (which also adds the missing
   PhoneNumber→LID mapping store call alongside the privacy-token fix).
 
+## Previously carried, now moved to bridge (no longer in fork)
+
+- **PR #1151** — historical poll-vote tally extractor. Closed
+  upstream unmerged. F117 moved the extraction to `bridge/history.go`
+  as `historicalPollUpdates()` + `HistoricalPollVote` — the walk only
+  touches public whatsmeow API (`HistorySync.Data`, `Conversation`,
+  `WebMessageInfo.PollUpdates`), so keeping it in the fork forced a
+  never-ending rebase for zero API benefit.
+
 ## Bumping the fork
 
 ```
-cd /tmp && git clone git@github.com:vadika/whatsmeow.git
-cd whatsmeow
-git remote add upstream https://github.com/tulir/whatsmeow.git
+cd /Users/vadikas/Work/whatsmeow
 git fetch upstream
-git rebase upstream/main          # re-applies the PR #1151 patch on top
-git push --force-with-lease origin main
+git checkout -b yawac-YYYY-MM-DD upstream/main
+git cherry-pick <PR1160-sha> <PR1168-sha> <PR1171-sha>
+git push origin yawac-YYYY-MM-DD
 ```
 
 Then in yawac:
 
 ```
 cd bridge
-# Edit replace directive in go.mod with new pseudo-version.
+go mod edit -replace=go.mau.fi/whatsmeow=github.com/vadika/whatsmeow@<sha>
 go mod tidy
 cd ..
 ./scripts/build-xcframework.sh
@@ -79,18 +78,20 @@ cd ..
 
 ## Dropping the fork entirely
 
-When tulir merges PR #1151 upstream, remove the `replace` block:
+When tulir merges all three carried PRs upstream, remove the
+`replace` block:
 
 1. Remove the `replace` directive from `bridge/go.mod`.
-2. `cd bridge && go get go.mau.fi/whatsmeow@<sha-that-includes-the-fix>`.
+2. `cd bridge && go get go.mau.fi/whatsmeow@<sha-that-includes-the-fixes>`.
 3. `go mod tidy`.
 4. Rebuild XCFramework.
 
 ## Notes
 
 - The fork's go.mod declares `module go.mau.fi/whatsmeow`, so `go get
-  github.com/vadika/whatsmeow@...` will fail. Edit the `replace`
-  directive's pseudo-version by hand and let `go mod tidy` resolve.
+  github.com/vadika/whatsmeow@...` will fail. Use `go mod edit
+  -replace=...@<sha>` and let `go mod tidy` resolve the
+  pseudo-version.
 - The `go.sum` carries entries for `github.com/vadika/whatsmeow@...`
   instead of `go.mau.fi/whatsmeow@...`. If you remove the `replace`,
   `go mod tidy` will swap them.

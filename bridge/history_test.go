@@ -54,14 +54,14 @@ func TestHistoricalRecordToVote(t *testing.T) {
 
 	cases := []struct {
 		name           string
-		record         events.HistoricalPollVote
+		record         HistoricalPollVote
 		expectedVoter  string
 		expectedChat   string
 		expectedHashes []string
 	}{
 		{
 			name: "own vote on own poll",
-			record: events.HistoricalPollVote{
+			record: HistoricalPollVote{
 				Chat:                 peerJID,
 				PollCreationID:       "P1",
 				Voter:                types.JID{},
@@ -75,7 +75,7 @@ func TestHistoricalRecordToVote(t *testing.T) {
 		},
 		{
 			name: "own vote on peer poll (F88 regression guard)",
-			record: events.HistoricalPollVote{
+			record: HistoricalPollVote{
 				Chat:                 peerJID,
 				PollCreationID:       "P2",
 				Voter:                types.JID{},
@@ -89,7 +89,7 @@ func TestHistoricalRecordToVote(t *testing.T) {
 		},
 		{
 			name: "peer vote on peer poll 1:1",
-			record: events.HistoricalPollVote{
+			record: HistoricalPollVote{
 				Chat:                 peerJID,
 				PollCreationID:       "P3",
 				Voter:                peerJID,
@@ -103,7 +103,7 @@ func TestHistoricalRecordToVote(t *testing.T) {
 		},
 		{
 			name: "peer vote on own poll 1:1",
-			record: events.HistoricalPollVote{
+			record: HistoricalPollVote{
 				Chat:                 peerJID,
 				PollCreationID:       "P4",
 				Voter:                peerJID,
@@ -117,7 +117,7 @@ func TestHistoricalRecordToVote(t *testing.T) {
 		},
 		{
 			name: "peer vote in group",
-			record: events.HistoricalPollVote{
+			record: HistoricalPollVote{
 				Chat:                 groupJID,
 				PollCreationID:       "P5",
 				Voter:                participantJID,
@@ -134,7 +134,7 @@ func TestHistoricalRecordToVote(t *testing.T) {
 		},
 		{
 			name: "empty selection (vote clear)",
-			record: events.HistoricalPollVote{
+			record: HistoricalPollVote{
 				Chat:                 peerJID,
 				PollCreationID:       "P6",
 				Voter:                peerJID,
@@ -182,7 +182,7 @@ func TestHistoricalRecordToVote(t *testing.T) {
 func TestHistoricalRecordToVoteUnpaired(t *testing.T) {
 	// Empty ownBareJID (client not paired): empty Voter must stay empty,
 	// not crash, not pick up a stray string.
-	record := events.HistoricalPollVote{
+	record := HistoricalPollVote{
 		Chat:                 types.JID{User: "x", Server: types.DefaultUserServer},
 		PollCreationID:       "P",
 		Voter:                types.JID{},

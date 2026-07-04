@@ -213,6 +213,18 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **F117 — move PR #1151 poll extractor to bridge** (v0.10.45) —
+  Fork was carrying tulir/whatsmeow PR #1151 (closed unmerged upstream)
+  for the `HistoricalPollUpdates()` walk over `HistorySync` blobs. The
+  walk only touches public whatsmeow API (`h.Data.GetConversations`,
+  `wm.GetPollUpdates`, `pu.GetPollUpdateMessageKey`). Moved 88 LOC of
+  extraction + 17 LOC of `HistoricalPollVote` struct into
+  `bridge/history.go` as unexported `historicalPollUpdates()` +
+  exported `HistoricalPollVote`. Fork branch dropped to
+  `yawac-2026-07-04-nopoll` (tip `a0d4b7e975f9`), now carrying only
+  three PRs (#1160, #1168, #1171). Zero rebase-forever cost for a
+  patch upstream rejected. Bridge tests: 186/186. No behavior change.
+
 - ✅ **F116 — whatsmeow fork rebase on upstream 2026-06-30** (v0.10.44) —
   Fork branch `yawac-2026-07-04` (tip `e4ae908359c8`) cherry-picks the
   four carried patches (PR #1151 poll-vote extractor, PR #1160 binary

@@ -43,4 +43,4 @@ require (
 // #1160 binary-decoder panic resilience, #1168 signal session lock
 // (likely closes our issue #6), and #1171 SkipBrokenAppStatePatches
 // opt-in. See docs/whatsmeow-patches.md.
-replace go.mau.fi/whatsmeow => github.com/vadika/whatsmeow v0.0.0-20260704061232-e4ae908359c8
+replace go.mau.fi/whatsmeow => github.com/vadika/whatsmeow v0.0.0-20260704062504-a0d4b7e975f9

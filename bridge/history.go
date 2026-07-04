@@ -6,12 +6,93 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"time"
 
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	waWeb "go.mau.fi/whatsmeow/proto/waWeb"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 )
+
+// HistoricalPollVote is one poll-vote record extracted from a HistorySync
+// blob's WebMessageInfo.PollUpdates arrays. Moved here from fork PR #1151
+// so the whatsmeow fork carries one fewer patch — the extraction only
+// touches public whatsmeow API. SelectedOptionHashes are SHA-256(option)
+// digests matching what Client.DecryptPollVote emits for live votes, so
+// the Swift tally path is uniform across live and historical sources.
+type HistoricalPollVote struct {
+	Chat                 types.JID
+	PollCreationID       types.MessageID
+	Voter                types.JID
+	SelectedOptionHashes [][]byte
+	Timestamp            time.Time
+	PollCreationFromMe   bool
+}
+
+// historicalPollUpdates flattens every previously-bundled poll-vote
+// record in a HistorySync blob. Empty Voter on 1:1 polls means own-vote;
+// the caller substitutes ownBareJID. Returns nil when the blob has none.
+func historicalPollUpdates(h *events.HistorySync) []HistoricalPollVote {
+	if h == nil || h.Data == nil {
+		return nil
+	}
+	var out []HistoricalPollVote
+	for _, conv := range h.Data.GetConversations() {
+		chatJIDStr := conv.GetID()
+		if chatJIDStr == "" {
+			continue
+		}
+		chatJID, err := types.ParseJID(chatJIDStr)
+		if err != nil {
+			continue
+		}
+		for _, m := range conv.GetMessages() {
+			wm := m.GetMessage()
+			if wm == nil {
+				continue
+			}
+			updates := wm.GetPollUpdates()
+			if len(updates) == 0 {
+				continue
+			}
+			key := wm.GetKey()
+			if key == nil {
+				continue
+			}
+			pollID := types.MessageID(key.GetID())
+			pollFromMe := key.GetFromMe()
+			for _, pu := range updates {
+				vote := pu.GetVote()
+				if vote == nil {
+					continue
+				}
+				var voter types.JID
+				if voteKey := pu.GetPollUpdateMessageKey(); voteKey != nil {
+					if p := voteKey.GetParticipant(); p != "" {
+						if vj, perr := types.ParseJID(p); perr == nil {
+							voter = vj
+						}
+					} else if !voteKey.GetFromMe() {
+						voter = chatJID
+					}
+				}
+				ts := time.Unix(int64(wm.GetMessageTimestamp()), 0)
+				if ms := pu.GetSenderTimestampMS(); ms > 0 {
+					ts = time.UnixMilli(ms)
+				}
+				out = append(out, HistoricalPollVote{
+					Chat:                 chatJID,
+					PollCreationID:       pollID,
+					Voter:                voter,
+					SelectedOptionHashes: vote.GetSelectedOptions(),
+					Timestamp:            ts,
+					PollCreationFromMe:   pollFromMe,
+				})
+			}
+		}
+	}
+	return out
+}
 
 // applyHistorySync persists push names + contact display names from a
 // HistorySync blob, and emits a synthetic "Message" event for every
@@ -129,7 +210,7 @@ func (c *Client) applyHistorySync(evt *events.HistorySync) {
 // ownJID substitution fired (fix for the F88 PollCreationFromMe gate
 // that missed own-votes on peer-created polls).
 func (c *Client) emitHistoricalPollUpdatesFromBlob(evt *events.HistorySync) {
-	records := evt.HistoricalPollUpdates()
+	records := historicalPollUpdates(evt)
 	if len(records) == 0 {
 		return
 	}
@@ -167,7 +248,7 @@ func (c *Client) emitHistoricalPollUpdatesFromBlob(evt *events.HistorySync) {
 // When the client is unpaired (ownBareJID == ""), the substitution is
 // skipped — VoterJID stays empty and SQLite upsert is recoverable on
 // the next sweep after pairing.
-func historicalRecordToVote(r events.HistoricalPollVote, ownBareJID string) JPollVote {
+func historicalRecordToVote(r HistoricalPollVote, ownBareJID string) JPollVote {
 	voterStr := r.Voter.String()
 	if voterStr == "" && ownBareJID != "" {
 		voterStr = ownBareJID
