@@ -12,6 +12,22 @@ final class BridgeClientTests: XCTestCase {
         XCTAssertEqual(m.timestamp, 42)
     }
 
+    // F118 regression: bridge emits media fields with omitempty, and
+    // synthesized Decodable does NOT honor stored-property defaults.
+    // A required `is_ptt` made every image/video/document without the
+    // key fail decode and drop silently for a month.
+    func testDecodeMediaMessageWithoutIsPTT() throws {
+        let json = #"""
+        {"id":"X","chat_jid":"a@g.us","sender_jid":"b@lid","from_me":false,
+         "timestamp":42,"kind":"image","media":{"mime_type":"image/jpeg",
+         "width":100,"height":50,"size_bytes":1234}}
+        """#
+        let m = try JSONDecoder().decode(BridgeMessage.self, from: Data(json.utf8))
+        XCTAssertEqual(m.kind, "image")
+        XCTAssertEqual(m.media?.mimeType, "image/jpeg")
+        XCTAssertNil(m.media?.isPTT)
+    }
+
     func testDecodePhoneCheckResultRegistered() throws {
         let json = #"""
         {"jid":"4915123456789@s.whatsapp.net","registered":true}

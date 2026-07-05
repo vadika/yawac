@@ -749,6 +749,13 @@ class WAClient: PhoneValidating, LIDResolving {
                                       count: count)
     }
 
+    nonisolated func requestMessageResend(chatJID: String,
+                                          senderJID: String,
+                                          msgID: String) throws {
+        bump("requestMessageResend")
+        try go.requestMessageResend(chatJID, senderJID: senderJID, msgID: msgID)
+    }
+
     /// Sends a `read` receipt for `messageIDs`. `senderJID` is the bare
     /// JID of the message author (chat peer for 1:1, participant for groups).
     nonisolated func markRead(chatJID: String, senderJID: String, messageIDs: [String]) throws {
@@ -1141,8 +1148,15 @@ class WAClient: PhoneValidating, LIDResolving {
             struct R: Codable { let reason: String }
             return .loggedOut(reason: (try? dec.decode(R.self, from: data))?.reason ?? "")
         case "Message":
-            if let m = try? dec.decode(BridgeMessage.self, from: data) {
-                return .message(m)
+            do {
+                return .message(try dec.decode(BridgeMessage.self, from: data))
+            } catch {
+                // F118: a decode failure here silently drops the message
+                // (falls through to .unknown). Log it — a schema drift
+                // between JMessage and BridgeMessage lost live media for
+                // a month with zero trace.
+                NSLog("[yawac/msg-decode] FAILED: %@ payload=%@",
+                      String(describing: error), String(payload.prefix(300)))
             }
         case "Receipt":
             if let r = try? dec.decode(BridgeReceipt.self, from: data) {

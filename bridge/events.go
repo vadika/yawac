@@ -64,6 +64,14 @@ func (c *Client) handleWAEvent(evt any) {
 		})
 		c.dispatch("OfflineSyncCompleted", string(b))
 	case *events.Message:
+		// F118: message recovered from the primary phone via
+		// placeholder-resend (RequestMessageResend or automatic
+		// rerequest). Rare enough to log every occurrence.
+		if v.UnavailableRequestID != "" {
+			fmt.Fprintf(os.Stderr,
+				"[yawac/resent] id=%s chat=%s sender=%s\n",
+				v.Info.ID, v.Info.Chat, v.Info.Sender)
+		}
 		c.dispatchMessage(v)
 	case *events.Receipt:
 		c.dispatchReceipt(v)

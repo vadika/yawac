@@ -84,10 +84,11 @@ struct BridgeMedia: Codable {
     /// Base64-encoded raw amplitude bytes (audio only — 64 bytes 0-100 for
     /// WhatsApp voice notes). Decoded to `Data` at render time.
     let waveform: String?
-    /// Push-to-talk / voice note (audio only). Defaults to `false` so older
-    /// payloads decode cleanly — Swift 5.9+ synthesizes a Decoder that
-    /// honors stored-property defaults.
-    var isPTT: Bool = false
+    /// Push-to-talk / voice note (audio only). Optional because the bridge
+    /// emits `is_ptt` with omitempty — synthesized Decodable does NOT honor
+    /// stored-property defaults, so a non-optional here made EVERY media
+    /// message without the key fail decode and vanish silently (F118).
+    let isPTT: Bool?
     let ref: BridgeMediaRef?
 
     enum CodingKeys: String, CodingKey {
