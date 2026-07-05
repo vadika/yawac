@@ -213,6 +213,33 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **F118 — live media decode regression fix + offline-gap message
+  recovery** (v0.10.46) — User report: picture visible on phone missing
+  in app. Investigation found TWO bugs. (1) Root cause of the loss:
+  since `01a78db` (Jun 6, v0.9.2x) `JMedia` emitted `is_ptt` with
+  `omitempty` while Swift `BridgeMedia` declared it non-optional on the
+  false assumption that synthesized Decodable honors stored-property
+  defaults (it does not) — EVERY live media message without the key
+  failed decode in `WAClient.decode`, fell through to `.unknown`, and
+  vanished with zero trace for a month. History-sync backfills masked
+  most losses; whatever the phone never re-sent stayed lost. Fixed:
+  `isPTT: Bool?` (callers already `?? false`), audited all remaining
+  Go-omitempty vs Swift-required fields (is_ptt was the only mismatch),
+  added permanent `[yawac/msg-decode]` failure log + decode regression
+  test. (2) Recovery path: enabled whatsmeow
+  `AutomaticMessageRerequestFromPhone` (PLACEHOLDER_MESSAGE_RESEND peer
+  request — WA Web's "Waiting for this message" mechanism) so decrypt
+  failures self-heal from the primary phone; added `[yawac/undecrypt]`
+  logging (bridge previously swallowed `UndecryptableMessage` silently)
+  and manual `RequestMessageResend(chat, sender, id)` bridge API +
+  Swift wrapper. Empirically verified end-to-end: located the lost
+  picture's ID via orphan-reaction sweep (reactions referencing
+  messages absent from the store = free gap detector), requested it
+  from the phone, message persisted and rendered. Bridge tests
+  190/190. Follow-up candidate: F119 gap sweep (orphan-reaction /
+  orphan-quote scan → per-chat `RequestOlderHistory` anchored
+  backfill) for the two remaining known orphan gaps (Jul 1, Jun 27).
+
 - ✅ **F117 — move PR #1151 poll extractor to bridge** (v0.10.45) —
   Fork was carrying tulir/whatsmeow PR #1151 (closed unmerged upstream)
   for the `HistoricalPollUpdates()` walk over `HistorySync` blobs. The
