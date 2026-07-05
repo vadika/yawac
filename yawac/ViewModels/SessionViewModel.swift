@@ -710,6 +710,8 @@ final class SessionViewModel {
             // was offline (which WhatsApp clears from the offline buffer)
             // still flow in via direct history-sync request. Throttled.
             Task { await self.requestReconnectCatchupSyncIfNeeded() }
+            // F119: recover quoted-but-missing originals from the phone.
+            Task { await self.runGapSweepIfNeeded() }
         case .joinApprovalModeChanged(let chatJID, let on, _, _):
             if on {
                 Task { await self.joinRequestStore.refresh(chatJID: chatJID) }
@@ -1140,6 +1142,49 @@ final class SessionViewModel {
                   String(describing: error))
         }
     }
+
+    /// F119: gap sweep. Replies store their quoted target's chat + sender
+    /// + message ID; if that target is absent from the store, the original
+    /// was lost (offline drain drop, decode regression, etc.). Ask the
+    /// primary phone to resend each one via PLACEHOLDER_MESSAGE_RESEND —
+    /// the recovered copy arrives as a normal Message event and persists
+    /// through the usual pipeline. Throttled to once per 24h; targets the
+    /// phone can't serve (deleted-for-everyone) age out of the 30-day
+    /// window. ponytail: no persisted attempted-set — at most one retry
+    /// per target per day is harmless, phone-side requests are cheap.
+    @MainActor
+    func runGapSweepIfNeeded() async {
+        guard historyBackfillCompleted else { return }
+        let now = Date().timeIntervalSince1970
+        let last = UserDefaults.standard.double(forKey: Self.lastGapSweepKey)
+        guard now - last > 24 * 3600 else { return }
+        UserDefaults.standard.set(now, forKey: Self.lastGapSweepKey)
+        // Let the reconnect catch-up burst settle first.
+        try? await Task.sleep(for: .seconds(45))
+        guard let client else { return }
+        let refs = await Task.detached {
+            SQLiteDedupe.orphanQuotedRefs(sinceDays: 30)
+        }.value
+        guard !refs.isEmpty else { return }
+        NSLog("[yawac/gap-sweep] orphan quoted targets=%d", refs.count)
+        var requested = 0
+        for r in refs.prefix(15) {
+            let sender = r.targetFromMe ? client.ownJID : r.targetSenderJID
+            guard !sender.isEmpty else { continue }
+            do {
+                try client.requestMessageResend(
+                    chatJID: r.chatJID, senderJID: sender,
+                    msgID: r.targetMessageID)
+                requested += 1
+            } catch {
+                NSLog("[yawac/gap-sweep] request failed %@: %@",
+                      r.targetMessageID, String(describing: error))
+            }
+            try? await Task.sleep(for: .seconds(4))
+        }
+        NSLog("[yawac/gap-sweep] requested=%d", requested)
+    }
+    private static let lastGapSweepKey = "yawac.lastGapSweepAt"
 
     /// Fan-out refresh of pending join-request queues for every group
     /// where the user is an admin and approval mode is on. Called on

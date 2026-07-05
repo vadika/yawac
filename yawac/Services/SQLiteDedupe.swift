@@ -129,6 +129,68 @@ enum SQLiteDedupe {
         return out
     }
 
+    /// F119: orphan quoted references — replies whose quoted target is
+    /// absent from the store. Each row carries complete placeholder-resend
+    /// coordinates (chat + target message ID + target sender), so the gap
+    /// sweep can ask the primary phone to resend the missing original.
+    /// Read-only.
+    struct OrphanQuotedRef {
+        let chatJID: String
+        let targetMessageID: String
+        let targetSenderJID: String
+        let targetFromMe: Bool
+    }
+    static func orphanQuotedRefs(sinceDays: Int) -> [OrphanQuotedRef] {
+        let supportDir: URL
+        do {
+            supportDir = try FileManager.default.url(
+                for: .applicationSupportDirectory, in: .userDomainMask,
+                appropriateFor: nil, create: false)
+        } catch { return [] }
+        let storeURL = supportDir.appendingPathComponent("default.store")
+        guard FileManager.default.fileExists(atPath: storeURL.path) else { return [] }
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(storeURL.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK,
+              let db else { return [] }
+        defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 1000)
+
+        // ZTIMESTAMP is Apple-epoch seconds (1 Jan 2001).
+        let cutoff = Date().timeIntervalSinceReferenceDate
+            - Double(sinceDays) * 86_400
+        let sql = """
+            SELECT m.ZCHATJID, m.ZQUOTEDMESSAGEID,
+                   COALESCE(m.ZQUOTEDSENDERJID, ''),
+                   COALESCE(m.ZQUOTEDFROMME, 0)
+            FROM ZPERSISTEDMESSAGE m
+            WHERE m.ZQUOTEDMESSAGEID IS NOT NULL
+              AND m.ZQUOTEDMESSAGEID != ''
+              AND m.ZTIMESTAMP > ?
+              AND NOT EXISTS (SELECT 1 FROM ZPERSISTEDMESSAGE t
+                              WHERE t.ZID = m.ZQUOTEDMESSAGEID)
+            GROUP BY m.ZQUOTEDMESSAGEID
+            ORDER BY m.ZTIMESTAMP DESC
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_double(stmt, 1, cutoff)
+
+        var out: [OrphanQuotedRef] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            guard let chatPtr = sqlite3_column_text(stmt, 0),
+                  let idPtr = sqlite3_column_text(stmt, 1) else { continue }
+            let sender = sqlite3_column_text(stmt, 2)
+                .flatMap { String(cString: $0) } ?? ""
+            out.append(OrphanQuotedRef(
+                chatJID: String(cString: chatPtr),
+                targetMessageID: String(cString: idPtr),
+                targetSenderJID: sender,
+                targetFromMe: sqlite3_column_int(stmt, 3) != 0))
+        }
+        return out
+    }
+
     /// Persists delivery status for a batch of message ids. Rank-based
     /// downgrade prevention: read(3) > played(2) > delivered(1) > sent(0).
     /// Raw SQLite because SwiftData writes from background paths have
