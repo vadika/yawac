@@ -68,9 +68,14 @@ func (c *Client) handleWAEvent(evt any) {
 	case *events.Receipt:
 		c.dispatchReceipt(v)
 	case *events.UndecryptableMessage:
-		// Do NOT dispatch to Swift — the Swift side has no UI for
-		// undecryptable messages; whatsmeow's own retry mechanism
-		// handles the recovery path.
+		// Do NOT dispatch to Swift — no UI for undecryptable
+		// messages. whatsmeow sends a retry receipt to the sender
+		// and (F118) requests a resend from the primary phone; the
+		// recovered copy arrives as a normal Message event. Log so
+		// losses are greppable instead of invisible.
+		fmt.Fprintf(os.Stderr,
+			"[yawac/undecrypt] id=%s chat=%s sender=%s unavailable=%v mode=%s\n",
+			v.Info.ID, v.Info.Chat, v.Info.Sender, v.IsUnavailable, v.DecryptFailMode)
 	case *events.Presence:
 		c.dispatchPresence(v)
 	case *events.ChatPresence:

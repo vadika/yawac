@@ -175,6 +175,17 @@ func NewClient(dbPath string) (*Client, error) {
 	// version) — same trade-off WhatsApp Web itself accepts when it
 	// requests a snapshot reset. See tulir/whatsmeow#1171.
 	wa.SkipBrokenAppStatePatches = true
+	// F118: when a message fails to decrypt (e.g. group skmsg with a
+	// missing sender key during offline drain), ask the primary phone
+	// to resend it — the same PLACEHOLDER_MESSAGE_RESEND peer request
+	// WhatsApp Web uses for "Waiting for this message". Without this,
+	// the only recovery is a retry receipt to the original sender,
+	// which often goes unanswered for LID senders in groups, and the
+	// message is silently lost. The phone's response is dispatched by
+	// whatsmeow as a normal events.Message, so the existing pipeline
+	// persists it. Fires 5s after the first decrypt failure per
+	// message ID (whatsmeow retry.go).
+	wa.AutomaticMessageRerequestFromPhone = true
 	return &Client{
 		wa:           wa,
 		dbPath:       dbPath,
