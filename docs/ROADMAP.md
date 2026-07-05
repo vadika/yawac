@@ -213,6 +213,23 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **F119 — automatic gap sweep** (v0.10.47) — Self-healing loop for
+  lost messages. Replies persist their quoted target's chat + sender +
+  message ID; `SQLiteDedupe.orphanQuotedRefs(sinceDays:)` scans for
+  quoted targets absent from the store (read-only raw SQLite, 30-day
+  window) and `SessionViewModel.runGapSweepIfNeeded()` asks the primary
+  phone to resend each via `RequestMessageResend`
+  (PLACEHOLDER_MESSAGE_RESEND) — recovered copies arrive as normal
+  Message events and persist through the usual pipeline. Fires on
+  `.connected`, 45 s after the F92 catch-up, throttled 24 h, capped at
+  15 requests/run with 4 s spacing. No persisted attempted-set:
+  unservable targets (deleted-for-everyone) retry at most once per day
+  and age out of the window. Live verify: first run found 7 orphans,
+  requested 7; combined with the F118 manual batch, 11 of 18
+  decode-regression losses recovered (2 confirmed revoked stubs, 5
+  pending phone response). Detection limit: only losses someone
+  replied to are discoverable — silent gaps have no client-side trace.
+
 - ✅ **F118 — live media decode regression fix + offline-gap message
   recovery** (v0.10.46) — User report: picture visible on phone missing
   in app. Investigation found TWO bugs. (1) Root cause of the loss:
