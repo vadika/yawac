@@ -805,7 +805,8 @@ struct MessageRow: View {
                 Text(quotedSenderDisplay)
                     .scaledUI(11, weight: .semibold)
                     .foregroundStyle(Theme.text)
-                Text(message.quotedTextSnippet ?? "")
+                Text(resolveMentionsText(message.quotedTextSnippet ?? "",
+                                         resolver: mentionResolver))
                     .scaledUI(11)
                     .foregroundStyle(Theme.textMuted)
                     .lineLimit(2)

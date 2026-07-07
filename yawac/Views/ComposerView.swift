@@ -483,7 +483,7 @@ struct ComposerView: View {
     private func replySnippet(for m: UIMessage) -> String {
         switch m.body {
         case .text(let t):
-            return t
+            return resolveMentionsText(t) { session.displayName(for: $0) }
         case .media(_, let caption, let fileName, _, _, _):
             if let c = caption, !c.isEmpty { return c }
             if let n = fileName, !n.isEmpty { return n }
