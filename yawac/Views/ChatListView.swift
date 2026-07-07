@@ -8,6 +8,7 @@ struct ChatListView: View {
     // F91 — kept for compilation; .archivedHeader Row case is now dead
     // (archived chats are shown via the Archived rail sentinel, not inline).
     @State private var archivedExpanded = false
+    @State private var globalSenders: [(jid: String, name: String)] = []
     @State private var pendingDelete: Chat?
     @State private var pendingBlock: Chat?
     @State private var contactEditing: Chat?
@@ -712,11 +713,12 @@ struct ChatListView: View {
         let chatsList = vm.chats.map { (jid: $0.jid, name: $0.name) }
         SearchFilterChips(
             filters: Bindable(search).filters,
-            availableSenders: search.knownGlobalSenders,
+            availableSenders: globalSenders,
             showChatChip: true,
             availableChats: chatsList,
             chatJID: Bindable(search).globalChatFilter
         )
+        .task { globalSenders = await search.knownGlobalSendersAsync() }
     }
 
     @ViewBuilder

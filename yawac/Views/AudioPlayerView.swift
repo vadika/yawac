@@ -53,6 +53,7 @@ struct AudioPlayerView: View {
     /// reappeared in real chats. Sniffing the container magic instead
     /// makes the routing robust to whatever filename the cache emits.
     @State private var bypassReady = false
+    @State private var opusLoading = false
 
     var body: some View {
         HStack(spacing: 8) {
@@ -149,15 +150,24 @@ struct AudioPlayerView: View {
         }
     }
 
-    private func loadOpusPlayer() {
+    private func loadOpusPlayerThenPlay() {
+        guard !opusLoading else { return }
+        opusLoading = true
         let url = URL(fileURLWithPath: path)
-        do {
-            let p = try OpusVoicePlayer(url: url)
-            self.opusPlayer = p
-            if self.duration == 0 { self.duration = p.duration }
-            audioPlayerDidCreate(kind: "opus")
-        } catch {
-            audioPlayerPerfLog.error("OpusVoicePlayer init failed for \(path, privacy: .public): \(String(describing: error), privacy: .public)")
+        Task { @MainActor in
+            defer { opusLoading = false }
+            do {
+                let buf = try await Task.detached(priority: .userInitiated) {
+                    try OpusVoicePlayer.decodeBuffer(url: url)
+                }.value
+                let p = OpusVoicePlayer(buffer: buf)
+                self.opusPlayer = p
+                if self.duration == 0 { self.duration = p.duration }
+                audioPlayerDidCreate(kind: "opus")
+                startOpus(p)
+            } catch {
+                audioPlayerPerfLog.error("OpusVoicePlayer decode failed for \(path, privacy: .public): \(String(describing: error), privacy: .public)")
+            }
         }
     }
 
@@ -221,27 +231,33 @@ struct AudioPlayerView: View {
     }
 
     private func togglePlayOpus() {
-        if opusPlayer == nil { loadOpusPlayer() }
-        guard let op = opusPlayer else { return }
+        guard let op = opusPlayer else {
+            loadOpusPlayerThenPlay()
+            return
+        }
         if isPlaying {
             op.pause()
             isPlaying = false
             current = op.currentTime
             timer?.invalidate()
         } else {
-            op.play()
-            isPlaying = op.isPlaying
-            guard isPlaying else { return }
-            timer?.invalidate()
-            timer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { _ in
-                Task { @MainActor in
-                    op.tick()
-                    self.current = op.currentTime
-                    if !op.isPlaying, self.isPlaying {
-                        self.isPlaying = false
-                        self.current = 0
-                        self.timer?.invalidate()
-                    }
+            startOpus(op)
+        }
+    }
+
+    private func startOpus(_ op: OpusVoicePlayer) {
+        op.play()
+        isPlaying = op.isPlaying
+        guard isPlaying else { return }
+        timer?.invalidate()
+        timer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { _ in
+            Task { @MainActor in
+                op.tick()
+                self.current = op.currentTime
+                if !op.isPlaying, self.isPlaying {
+                    self.isPlaying = false
+                    self.current = 0
+                    self.timer?.invalidate()
                 }
             }
         }

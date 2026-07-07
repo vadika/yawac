@@ -42,9 +42,11 @@ final class OpusVoicePlayer {
     /// with `nodeStartFrame` to compute `currentTime`.
     private var resumeAnchor: TimeInterval = 0
 
-    private static let sampleRate: Double = 48_000   // Opus always 48 kHz internal
+    private nonisolated static let sampleRate: Double = 48_000   // Opus always 48 kHz internal
 
-    init(url: URL) throws {
+    /// Full-file decode — CPU-bound, seconds for long notes. nonisolated so
+    /// callers run it off MainActor; the returned buffer is moved, not shared.
+    nonisolated static func decodeBuffer(url: URL) throws -> AVAudioPCMBuffer {
         let demuxer = try OggOpusDemuxer(url: url)
         let allPackets = demuxer.packets
         // Need at least OpusHead + OpusTags + 1 audio packet to be playable.
@@ -100,9 +102,16 @@ final class OpusVoicePlayer {
             buf.floatChannelData!.pointee.update(from: src.baseAddress!,
                                                  count: pcm.count)
         }
+        return buf
+    }
 
-        self.buffer = buf
-        self.duration = Double(frameCount) / Self.sampleRate
+    convenience init(url: URL) throws {
+        self.init(buffer: try Self.decodeBuffer(url: url))
+    }
+
+    init(buffer: AVAudioPCMBuffer) {
+        self.buffer = buffer
+        self.duration = Double(buffer.frameLength) / Self.sampleRate
     }
 
     /// Builds the engine lazily so an idle voice-note row in the list

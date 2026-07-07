@@ -71,6 +71,7 @@ struct ChatInfoView: View {
     // GROUPS section header (+ menu) and per-row context menu. Sheets
     // and the unlink confirmation are attached at the body level.
     @State private var showingLinkSheet: Bool = false
+    @State private var linkSheetGroups: [BridgeGroupModel]?
     @State private var showingNewSubGroupSheet: Bool = false
     @State private var unlinkSubGroupTarget: BridgeSubGroup?
     @State private var sectionError: String?
@@ -250,30 +251,11 @@ struct ChatInfoView: View {
         }
         .sheet(isPresented: $showingLinkSheet) {
             if let g = group, let client = session.client {
-                // Bridge listGroups is synchronous; let the sheet render
-                // with an empty candidate set on failure rather than
-                // refusing to present.
-                let allGroups: [BridgeGroupModel] = (try? client.listGroups()) ?? []
-                let model = LinkSubGroupSheetModel(
-                    parentChatJID: g.jid,
-                    myJID: client.ownJID,
-                    availableGroups: allGroups,
-                    linkSubGroup: { parent, sub in
-                        try client.linkSubGroup(parentJID: parent, subJID: sub)
-                    },
-                    client: client)
-                LinkSubGroupSheet(
-                    model: model,
-                    parentName: g.name,
-                    resolveCommunityName: { jid in
-                        session.chatList?.chats.first(where: { $0.jid == jid })?.name ?? jid
-                    },
-                    onLinked: {
-                        showingLinkSheet = false
-                        Task { await loadGroup() }
-                    }
-                )
+                linkSheetContent(g: g, client: client)
             }
+        }
+        .onChange(of: showingLinkSheet) { _, open in
+            if !open { linkSheetGroups = nil }
         }
         .sheet(isPresented: $showingNewSubGroupSheet) {
             if let g = group, let client = session.client {
@@ -301,7 +283,7 @@ struct ChatInfoView: View {
             }
         }
         .confirmationDialog(
-            "Unlink \u{201C}\(unlinkSubGroupTarget?.name ?? "")\u{201D} from community?",
+            unlinkDialogTitle,
             isPresented: confirmUnlinkBinding,
             titleVisibility: .visible
         ) {
@@ -2025,6 +2007,42 @@ struct ChatInfoView: View {
         return Array(byKey.values)
     }
 
+    private var unlinkDialogTitle: String {
+        "Unlink \u{201C}\(unlinkSubGroupTarget?.name ?? "")\u{201D} from community?"
+    }
+
+    @ViewBuilder
+    private func linkSheetContent(g: BridgeGroupModel, client: WAClient) -> some View {
+        if let allGroups = linkSheetGroups {
+            LinkSubGroupSheet(
+                model: LinkSubGroupSheetModel(
+                    parentChatJID: g.jid,
+                    myJID: client.ownJID,
+                    availableGroups: allGroups,
+                    linkSubGroup: { parent, sub in
+                        try client.linkSubGroup(parentJID: parent, subJID: sub)
+                    },
+                    client: client),
+                parentName: g.name,
+                resolveCommunityName: { jid in
+                    session.chatList?.chats.first(where: { $0.jid == jid })?.name ?? jid
+                },
+                onLinked: {
+                    showingLinkSheet = false
+                    Task { await loadGroup() }
+                }
+            )
+        } else {
+            ProgressView()
+                .frame(width: 260, height: 120)
+                .task {
+                    linkSheetGroups = await Task.detached {
+                        (try? client.listGroups()) ?? []
+                    }.value
+                }
+        }
+    }
+
     @MainActor
     private func loadGroup() async {
         guard let client = session.client else { return }
@@ -2035,7 +2053,10 @@ struct ChatInfoView: View {
         subGroups = []
         joinStatusByJID = [:]
         do {
-            let g = try client.getGroupInfo(jid: chatJID)
+            let jid = chatJID
+            let g = try await Task.detached(priority: .userInitiated) {
+                try client.getGroupInfo(jid: jid)
+            }.value
             self.group = g
             // Reconcile chat-list row with the freshly-fetched group
             // metadata. Phone-side renames + description edits arrive
@@ -2053,9 +2074,11 @@ struct ChatInfoView: View {
             let parentForDirectory: String? = g.isParent
                 ? chatJID
                 : g.linkedParentJID
-            if let parent = parentForDirectory, !parent.isEmpty,
-               let subs = try? client.listSubGroups(parentJID: parent) {
-                self.subGroups = subs
+            if let parent = parentForDirectory, !parent.isEmpty {
+                let subs = try? await Task.detached(priority: .userInitiated) {
+                    try client.listSubGroups(parentJID: parent)
+                }.value
+                if let subs { self.subGroups = subs }
             }
             // Seed the pending-requests section model whenever the
             // user admins this sub-group AND approval-mode is on.

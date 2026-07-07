@@ -584,7 +584,8 @@ final class SessionViewModel {
             self.joinRequestStore = JoinRequestStore { chatJID in
                 try c.getGroupJoinRequests(chatJID: chatJID)
             }
-            try c.connect()
+            // Websocket connect can stall on slow networks; keep it off MainActor.
+            try await Task.detached(priority: .userInitiated) { try c.connect() }.value
             self.state = c.isLoggedIn ? .ready : .needsPair
             hydratePushNamesFromStore()
             consumeEvents()
@@ -608,9 +609,18 @@ final class SessionViewModel {
     /// captured on prior sessions so cold-start renders names instead of
     /// raw user ids — even for chats the user never opens this session.
     private func hydratePushNamesFromStore() {
-        for (jid, name) in SQLiteDedupe.sendersWithPushNames() {
-            let key = JIDNormalize.bare(jid)
-            if contactNames[key] == nil { contactNames[key] = name }
+        // Full-table SQLite scan — keep it off MainActor during boot.
+        Task.detached(priority: .utility) { [weak self] in
+            var fresh: [String: String] = [:]
+            for (jid, name) in SQLiteDedupe.sendersWithPushNames() {
+                fresh[JIDNormalize.bare(jid)] = name
+            }
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                for (key, name) in fresh where self.contactNames[key] == nil {
+                    self.contactNames[key] = name
+                }
+            }
         }
     }
 

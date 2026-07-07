@@ -190,8 +190,13 @@ final class ChatSearchViewModel {
     /// across push-name changes; label resolves through
     /// SessionViewModel display names when available, falling back to
     /// the indexed push name otherwise.
-    var knownGlobalSenders: [(jid: String, name: String)] {
-        return messageIndex.distinctSendersGlobal()
+    /// Async because the backing FTS5 GROUP BY blocks its serial queue —
+    /// never call the index synchronously from a view body.
+    func knownGlobalSendersAsync() async -> [(jid: String, name: String)] {
+        let idx = messageIndex
+        return await Task.detached(priority: .userInitiated) {
+            idx.distinctSendersGlobal()
+        }.value
     }
 
     private func maybeResolveInviteLink(_ q: String) async {

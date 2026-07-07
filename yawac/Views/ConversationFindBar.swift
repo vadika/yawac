@@ -8,6 +8,7 @@ struct ConversationFindBar: View {
     @Bindable var vm: ConversationViewModel
     @Environment(SessionViewModel.self) private var session
     @FocusState private var fieldFocused: Bool
+    @State private var availableSenders: [(jid: String, name: String)] = []
 
     var body: some View {
         VStack(spacing: 4) {
@@ -51,7 +52,7 @@ struct ConversationFindBar: View {
 
             SearchFilterChips(
                 filters: $vm.findFilters,
-                availableSenders: vm.knownSendersInChat(session: session),
+                availableSenders: availableSenders,
                 showChatChip: false,
                 availableChats: [],
                 chatJID: nil
@@ -62,6 +63,7 @@ struct ConversationFindBar: View {
         .overlay(Rectangle().frame(height: 1)
                     .foregroundStyle(Theme.border), alignment: .bottom)
         .onAppear { fieldFocused = true }
+        .task { availableSenders = await vm.knownSendersInChat(session: session) }
     }
 
     @ViewBuilder

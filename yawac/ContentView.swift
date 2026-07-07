@@ -149,7 +149,8 @@ struct ContentView: View {
             // MainActor commit step, so by the time we observe `false`
             // here `vm.chats` is already populated.
             if !lastSelectedChatJID.isEmpty {
-                while vm.bootstrapping { await Task.yield() }
+                // Sleep, don't spin — Task.yield() here busy-looped MainActor.
+                while vm.bootstrapping { try? await Task.sleep(for: .milliseconds(50)) }
                 if vm.chats.contains(where: { $0.jid == lastSelectedChatJID }) {
                     // Goes through openRoot so the trail starts at depth
                     // 0 (no stale BackBar from whatever the previous

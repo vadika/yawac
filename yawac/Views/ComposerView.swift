@@ -115,7 +115,10 @@ struct ComposerView: View {
         .onChange(of: vm.replyTarget?.id) { _, new in
             if new != nil { focused = true }
         }
-        .onAppear { installPasteMonitor() }
+        .onAppear {
+            installPasteMonitor()
+            syncMentionCandidates()
+        }
         .onDisappear { removePasteMonitor() }
         .sheet(isPresented: $showLocationPicker) {
             LocationPickerSheet(
@@ -255,6 +258,24 @@ struct ComposerView: View {
     /// `picker.cancel()` clears triggerRange before this closure may run
     /// (e.g. tab while only one candidate); recompute by finding the
     /// last '@' in the current draft as a fallback.
+    private func syncMentionCandidates() {
+        let candidates: [MentionPickerViewModel.Candidate] = {
+            if let parts = vm.groupParticipants, !parts.isEmpty {
+                return parts.map { .participant(
+                    jid: $0.jid,
+                    displayName: session.displayName(for: $0.jid)) }
+            }
+            if !vm.chatJID.hasSuffix("@g.us") {
+                return [.participant(
+                    jid: vm.chatJID,
+                    displayName: session.displayName(for: vm.chatJID))]
+            }
+            return []
+        }()
+        vm.picker.setCandidates(candidates,
+                                includeEveryone: vm.chatJID.hasSuffix("@g.us"))
+    }
+
     private func findCurrentTriggerRange() -> Range<String.Index>? {
         guard let at = vm.draft.lastIndex(of: "@") else { return nil }
         return at..<vm.draft.endIndex
@@ -305,24 +326,15 @@ struct ComposerView: View {
                 .focused($focused)
                 .onChange(of: vm.draft) { _, new in
                     vm.setTyping(!new.isEmpty)
-                    Task { await vm.loadGroupParticipantsIfNeeded() }
-                    let candidates: [MentionPickerViewModel.Candidate] = {
-                        if let parts = vm.groupParticipants, !parts.isEmpty {
-                            return parts.map { .participant(
-                                jid: $0.jid,
-                                displayName: session.displayName(for: $0.jid)) }
+                    if vm.groupParticipants == nil {
+                        Task {
+                            await vm.loadGroupParticipantsIfNeeded()
+                            syncMentionCandidates()
                         }
-                        if !vm.chatJID.hasSuffix("@g.us") {
-                            return [.participant(
-                                jid: vm.chatJID,
-                                displayName: session.displayName(for: vm.chatJID))]
-                        }
-                        return []
-                    }()
-                    vm.picker.setCandidates(candidates,
-                                            includeEveryone: vm.chatJID.hasSuffix("@g.us"))
+                    }
                     vm.picker.update(text: new)
                 }
+                .onChange(of: vm.chatJID) { _, _ in syncMentionCandidates() }
                 .onSubmit { send() }
                 .onKeyPress(.tab) {
                     guard vm.picker.isActive else { return .ignored }
@@ -634,7 +646,7 @@ struct ComposerView: View {
     private func attachmentChip(_ att: PendingAttachment) -> some View {
         ZStack(alignment: .topTrailing) {
             Group {
-                if att.kind == "image", let img = NSImage(contentsOf: att.url) {
+                if let img = att.thumbnail {
                     Image(nsImage: img)
                         .resizable().scaledToFill()
                         .frame(width: 56, height: 56)

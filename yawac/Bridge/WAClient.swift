@@ -223,7 +223,7 @@ class WAClient: PhoneValidating, LIDResolving {
     /// pairing or before app-state has settled.
     var ownPushName: String { go.ownPushName() }
 
-    func connect() throws {
+    nonisolated func connect() throws {
         bump("connect")
         try go.connect()
     }
@@ -784,7 +784,7 @@ class WAClient: PhoneValidating, LIDResolving {
         return try Self.decodeJSON(json)
     }
 
-    func getGroupInfo(jid: String) throws -> BridgeGroupModel {
+    nonisolated func getGroupInfo(jid: String) throws -> BridgeGroupModel {
         bump("getGroupInfo")
         var err: NSError?
         let json = go.getGroupInfo(jid, error: &err)
@@ -794,7 +794,7 @@ class WAClient: PhoneValidating, LIDResolving {
 
     /// Returns every sub-group linked under `parentJID` (a community
     /// parent), joined or not. Cheap directory listing.
-    func listSubGroups(parentJID: String) throws -> [BridgeSubGroup] {
+    nonisolated func listSubGroups(parentJID: String) throws -> [BridgeSubGroup] {
         bump("listSubGroups")
         var err: NSError?
         let json = go.listSubGroups(parentJID, error: &err)

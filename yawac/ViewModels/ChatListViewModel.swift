@@ -97,9 +97,10 @@ final class ChatListViewModel {
         dirtyChatJIDs.removeAll(keepingCapacity: true)
         for jid in snapshot {
             if let c = chats.first(where: { $0.jid == jid }) {
-                upsertPersisted(c, preview: c.lastMessage)
+                upsertPersisted(c, preview: c.lastMessage, save: false)
             }
         }
+        try? context?.save()
     }
 
     private func pushUnreadToSession() {
@@ -108,7 +109,9 @@ final class ChatListViewModel {
             let muted = (c.mutedUntil.map { $0 > now }) ?? false
             return muted ? acc : acc + c.unread
         }
-        session?.totalUnread = total
+        // Only write on change — chats mutates per-element in merge loops,
+        // and every redundant assign invalidates the menubar observers.
+        if session?.totalUnread != total { session?.totalUnread = total }
     }
 
     // MARK: - Delete tombstones
@@ -835,7 +838,7 @@ final class ChatListViewModel {
                 c.isAllMemberAdd = g.isAllMemberAdd
                 if c.name == jid && !g.name.isEmpty { c.name = g.name }
                 chats[idx] = c
-                upsertPersisted(c)
+                upsertPersisted(c, save: false)
                 continue
             }
             if isTombstoned(jid) { continue }
@@ -856,8 +859,9 @@ final class ChatListViewModel {
             fresh.isAllMemberAdd = g.isAllMemberAdd
             chats.append(fresh)
             idxByJID[jid] = chats.count - 1
-            upsertPersisted(chats[chats.count - 1])
+            upsertPersisted(chats[chats.count - 1], save: false)
         }
+        try? context?.save()
         sortChats()
     }
 
@@ -888,8 +892,9 @@ final class ChatListViewModel {
                 unread: 0)
             chats.append(chat)
             known.insert(jid)
-            upsertPersisted(chat)
+            upsertPersisted(chat, save: false)
         }
+        try? context?.save()
         sortChats()
     }
 
@@ -1025,12 +1030,13 @@ final class ChatListViewModel {
         for i in chats.indices {
             if let resolved = byJID[chats[i].jid], chats[i].name != resolved {
                 chats[i].name = resolved
-                upsertPersisted(chats[i])
+                upsertPersisted(chats[i], save: false)
             }
         }
+        try? context?.save()
     }
 
-    private func upsertPersisted(_ c: Chat, preview: String? = nil) {
+    private func upsertPersisted(_ c: Chat, preview: String? = nil, save: Bool = true) {
         guard let context else { return }
         let jid = c.jid
         let descriptor = FetchDescriptor<PersistedChat>(
@@ -1067,7 +1073,7 @@ final class ChatListViewModel {
             row.folderIDs = c.folderIDs
             context.insert(row)
         }
-        try? context.save()
+        if save { try? context.save() }
     }
 
     /// Toggle pin state for `chat`. Sends an appstate patch (the
@@ -1113,10 +1119,10 @@ final class ChatListViewModel {
             let wasPinned = chats[i].pinnedAt != nil
             if isPinned == wasPinned { continue }
             chats[i].pinnedAt = isPinned ? (chats[i].pinnedAt ?? now) : nil
-            upsertPersisted(chats[i])
+            upsertPersisted(chats[i], save: false)
             changed = true
         }
-        if changed { sortChats() }
+        if changed { try? context?.save(); sortChats() }
     }
 
     /// Collapse `@lid` chats that now resolve (via whatsmeow's LID map) to a
@@ -1311,10 +1317,10 @@ final class ChatListViewModel {
                 : Date(timeIntervalSince1970: TimeInterval(serverMs) / 1000)
             if chats[i].mutedUntil == serverUntil { continue }
             chats[i].mutedUntil = serverUntil
-            upsertPersisted(chats[i])
+            upsertPersisted(chats[i], save: false)
             changed = true
         }
-        if changed { sortChats() }
+        if changed { try? context?.save(); sortChats() }
     }
 
     // MARK: - Group info (name + description)

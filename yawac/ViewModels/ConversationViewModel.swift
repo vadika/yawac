@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Observation
 import os
@@ -46,6 +47,7 @@ struct PendingAttachment: Identifiable, Equatable {
     let url: URL
     let kind: String   // image | video | audio | document
     var viewOnce: Bool = false
+    var thumbnail: NSImage? = nil
 }
 
 @Observable @MainActor
@@ -246,8 +248,15 @@ final class ConversationViewModel {
     /// the JID so filter equality survives push-name changes; the label
     /// resolves via `session.displayName` when known, falling back to
     /// the indexed push name.
-    func knownSendersInChat(session: SessionViewModel) -> [(jid: String, name: String)] {
-        return messageIndex.distinctSendersInChat(jid: chatJID).map { row in
+    /// Async because the backing FTS5 GROUP BY blocks its serial queue —
+    /// never call the index synchronously from a view body.
+    func knownSendersInChat(session: SessionViewModel) async -> [(jid: String, name: String)] {
+        let idx = messageIndex
+        let jid = chatJID
+        let rows = await Task.detached(priority: .userInitiated) {
+            idx.distinctSendersInChat(jid: jid)
+        }.value
+        return rows.map { row in
             let resolved = session.displayName(for: row.jid)
             let label = resolved.isEmpty ? row.name : resolved
             return (jid: row.jid, name: label)
@@ -2055,7 +2064,16 @@ final class ConversationViewModel {
         sendReadReceipts(for: messages.map { ($0.id, $0.senderJID) })
     }
 
+    @ObservationIgnored private var typingState = false
+    @ObservationIgnored private var typingSentAt = Date.distantPast
+
     func setTyping(_ typing: Bool) {
+        // ponytail: resend "composing" every 10s while typing; WA expires it server-side
+        let now = Date()
+        if typing == typingState,
+           !typing || now.timeIntervalSince(typingSentAt) < 10 { return }
+        typingState = typing
+        typingSentAt = now
         try? client.sendTyping(chatJID, typing)
     }
 
@@ -2122,7 +2140,19 @@ final class ConversationViewModel {
     /// Stage a picked file in the composer (does NOT send). The user can add
     /// a caption, remove it, or add more before sending.
     func stageAttachment(at url: URL) {
-        pendingAttachments.append(PendingAttachment(url: url, kind: Self.attachmentKind(url)))
+        let att = PendingAttachment(url: url, kind: Self.attachmentKind(url))
+        pendingAttachments.append(att)
+        guard att.kind == "image" else { return }
+        // Decode the 56pt chip preview off-main once; body must never touch disk.
+        Task.detached(priority: .userInitiated) { [id = att.id] in
+            let img = decodedImage(fromFile: url.path, maxPixel: 112)
+            await MainActor.run { [weak self] in
+                guard let self,
+                      let idx = self.pendingAttachments.firstIndex(where: { $0.id == id })
+                else { return }
+                self.pendingAttachments[idx].thumbnail = img
+            }
+        }
     }
 
     func removePendingAttachment(_ id: PendingAttachment.ID) {
