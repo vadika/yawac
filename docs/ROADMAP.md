@@ -213,6 +213,14 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **F123 — PN↔LID name lookup + system-only chat sort** (v0.10.51) —
+  Chat header showed "+digits" while the sidebar showed the contact
+  name: pushnames can be keyed under the @lid contact row while the
+  chat is PN-keyed, and displayName only tried LID→PN; added the
+  reverse resolvePNToLID lookup. Also: a chat holding nothing but
+  system/protocol rows (encryption-key notices) no longer floats on
+  the key-change timestamp — bootstrap sorts by the latest previewable
+  message; system-only chats sink to the bottom.
 - ✅ **F122 — system messages inverted** (v0.10.50) — Encryption-key
   system rows showed as sidebar previews but were hidden in the
   conversation; now the opposite. CVM displayable filter keeps
