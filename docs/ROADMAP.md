@@ -213,6 +213,20 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **F120 — responsiveness batch** (v0.10.48) — Main-thread audit over
+  the hot paths (five parallel reviewers, 14 findings, 11 fixed / 3
+  verified-invalid). Composer: `sendTyping` throttled to state change +
+  10 s refresh (was one bridge RPC per keystroke), mention candidates
+  built on appear/chat-switch, attachment chip previews decoded
+  off-main at stage time. Chat list: `upsertPersisted(save:)` batches
+  merge/reconcile loops into one `context.save()`; `totalUnread`
+  written only on change. Voice notes: `OpusVoicePlayer.decodeBuffer`
+  nonisolated, decode detached before playback. Boot: `connect()`
+  nonisolated + detached, push-name hydration scan detached, bootstrap
+  wait sleeps instead of `Task.yield()` spinning. ChatInfoView:
+  link-sheet `listGroups` + `loadGroup` RPCs detached. Sender filter
+  chips: FTS5 GROUP BY queries moved behind async loaders in find bar
+  and global search.
 - ✅ **F119 — automatic gap sweep** (v0.10.47) — Self-healing loop for
   lost messages. Replies persist their quoted target's chat + sender +
   message ID; `SQLiteDedupe.orphanQuotedRefs(sinceDays:)` scans for
