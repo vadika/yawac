@@ -93,6 +93,8 @@ enum SQLiteDedupe {
         sqlite3_busy_timeout(db, 1000)
 
         // For each chat, take the row with the max timestamp.
+        // F122: skip system/protocol rows — their body text ("Encryption
+        // key with X changed.") must never become the sidebar preview.
         let sql = """
             SELECT m.ZCHATJID, m.ZTIMESTAMP, m.ZTEXT, m.ZKIND,
                    m.ZREVOKEDAT, m.ZLOCALLYDELETED
@@ -100,6 +102,7 @@ enum SQLiteDedupe {
             JOIN (
                 SELECT ZCHATJID, MAX(ZTIMESTAMP) AS mx
                 FROM ZPERSISTEDMESSAGE
+                WHERE ZKIND NOT IN ('system', 'protocol')
                 GROUP BY ZCHATJID
             ) j ON j.ZCHATJID = m.ZCHATJID AND j.mx = m.ZTIMESTAMP
         """

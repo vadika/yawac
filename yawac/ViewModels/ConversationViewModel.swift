@@ -972,8 +972,12 @@ final class ConversationViewModel {
             if swept > 0 { try? context.save() }
             UserDefaults.standard.set(true, forKey: sweepKey)
         }
+        // F122: system rows with a body (encryption-key change,
+        // disappearing-timer change) stay visible in the chat; only
+        // body-less carriers are dropped.
         let displayable = rows.filter { p in
-            p.kind != "reaction" && p.kind != "protocol" && p.kind != "system"
+            p.kind != "reaction" && p.kind != "protocol"
+                && (p.kind != "system" || !(p.text ?? "").isEmpty)
         }
         let messages: [UIMessage] = displayable.map { Self.uiMessage(from: $0) }
         // Hydrate persisted delivery status (fromMe only — receipts for
@@ -1288,7 +1292,8 @@ final class ConversationViewModel {
         }
         let rows = recentRows.reversed().map { $0 }
         let displayable = rows.filter { p in
-            p.kind != "reaction" && p.kind != "protocol" && p.kind != "system"
+            p.kind != "reaction" && p.kind != "protocol"
+                && (p.kind != "system" || !(p.text ?? "").isEmpty)
         }
         let messages: [UIMessage] = displayable.map { Self.uiMessage(from: $0) }
         return .init(messages: messages)

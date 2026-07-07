@@ -335,13 +335,12 @@ final class ChatListViewModel {
                 let ts = max(
                     row.lastTimestamp.timeIntervalSince1970,
                     derived?.ts.timeIntervalSince1970 ?? -.infinity)
-                let rawPreview: String = {
-                    if let d = derived,
-                       d.ts.timeIntervalSince1970 >= row.lastTimestamp.timeIntervalSince1970 {
-                        return d.text
-                    }
-                    return row.lastMessageText ?? ""
-                }()
+                // F122: derived (latest previewable message row) wins over
+                // the PersistedChat cache whenever present — the cache can
+                // hold system-message text from before the preview gates,
+                // and its lastTimestamp (bumped by system rows) made the
+                // old `>=` guard keep the stale value forever.
+                let rawPreview = derived?.text ?? row.lastMessageText ?? ""
                 return Chat(
                     jid: row.jid, name: row.name,
                     lastMessage: rawPreview,
@@ -986,7 +985,12 @@ final class ChatListViewModel {
     func refreshPreview(chatJID: String) {
         guard let context else { return }
         var descriptor = FetchDescriptor<PersistedMessage>(
-            predicate: #Predicate { $0.chatJID == chatJID },
+            // F122: latest *previewable* row — a trailing system/protocol
+            // row must not wipe the preview to "".
+            predicate: #Predicate {
+                $0.chatJID == chatJID
+                    && $0.kind != "system" && $0.kind != "protocol"
+            },
             sortBy: [SortDescriptor(\.timestamp, order: .reverse)])
         descriptor.fetchLimit = 1
         guard let row = try? context.fetch(descriptor).first else { return }
@@ -1006,6 +1010,10 @@ final class ChatListViewModel {
     private static func previewText(for m: PersistedMessage) -> String {
         if m.revokedAt != nil   { return "🚫 message deleted" }
         if m.locallyDeleted     { return "🚫 you deleted this" }
+        // Kind gate BEFORE text: system rows carry body text
+        // ("Encryption key with X changed.") that must never become
+        // the sidebar preview.
+        if m.kind == "system" || m.kind == "protocol" { return "" }
         if let t = m.text, !t.isEmpty { return t }
         switch m.kind {
         case "image":    return "📷 Photo"
