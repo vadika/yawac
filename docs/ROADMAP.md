@@ -213,6 +213,17 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **F121 — @lid mention resolution** (v0.10.49) — Group @mentions of
+  LID identities rendered as `@+165562483245097`: displayName's
+  "+digits" unknown-JID fallback from the `@s.whatsapp.net` candidate
+  passed the `name != phone` check and masked the `@lid` candidate that
+  holds the LID→PN mapping + pushname. Echo now kept only as last
+  resort in both resolvers (bubble + chat-list preview). History audit
+  (197 distinct mentioned ids): every id with any known identity now
+  resolves; 50 silent-member phone mentions remain `@+phone` — protocol
+  limit, no pushname fetch for arbitrary JIDs (verified against
+  whatsmeow source). Fork bumped with upstream PR #1163 cherry-pick:
+  join-request `phone_number` attrs now populate `whatsmeow_lid_map`.
 - ✅ **F120 — responsiveness batch** (v0.10.48) — Main-thread audit over
   the hot paths (five parallel reviewers, 14 findings, 11 fixed / 3
   verified-invalid). Composer: `sendTyping` throttled to state change +
