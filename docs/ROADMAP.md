@@ -213,6 +213,10 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **F124 — sidebar raw-JID name fallback** (v0.10.52) — Row showed
+  `4915170075571@s.wha…` while the header showed `+4915170075571`;
+  JID-shaped chat names now render through displayName so both
+  surfaces agree on the readable `+phone` form.
 - ✅ **F123 — PN↔LID name lookup + system-only chat sort** (v0.10.51) —
   Chat header showed "+digits" while the sidebar showed the contact
   name: pushnames can be keyed under the @lid contact row while the
