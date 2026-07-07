@@ -1,12 +1,12 @@
 # Local whatsmeow patches
 
-We carry three upstream PRs that haven't merged into whatsmeow main.
+We carry four upstream PRs that haven't merged into whatsmeow main.
 Pinned via a `replace` directive in `bridge/go.mod` pointing at the
 github.com/vadika/whatsmeow fork. The fork mirrors upstream tip with
 cherry-picked patches on top.
 
-Current fork tip: `a0d4b7e975f9` (pseudo-version
-`v0.0.0-20260704062504-a0d4b7e975f9`), based on upstream
+Current fork tip: `45fac9cd24ec` (pseudo-version
+`v0.0.0-20260707191601-45fac9cd24ec`), based on upstream
 `b572e5bcb92b` (Jun 30 2026).
 
 ## Applied patches
@@ -38,6 +38,15 @@ Current fork tip: `a0d4b7e975f9` (pseudo-version
   the entire collection. Bounded skip-loop (300ms throttle × 200
   cap). Fixes upstream issues #382, #518, #651, #858 where a
   server-side bad patch wedges archive/mute/pin sync forever.
+
+- **PR #1163** — store LID→PN mappings from
+  `GetGroupRequestParticipants` response.
+  Upstream: https://github.com/tulir/whatsmeow/pull/1163
+
+  The `membership_approval_request` IQ nodes carry a `phone_number`
+  attribute the old code discarded, so pending join requesters whose
+  LID was never seen live had no LID→PN mapping. Feeds the same
+  `whatsmeow_lid_map` that yawac's name/mention resolution reads.
 
 ## Previously applied, now upstreamed (no longer carried)
 
@@ -78,7 +87,7 @@ cd ..
 
 ## Dropping the fork entirely
 
-When tulir merges all three carried PRs upstream, remove the
+When tulir merges all carried PRs upstream, remove the
 `replace` block:
 
 1. Remove the `replace` directive from `bridge/go.mod`.

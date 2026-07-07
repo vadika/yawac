@@ -40,8 +40,9 @@ require (
 
 // Fork (github.com/vadika/whatsmeow) carries upstream PRs not yet
 // merged into whatsmeow main: #1160 binary-decoder panic resilience,
-// #1168 signal session lock (likely closes our issue #6), and #1171
-// SkipBrokenAppStatePatches opt-in. (#1151 poll-vote extractor was
+// #1168 signal session lock (likely closes our issue #6), #1171
+// SkipBrokenAppStatePatches opt-in, and #1163 LID→PN mappings from
+// GetGroupRequestParticipants. (#1151 poll-vote extractor was
 // closed upstream; its logic lives in bridge/history.go now.)
 // See docs/whatsmeow-patches.md.
-replace go.mau.fi/whatsmeow => github.com/vadika/whatsmeow v0.0.0-20260704062504-a0d4b7e975f9
+replace go.mau.fi/whatsmeow => github.com/vadika/whatsmeow v0.0.0-20260707191601-45fac9cd24ec
