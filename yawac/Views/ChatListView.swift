@@ -744,9 +744,12 @@ struct ChatListView: View {
                 }
                 // Strips ⟦…⟧ snippet markers for v1; bold-around-hit rendering
                 // is deferred to a polish task.
-                Text(hit.snippet
-                    .replacingOccurrences(of: "⟦", with: "")
-                    .replacingOccurrences(of: "⟧", with: ""))
+                Text(resolveMentionsText(
+                    hit.snippet
+                        .replacingOccurrences(of: "⟦", with: "")
+                        .replacingOccurrences(of: "⟧", with: "")) {
+                    session.displayName(for: $0)
+                })
                     .scaledUI(11)
                     .lineLimit(2)
                     .foregroundStyle(Theme.textMuted)
