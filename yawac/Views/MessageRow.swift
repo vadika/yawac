@@ -1041,8 +1041,14 @@ struct MessageRow: View {
                 // "+<same digits>" is displayName's unknown-JID fallback, not
                 // a resolution — for @lid mentions the PN candidate echoes it
                 // first and used to mask the @lid candidate that actually
-                // maps LID→PN→name.
-                if name != phone, name != "+" + phone, !name.isEmpty {
+                // maps LID→PN→name. Keep it as last resort (readable phone)
+                // but keep scanning.
+                if name == "+" + phone {
+                    replacement = "@\(name)"
+                    resolvedJID = jid
+                    continue
+                }
+                if name != phone, !name.isEmpty {
                     replacement = "@\(name)"
                     resolvedJID = jid
                     break

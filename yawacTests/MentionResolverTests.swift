@@ -12,9 +12,9 @@ final class MentionResolverTests: XCTestCase {
         XCTAssertEqual(out, "@MariaV caltopo!!")
     }
 
-    func testUnknownEverywhereKeepsRawDigits() {
+    func testUnknownEverywhereKeepsPlusDigitsFallback() {
         let out = resolveMentionsText("hi @12345678") { _ in "+12345678" }
-        XCTAssertEqual(out, "hi @12345678")
+        XCTAssertEqual(out, "hi @+12345678")
     }
 
     func testPNNameResolves() {

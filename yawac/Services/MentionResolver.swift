@@ -31,8 +31,12 @@ func resolveMentionsText(_ text: String, resolver: (String) -> String) -> String
             // populated yet and would otherwise leak the server suffix
             // back into the rendered preview.
             // "+<same digits>" is displayName's unknown-JID fallback, not a
-            // resolution — rejecting it lets the @lid candidate run.
-            if name != phone, name != "+" + phone, !name.isEmpty, !name.contains("@") {
+            // resolution — keep as last resort but let the @lid candidate run.
+            if name == "+" + phone {
+                replacement = "@\(name)"
+                continue
+            }
+            if name != phone, !name.isEmpty, !name.contains("@") {
                 replacement = "@\(name)"
                 break
             }
