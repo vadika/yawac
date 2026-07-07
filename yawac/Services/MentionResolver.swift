@@ -30,7 +30,9 @@ func resolveMentionsText(_ text: String, resolver: (String) -> String) -> String
             // (containing `@`) — that happens when the contact map isn't
             // populated yet and would otherwise leak the server suffix
             // back into the rendered preview.
-            if name != phone, !name.isEmpty, !name.contains("@") {
+            // "+<same digits>" is displayName's unknown-JID fallback, not a
+            // resolution — rejecting it lets the @lid candidate run.
+            if name != phone, name != "+" + phone, !name.isEmpty, !name.contains("@") {
                 replacement = "@\(name)"
                 break
             }
