@@ -132,6 +132,36 @@ enum SQLiteDedupe {
         return out
     }
 
+    /// F123: chats that have at least one message row of any kind.
+    /// Combined with `latestMessagePerChat` (previewable kinds only),
+    /// a chat present here but absent there holds nothing but
+    /// system/protocol rows — it must not float in the sidebar.
+    static func chatJIDsWithAnyMessage() -> Set<String> {
+        let supportDir: URL
+        do {
+            supportDir = try FileManager.default.url(
+                for: .applicationSupportDirectory, in: .userDomainMask,
+                appropriateFor: nil, create: false)
+        } catch { return [] }
+        let storeURL = supportDir.appendingPathComponent("default.store")
+        guard FileManager.default.fileExists(atPath: storeURL.path) else { return [] }
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(storeURL.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK,
+              let db else { return [] }
+        defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 1000)
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(
+            db, "SELECT DISTINCT ZCHATJID FROM ZPERSISTEDMESSAGE",
+            -1, &stmt, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(stmt) }
+        var out: Set<String> = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            if let p = sqlite3_column_text(stmt, 0) { out.insert(String(cString: p)) }
+        }
+        return out
+    }
+
     /// F119: orphan quoted references — replies whose quoted target is
     /// absent from the store. Each row carries complete placeholder-resend
     /// coordinates (chat + target message ID + target sender), so the gap

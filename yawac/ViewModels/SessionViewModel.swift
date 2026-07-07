@@ -355,6 +355,13 @@ final class SessionViewModel {
         if let n = contactNames[bare] { return n }
         let canonical = JIDNormalize.canonical(jid, client: client)
         if canonical != bare, let n = contactNames[canonical] { return n }
+        // F123: reverse direction — whatsmeow keys some contact rows
+        // (pushnames) under the @lid form while the chat is PN-keyed,
+        // so a PN lookup must also try its LID counterpart.
+        if bare.hasSuffix("@s.whatsapp.net"), let client {
+            let lid = JIDNormalize.bare(client.resolvePNToLID(bare))
+            if lid != bare, let n = contactNames[lid] { return n }
+        }
         // F60: protocol-limit fallback. For @lid senders with a known
         // LID→PN mapping but no push-name anywhere (silent group
         // member, no prior interaction with this account — whatsmeow's

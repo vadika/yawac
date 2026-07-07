@@ -329,18 +329,22 @@ final class ChatListViewModel {
         // (`session.displayName` is MainActor-isolated). The raw preview
         // is carried as-is in `Chat.lastMessage` here and resolved in
         // place before the snapshot is committed.
+        let messageBearing = SQLiteDedupe.chatJIDsWithAnyMessage()
         let chats: [Chat] = keepers.values
             .map { row -> Chat in
                 let derived = latestByChat[row.jid]
-                let ts = max(
-                    row.lastTimestamp.timeIntervalSince1970,
-                    derived?.ts.timeIntervalSince1970 ?? -.infinity)
-                // F122: derived (latest previewable message row) wins over
-                // the PersistedChat cache whenever present — the cache can
-                // hold system-message text from before the preview gates,
-                // and its lastTimestamp (bumped by system rows) made the
-                // old `>=` guard keep the stale value forever.
-                let rawPreview = derived?.text ?? row.lastMessageText ?? ""
+                // F122/F123: derived (latest previewable message row) is
+                // authoritative for preview AND sort position — the
+                // PersistedChat cache can hold system-message text and a
+                // system-bumped lastTimestamp from before the preview
+                // gates. A chat whose rows are all system/protocol
+                // (derived nil but message-bearing) sinks to the bottom:
+                // only real messages float a chat.
+                let systemRowsOnly = derived == nil && messageBearing.contains(row.jid)
+                let ts = derived?.ts.timeIntervalSince1970
+                    ?? (systemRowsOnly ? 0 : row.lastTimestamp.timeIntervalSince1970)
+                let rawPreview = derived?.text
+                    ?? (systemRowsOnly ? "" : row.lastMessageText ?? "")
                 return Chat(
                     jid: row.jid, name: row.name,
                     lastMessage: rawPreview,
