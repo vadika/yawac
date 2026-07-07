@@ -213,6 +213,15 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **F122 — system messages inverted** (v0.10.50) — Encryption-key
+  system rows showed as sidebar previews but were hidden in the
+  conversation; now the opposite. CVM displayable filter keeps
+  kind=system rows with body text; previewText gates kind before text;
+  latestMessagePerChat SQL excludes system/protocol; refreshPreview
+  fetches latest previewable row; bootstrap derived preview wins over
+  the stale PersistedChat cache. Also: @mentions now resolve in
+  quoted-reply snippets, composer reply chip, and global search hit
+  snippets (missed surfaces from F121).
 - ✅ **F121 — @lid mention resolution** (v0.10.49) — Group @mentions of
   LID identities rendered as `@+165562483245097`: displayName's
   "+digits" unknown-JID fallback from the `@s.whatsapp.net` candidate
