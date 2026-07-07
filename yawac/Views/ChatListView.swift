@@ -836,9 +836,14 @@ struct ChatListView: View {
     @ViewBuilder
     private func chatRowBody(_ chat: Chat, indent: CGFloat) -> some View {
         let isSelected = (selection == chat.id)
+        // F123: a name that still IS the raw JID ("…@s.whatsapp.net")
+        // renders through displayName, which at worst gives the readable
+        // "+<phone>" form — matching the conversation header.
+        let title = chat.name.contains("@")
+            ? session.displayName(for: chat.jid) : chat.name
         HStack(alignment: .top, spacing: 11) {
             if indent > 0 { Color.clear.frame(width: indent) }
-            AvatarView(jid: chat.jid, name: chat.name, size: 36)
+            AvatarView(jid: chat.jid, name: title, size: 36)
                 .padding(.top, 1)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
@@ -848,7 +853,7 @@ struct ChatListView: View {
                     // `displayName`) because that helper feeds mentions
                     // + notifications too, where the suffix would read
                     // wrong.
-                    Text(chat.name + (session.isSelfChat(chat.jid) ? " (You)" : ""))
+                    Text(title + (session.isSelfChat(chat.jid) ? " (You)" : ""))
                         .scaledUI(14, weight: isSelected ? .semibold : .medium)
                         .foregroundStyle(isSelected ? Theme.text : Theme.text)
                         .lineLimit(1)
