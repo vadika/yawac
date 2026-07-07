@@ -133,6 +133,7 @@ func (c *Client) applyHistorySync(evt *events.HistorySync) {
 	}
 
 	// Conversations — names + message backfill.
+	groupNames := 0
 	for _, conv := range evt.Data.GetConversations() {
 		chatJIDStr := conv.GetID()
 		if chatJIDStr == "" {
@@ -142,11 +143,20 @@ func (c *Client) applyHistorySync(evt *events.HistorySync) {
 		if err != nil {
 			continue
 		}
-		// For 1:1 conversations, the Name field is the contact's display name.
+		// For 1:1 conversations, the Name field is the contact's display
+		// name. Group subjects (incl. left groups absent from
+		// GetJoinedGroups) arrive in DisplayName — F125.
 		// PutContactName signature: (ctx, jid, fullName, firstName).
-		if name := conv.GetName(); name != "" &&
+		name := conv.GetName()
+		if name == "" {
+			name = conv.GetDisplayName()
+		}
+		if name != "" &&
 			c.wa != nil && c.wa.Store != nil && c.wa.Store.Contacts != nil {
 			_ = c.wa.Store.Contacts.PutContactName(ctx, chatJID, name, "")
+			if chatJID.Server == types.GroupServer {
+				groupNames++
+			}
 		}
 
 		// Two-pass: store every message's secret first so subsequent vote
@@ -190,6 +200,11 @@ func (c *Client) applyHistorySync(evt *events.HistorySync) {
 			}
 			c.dispatchWebMessage(chatJIDStr, wm)
 		}
+	}
+
+	if groupNames > 0 {
+		fmt.Fprintf(os.Stderr,
+			"[yawac/history] group names captured=%d\n", groupNames)
 	}
 
 	// Surface every poll's bundled historical vote tally in one sweep.
