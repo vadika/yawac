@@ -21,6 +21,14 @@ final class ChatSearchViewModelTests: XCTestCase {
         }
     }
 
+    /// Poll up to ~2s instead of fixed sleeps — the debounce pipeline's
+    /// timing flakes under machine load (recurring suite failure family).
+    private func waitUntil(_ cond: () -> Bool) async {
+        for _ in 0..<200 where !cond() {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+    }
+
     private func makeListVM(chats: [Chat] = []) -> ChatListViewModel {
         let vm = ChatListViewModelTestHarness.make()
         vm.chats = chats
@@ -65,7 +73,7 @@ final class ChatSearchViewModelTests: XCTestCase {
         let search = ChatSearchViewModel(listVM: list, validator: FakeValidator())
         search.debounceMs = 1
         search.query = "smith"
-        try? await Task.sleep(for: .milliseconds(50))
+        await waitUntil { search.filteredChats.count == 2 }
         XCTAssertEqual(Set(search.filteredChats.map(\.jid)),
                        Set(["1@s.whatsapp.net", "3@s.whatsapp.net"]))
     }
@@ -78,7 +86,7 @@ final class ChatSearchViewModelTests: XCTestCase {
         let search = ChatSearchViewModel(listVM: list, validator: FakeValidator())
         search.debounceMs = 1
         search.query = "+49 151 2345"
-        try? await Task.sleep(for: .milliseconds(50))
+        await waitUntil { search.filteredChats.count == 1 }
         XCTAssertEqual(search.filteredChats.map(\.jid),
                        ["4915123456789@s.whatsapp.net"])
     }
@@ -90,7 +98,7 @@ final class ChatSearchViewModelTests: XCTestCase {
         let search = ChatSearchViewModel(listVM: list, validator: FakeValidator())
         search.debounceMs = 1
         search.query = "zzzz"
-        try? await Task.sleep(for: .milliseconds(50))
+        await waitUntil { search.filteredChats.isEmpty }
         XCTAssertTrue(search.filteredChats.isEmpty)
     }
 
@@ -127,7 +135,7 @@ final class ChatSearchViewModelTests: XCTestCase {
         let search = ChatSearchViewModel(listVM: list, validator: v)
         search.debounceMs = 1
         search.query = "+49 151 2345 6789"
-        try? await Task.sleep(for: .milliseconds(50))
+        await waitUntil { search.suggestion != nil }
         XCTAssertEqual(v.calls, ["4915123456789"])
         XCTAssertEqual(search.suggestion?.jid, "4915123456789@s.whatsapp.net")
     }
@@ -192,7 +200,7 @@ final class ChatSearchViewModelTests: XCTestCase {
         search.debounceMs = 20
         search.query = "+491512345678"
         search.query = "+4915123456788"
-        try? await Task.sleep(for: .milliseconds(80))
+        await waitUntil { !v.calls.isEmpty }
         XCTAssertEqual(v.calls.count, 1)
         XCTAssertEqual(v.calls.first, "4915123456788")
     }
@@ -221,13 +229,18 @@ final class ChatSearchViewModelTests: XCTestCase {
         let search = ChatSearchViewModel(listVM: list, validator: v)
         search.debounceMs = 1
         search.query = "+4915123456789"
-        try? await Task.sleep(for: .milliseconds(50))
+        // Poll instead of fixed sleeps — 50ms budgets flake under load.
+        for _ in 0..<100 where search.suggestion == nil {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
         XCTAssertNotNil(search.suggestion)
         // Second query — bridge rate-limits.
         v.stub = .failure(NSError(domain: "Bridge", code: 0,
             userInfo: [NSLocalizedDescriptionKey: "rate_limited"]))
         search.query = "+4915999999999"
-        try? await Task.sleep(for: .milliseconds(50))
+        for _ in 0..<100 where v.calls.count < 2 || search.validating {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
         // Prior suggestion preserved.
         XCTAssertEqual(search.suggestion?.jid, "4915123456789@s.whatsapp.net")
         XCTAssertFalse(search.validating)
@@ -265,7 +278,7 @@ final class ChatSearchViewModelTests: XCTestCase {
         let search = ChatSearchViewModel(listVM: list, validator: v)
         search.debounceMs = 1
         search.query = "+4912345678"
-        try? await Task.sleep(for: .milliseconds(50))
+        await waitUntil { search.suggestion != nil }
         XCTAssertEqual(search.suggestion?.displayPhone, "Acme")
     }
 
@@ -282,7 +295,7 @@ final class ChatSearchViewModelTests: XCTestCase {
         let search = ChatSearchViewModel(listVM: list, validator: v)
         search.debounceMs = 1
         search.query = "+4912345678"
-        try? await Task.sleep(for: .milliseconds(50))
+        await waitUntil { search.suggestion != nil }
         XCTAssertEqual(search.suggestion?.displayPhone, "Bob")
     }
 
@@ -299,7 +312,7 @@ final class ChatSearchViewModelTests: XCTestCase {
         let search = ChatSearchViewModel(listVM: list, validator: v)
         search.debounceMs = 1
         search.query = "+4912345678"
-        try? await Task.sleep(for: .milliseconds(50))
+        await waitUntil { search.suggestion != nil }
         XCTAssertEqual(search.suggestion?.displayPhone, "Carol Jones")
     }
 
@@ -316,7 +329,7 @@ final class ChatSearchViewModelTests: XCTestCase {
         let search = ChatSearchViewModel(listVM: list, validator: v)
         search.debounceMs = 1
         search.query = "+4912345678"
-        try? await Task.sleep(for: .milliseconds(50))
+        await waitUntil { search.suggestion != nil }
         XCTAssertEqual(search.suggestion?.displayPhone, "+4912345678")
     }
 
@@ -399,7 +412,11 @@ final class ChatSearchViewModelTests: XCTestCase {
         vm.debounceMs = 20
         vm.query = "fin"
         vm.query = "swe"
-        try await Task.sleep(for: .milliseconds(200))
+        // Poll instead of a fixed sleep — the 200ms budget flaked under
+        // machine load (this suite's known debounce-race family).
+        for _ in 0..<50 where vm.messageHits.map(\.messageID) != ["m2"] {
+            try await Task.sleep(for: .milliseconds(20))
+        }
         XCTAssertEqual(vm.messageHits.map(\.messageID), ["m2"])
     }
 }
