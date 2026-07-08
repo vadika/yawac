@@ -3375,7 +3375,14 @@ final class ConversationViewModel {
             return
         }
         do {
-            let info = try client.getGroupInfo(jid: chatJID)
+            // Detached: the IQ blocks (whatsmeow retries with a 750ms
+            // sleep when the socket isn't ready) — on MainActor this
+            // beachballed group chat switches.
+            let jid = chatJID
+            let client = self.client
+            let info = try await Task.detached(priority: .userInitiated) {
+                try client.getGroupInfo(jid: jid)
+            }.value
             self.groupParticipants = info.participants
             // Side-effect: keep chat-list's groupDescription in sync
             // with the freshly-fetched group topic.

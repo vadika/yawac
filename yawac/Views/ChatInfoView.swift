@@ -2058,6 +2058,7 @@ struct ChatInfoView: View {
                 try client.getGroupInfo(jid: jid)
             }.value
             self.group = g
+            self.loadError = nil
             // Reconcile chat-list row with the freshly-fetched group
             // metadata. Phone-side renames + description edits arrive
             // only via events.GroupInfo for live changes; cold-opens of
@@ -2121,7 +2122,12 @@ struct ChatInfoView: View {
                 pendingRequestsModel = nil
             }
         } catch {
-            self.loadError = error.localizedDescription
+            // The group-info IQ can 403 transiently (legacy-JID groups)
+            // even while membership is fine — keep showing loaded data
+            // and only surface the error when there's nothing to show.
+            if self.group == nil {
+                self.loadError = error.localizedDescription
+            }
         }
     }
 }
