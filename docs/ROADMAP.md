@@ -213,6 +213,20 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **F126 — group-info IQ off main + 403 resilience** (v0.10.53) —
+  Composer focus in a group ran the blocking group-info IQ (whatsmeow
+  sleeps 750ms + retries on cold socket) on MainActor — beachball on
+  group chat switch; now detached. ChatInfoView: transient 403 on
+  legacy-JID groups ("you're not participating") no longer clobbers
+  successfully-loaded group data — error surfaces only when nothing
+  loaded. Also: ChatSearchViewModelTests deflaked (poll-until instead
+  of 50–200ms sleep budgets).
+- ✅ **F125 — group subjects from history sync** (v0.10.53) —
+  Conversation.Name is empty for groups; fall back to DisplayName in
+  the PutContactName write so re-pair initial syncs retain left-group
+  names. Verified empirically: on-demand (type-6) syncs carry no
+  conversation names at all — left-before-pairing groups stay digits
+  until re-pair (protocol limit).
 - ✅ **F124 — sidebar raw-JID name fallback** (v0.10.52) — Row showed
   `4915170075571@s.wha…` while the header showed `+4915170075571`;
   JID-shaped chat names now render through displayName so both
