@@ -213,6 +213,20 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **F127 — reconnect history recovery is a whatsmeow request bug** (v0.10.54) —
+  Reclassified the read-on-phone-while-yawac-was-offline gap as a client
+  implementation bug, not a protocol limitation. The type-6
+  `FULL_HISTORY_SYNC_ON_DEMAND` request built by yawac omitted the
+  `historySyncConfig` field. That field carries the companion's advertised
+  complete/on-demand capabilities and transfer limits; without it, the phone
+  can fall back to the tiny server-selected response observed during F92/F93
+  (50 messages from one conversation) instead of reconciling the requested
+  range. The yawac bridge now builds the corrected request with a cloned
+  `store.DeviceProps.HistorySyncConfig`, request metadata, and the requested
+  time range. Payload-level Go tests assert the type-6 operation, copied
+  config, range, and request ID.
+  F92 remains the reconnect trigger; its earlier “server cleared it, therefore
+  unrecoverable” diagnosis is superseded.
 - ✅ **F126 — group-info IQ off main + 403 resilience** (v0.10.53) —
   Composer focus in a group ran the blocking group-info IQ (whatsmeow
   sleeps 750ms + retries on cold socket) on MainActor — beachball on
@@ -635,10 +649,11 @@ surfaces.
     .ingest`, `MessageWriter.enqueue`, `SessionViewModel.boot` removed;
     whatsmeow fork patches reverted; `bridge/go.mod` `replace` directive
     restored to the github.com/vadika/whatsmeow pin.
-  - **Caveat.** Phone-side-already-read messages where WhatsApp's
-    server cleared the offline buffer are still unrecoverable per
-    protocol (F93 confirmed `preview.messages=0` for those cases).
-    F100 closes the OTHER failure mode where bytes did arrive but
+  - **Caveat (superseded by F127).** F93's `preview.messages=0` only
+    proved the normal offline batch was empty; it did not prove that
+    companion reconciliation was unavailable. F127 treats the missing
+    whatsmeow full-history request configuration as the remaining bug.
+    F100 closes the separate failure mode where bytes did arrive but
     yawac was racing its own subscriber registration.
 
 - ✅ **F98 — Communities polish: sidebar chip tap + leave-community workflow** (v0.10.32) —
@@ -842,8 +857,9 @@ surfaces.
   - Three bridge tests cover: ticks on `IsUnavailable=true`,
     ticks on `IsUnavailable=false`, no-op outside in-flight window.
   - **Next step (post v0.10.25 user repro):** if `unavail > 0` →
-    protocol limit confirmed → file upstream whatsmeow issue +
-    document as known. If `ciphertext > 0` → fix subcase via
+    file an upstream whatsmeow issue and recover from the primary
+    device rather than classifying it as a protocol limit. If
+    `ciphertext > 0` → fix subcase via
     PLACEHOLDER_MESSAGE_RESEND. If both 0 → bytes never arrive →
     open whatsmeow issue.
 
@@ -875,12 +891,11 @@ surfaces.
   Issue #6 regression: user reports messages read on the phone
   while yawac was offline never sync after reconnect. F83/F84/F89
   closed the in-bridge silent-drop failure modes (SQLITE_BUSY,
-  signal session race), but `/tmp/yawac.log` analysis shows a
-  separate WhatsApp protocol behavior is now the cause: when the
-  primary device (phone) reads a message, the server marks it
-  delivered to all linked devices and clears the offline buffer.
-  yawac then gets only "notifications" (read-state hints), no
-  actual message content. Server-side, not fixable in bridge.
+  signal session race). The initial diagnosis blamed a server-side
+  protocol limitation because yawac received only notifications and
+  an empty offline message batch. F127 supersedes that diagnosis:
+  official clients reconcile this state, and yawac's whatsmeow
+  type-6 request was missing its `historySyncConfig`.
   - **Workaround.** On every `.connected` event after the one-shot
     full backfill, fire a 7-day FULL_HISTORY_SYNC_ON_DEMAND
     (type 6) catch-up request via the existing

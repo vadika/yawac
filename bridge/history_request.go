@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"time"
 
+	"go.mau.fi/whatsmeow/proto/waCompanionReg"
 	"go.mau.fi/whatsmeow/proto/waE2E"
+	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/types"
 	"google.golang.org/protobuf/proto"
 )
@@ -63,9 +65,12 @@ func (c *Client) RequestOlderHistory(
 	return nil
 }
 
-// RequestFullHistorySync issues a FULL_HISTORY_SYNC_ON_DEMAND
+// RequestFullHistorySync issues whatsmeow's FULL_HISTORY_SYNC_ON_DEMAND
 // PeerDataOperationRequestMessage (type 6) — the account-wide
-// deep-history variant — and sends it via SendPeerMessage.
+// deep-history variant — and sends it via SendPeerMessage. The builder
+// includes the companion's HistorySyncConfig; omitting that config makes
+// some primary clients fall back to a limited, server-selected response
+// that can exclude messages another device consumed while yawac was offline.
 //
 // Whatsmeow's BuildHistorySyncRequest only builds the per-chat
 // HISTORY_SYNC_ON_DEMAND variant (type 5), which the phone caps to
@@ -104,28 +109,40 @@ func (c *Client) RequestFullHistorySync(
 	if days > 3650 {
 		days = 3650
 	}
-	requestID := newRequestID()
-	req := &waE2E.Message{
+	// Keep this local compatibility builder until the matching whatsmeow
+	// fork change is published and pinned. It intentionally mirrors
+	// whatsmeow.Client.BuildFullHistorySyncRequest, including the field the
+	// previous yawac-side request omitted.
+	req := buildFullHistorySyncRequest(time.Now(), days)
+	if _, err := c.wa.SendPeerMessage(context.Background(), req); err != nil {
+		return fmt.Errorf("send full-history-sync-on-demand: %w", err)
+	}
+	return nil
+}
+
+func buildFullHistorySyncRequest(historyFrom time.Time, durationDays uint32) *waE2E.Message {
+	var historySyncConfig *waCompanionReg.DeviceProps_HistorySyncConfig
+	if store.DeviceProps != nil && store.DeviceProps.HistorySyncConfig != nil {
+		historySyncConfig = proto.Clone(store.DeviceProps.HistorySyncConfig).(*waCompanionReg.DeviceProps_HistorySyncConfig)
+	}
+	return &waE2E.Message{
 		ProtocolMessage: &waE2E.ProtocolMessage{
 			Type: waE2E.ProtocolMessage_PEER_DATA_OPERATION_REQUEST_MESSAGE.Enum(),
 			PeerDataOperationRequestMessage: &waE2E.PeerDataOperationRequestMessage{
 				PeerDataOperationRequestType: waE2E.PeerDataOperationRequestType_FULL_HISTORY_SYNC_ON_DEMAND.Enum(),
 				FullHistorySyncOnDemandRequest: &waE2E.PeerDataOperationRequestMessage_FullHistorySyncOnDemandRequest{
 					RequestMetadata: &waE2E.FullHistorySyncOnDemandRequestMetadata{
-						RequestID: proto.String(requestID),
+						RequestID: proto.String(newRequestID()),
 					},
+					HistorySyncConfig: historySyncConfig,
 					FullHistorySyncOnDemandConfig: &waE2E.FullHistorySyncOnDemandConfig{
-						HistoryFromTimestamp: proto.Uint64(uint64(time.Now().Unix())),
-						HistoryDurationDays:  proto.Uint32(days),
+						HistoryFromTimestamp: proto.Uint64(uint64(historyFrom.Unix())),
+						HistoryDurationDays:  proto.Uint32(durationDays),
 					},
 				},
 			},
 		},
 	}
-	if _, err := c.wa.SendPeerMessage(context.Background(), req); err != nil {
-		return fmt.Errorf("send full-history-sync-on-demand: %w", err)
-	}
-	return nil
 }
 
 // newRequestID returns a hex-encoded 16-byte ID for the
