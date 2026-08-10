@@ -109,6 +109,20 @@ class WAClient: PhoneValidating, LIDResolving {
     nonisolated(unsafe) private var _callCountsStartedAt: Date = Date()
     nonisolated private let callCountsLock = NSLock()
 
+    // JID resolution sits on several SwiftUI body paths (sender labels,
+    // avatars, presence, reaction names). The Go resolver performs a local
+    // SQLite query, so crossing CGo for the same visible sender on every
+    // redraw is both unnecessary and visible as scroll hitching in groups.
+    // Positive mappings are stable for the lifetime of a paired account.
+    // Misses get only a short cooldown because whatsmeow may learn a mapping
+    // from a later event while the app is running.
+    nonisolated private let jidCacheLock = NSLock()
+    nonisolated(unsafe) private var lidToPNCache: [String: String] = [:]
+    nonisolated(unsafe) private var pnToLIDCache: [String: String] = [:]
+    nonisolated(unsafe) private var lidMissUntil: [String: TimeInterval] = [:]
+    nonisolated(unsafe) private var pnMissUntil: [String: TimeInterval] = [:]
+    nonisolated private static let jidMissCooldown: TimeInterval = 2
+
     nonisolated private func bump(_ name: String) {
         callCountsLock.lock()
         _callCounts[name, default: 0] += 1
@@ -216,18 +230,18 @@ class WAClient: PhoneValidating, LIDResolving {
         go.close()
     }
 
-    var isLoggedIn: Bool { go.isLoggedIn() }
+    nonisolated var isLoggedIn: Bool { go.isLoggedIn() }
     /// Bare JID of the paired account, empty when not paired.
-    var ownJID: String { go.ownJID() }
+    nonisolated var ownJID: String { go.ownJID() }
     /// Own push name as known to whatsmeow's local store. Empty before
     /// pairing or before app-state has settled.
-    var ownPushName: String { go.ownPushName() }
+    nonisolated var ownPushName: String { go.ownPushName() }
 
     nonisolated func connect() throws {
         bump("connect")
         try go.connect()
     }
-    func logout() throws {
+    nonisolated func logout() throws {
         bump("logout")
         try go.logout()
     }
@@ -273,7 +287,7 @@ class WAClient: PhoneValidating, LIDResolving {
         return try Self.decodeJSON(json)
     }
 
-    func sendImage(_ chatJID: String, path: String, caption: String,
+    nonisolated func sendImage(_ chatJID: String, path: String, caption: String,
                    ephemeralSeconds: Int32 = 0,
                    viewOnce: Bool = false) throws -> BridgeSendResult {
         bump("sendImage")
@@ -286,7 +300,7 @@ class WAClient: PhoneValidating, LIDResolving {
         return try Self.decodeJSON(json)
     }
 
-    func sendVideo(_ chatJID: String, path: String, caption: String,
+    nonisolated func sendVideo(_ chatJID: String, path: String, caption: String,
                    ephemeralSeconds: Int32 = 0,
                    viewOnce: Bool = false) throws -> BridgeSendResult {
         bump("sendVideo")
@@ -299,7 +313,7 @@ class WAClient: PhoneValidating, LIDResolving {
         return try Self.decodeJSON(json)
     }
 
-    func sendAudio(_ chatJID: String, path: String,
+    nonisolated func sendAudio(_ chatJID: String, path: String,
                    ephemeralSeconds: Int32 = 0) throws -> BridgeSendResult {
         bump("sendAudio")
         var err: NSError?
@@ -310,7 +324,7 @@ class WAClient: PhoneValidating, LIDResolving {
         return try Self.decodeJSON(json)
     }
 
-    func sendVoiceNote(_ chatJID: String,
+    nonisolated func sendVoiceNote(_ chatJID: String,
                        path: String,
                        duration: Int32,
                        waveform: Data,
@@ -327,7 +341,7 @@ class WAClient: PhoneValidating, LIDResolving {
         return try Self.decodeJSON(json)
     }
 
-    func sendDocument(_ chatJID: String, path: String, caption: String,
+    nonisolated func sendDocument(_ chatJID: String, path: String, caption: String,
                       ephemeralSeconds: Int32 = 0) throws -> BridgeSendResult {
         bump("sendDocument")
         var err: NSError?
@@ -474,7 +488,7 @@ class WAClient: PhoneValidating, LIDResolving {
         return try Self.decodeJSON(json)
     }
 
-    func revokeMessage(_ chatJID: String, _ msgID: String,
+    nonisolated func revokeMessage(_ chatJID: String, _ msgID: String,
                        _ targetSenderJID: String, _ targetFromMe: Bool) throws -> BridgeSendResult {
         bump("revokeMessage")
         var err: NSError?
@@ -485,7 +499,7 @@ class WAClient: PhoneValidating, LIDResolving {
         return try Self.decodeJSON(json)
     }
 
-    func starMessage(chatJID: String,
+    nonisolated func starMessage(chatJID: String,
                      targetMsgID: String,
                      targetSenderJID: String,
                      targetFromMe: Bool,
@@ -498,17 +512,17 @@ class WAClient: PhoneValidating, LIDResolving {
                            starred: starred)
     }
 
-    func pinChat(chatJID: String, pinned: Bool) throws {
+    nonisolated func pinChat(chatJID: String, pinned: Bool) throws {
         bump("pinChat")
         try go.pinChat(chatJID, pinned: pinned)
     }
 
-    func muteChat(chatJID: String, mute: Bool, mutedUntilMs: Int64) throws {
+    nonisolated func muteChat(chatJID: String, mute: Bool, mutedUntilMs: Int64) throws {
         bump("muteChat")
         try go.muteChat(chatJID, mute: mute, mutedUntilUnixMs: mutedUntilMs)
     }
 
-    func pinMessageInChat(chatJID: String,
+    nonisolated func pinMessageInChat(chatJID: String,
                           targetMsgID: String,
                           targetSenderJID: String,
                           targetFromMe: Bool,
@@ -525,30 +539,30 @@ class WAClient: PhoneValidating, LIDResolving {
         return try Self.decodeJSON(json)
     }
 
-    func archiveChat(chatJID: String, archived: Bool,
+    nonisolated func archiveChat(chatJID: String, archived: Bool,
                      lastTS: Int64, lastMsgID: String, fromMe: Bool) throws {
         bump("archiveChat")
         try go.archiveChat(chatJID, archived: archived,
                            lastTS: lastTS, lastMsgID: lastMsgID, fromMe: fromMe)
     }
 
-    func setGroupName(chatJID: String, name: String) throws {
+    nonisolated func setGroupName(chatJID: String, name: String) throws {
         bump("setGroupName")
         try go.setGroupName(chatJID, name: name)
     }
 
-    func setGroupDescription(chatJID: String, description: String) throws {
+    nonisolated func setGroupDescription(chatJID: String, description: String) throws {
         bump("setGroupDescription")
         try go.setGroupDescription(chatJID, description: description)
     }
 
-    func deleteChat(chatJID: String, lastTS: Int64,
+    nonisolated func deleteChat(chatJID: String, lastTS: Int64,
                     lastMsgID: String, fromMe: Bool) throws {
         bump("deleteChat")
         try go.deleteChat(chatJID, lastTS: lastTS, lastMsgID: lastMsgID, fromMe: fromMe)
     }
 
-    func setContactName(jid: String, fullName: String, firstName: String) throws {
+    nonisolated func setContactName(jid: String, fullName: String, firstName: String) throws {
         bump("setContactName")
         try go.setContactName(jid, fullName: fullName, firstName: firstName)
     }
@@ -604,7 +618,7 @@ class WAClient: PhoneValidating, LIDResolving {
     /// Returns the subset of `jids` that whatsmeow's local appstate
     /// store currently marks as pinned. Used to reconcile the sidebar
     /// at startup since events.Pin isn't re-emitted on reconnect.
-    func listPinnedChats(jids: [String]) throws -> [String] {
+    nonisolated func listPinnedChats(jids: [String]) throws -> [String] {
         bump("listPinnedChats")
         let jidsJSON = Self.jsonArrayString(jids)
         var err: NSError?
@@ -618,7 +632,7 @@ class WAClient: PhoneValidating, LIDResolving {
     /// expired entries are skipped server-side). Used to reconcile
     /// the sidebar at startup since events.Mute isn't re-emitted on
     /// reconnect.
-    func listMutedChats(jids: [String]) throws -> [(jid: String, mutedUntilMs: Int64)] {
+    nonisolated func listMutedChats(jids: [String]) throws -> [(jid: String, mutedUntilMs: Int64)] {
         bump("listMutedChats")
         let jidsJSON = Self.jsonArrayString(jids)
         var err: NSError?
@@ -632,7 +646,7 @@ class WAClient: PhoneValidating, LIDResolving {
         return decoded.map { ($0.chatJID, $0.mutedUntilMs) }
     }
 
-    func sendPollCreation(_ chatJID: String,
+    nonisolated func sendPollCreation(_ chatJID: String,
                           question: String,
                           options: [String],
                           selectableCount: Int,
@@ -703,9 +717,32 @@ class WAClient: PhoneValidating, LIDResolving {
     /// whatsmeow's local LID map. Returns the input unchanged when no
     /// mapping is known (mapping is learned from group/sender events).
     nonisolated func resolveLIDToPN(_ jid: String) -> String {
+        let now = Date.timeIntervalSinceReferenceDate
+        jidCacheLock.lock()
+        if let cached = lidToPNCache[jid] {
+            jidCacheLock.unlock()
+            return cached
+        }
+        if (lidMissUntil[jid] ?? 0) > now {
+            jidCacheLock.unlock()
+            return jid
+        }
+        jidCacheLock.unlock()
+
         var err: NSError?
         let result = go.resolveLID(toPN: jid, error: &err)
-        if err != nil || result.isEmpty { return jid }
+        guard err == nil, !result.isEmpty, result != jid else {
+            jidCacheLock.lock()
+            lidMissUntil[jid] = now + Self.jidMissCooldown
+            jidCacheLock.unlock()
+            return jid
+        }
+        jidCacheLock.lock()
+        lidToPNCache[jid] = result
+        pnToLIDCache[result] = jid
+        lidMissUntil.removeValue(forKey: jid)
+        pnMissUntil.removeValue(forKey: result)
+        jidCacheLock.unlock()
         return result
     }
 
@@ -714,10 +751,48 @@ class WAClient: PhoneValidating, LIDResolving {
     /// mapping is known. Used by JIDNormalize.same to establish identity
     /// equality regardless of which namespace each side happens to be in.
     nonisolated func resolvePNToLID(_ jid: String) -> String {
+        let now = Date.timeIntervalSinceReferenceDate
+        jidCacheLock.lock()
+        if let cached = pnToLIDCache[jid] {
+            jidCacheLock.unlock()
+            return cached
+        }
+        if (pnMissUntil[jid] ?? 0) > now {
+            jidCacheLock.unlock()
+            return jid
+        }
+        jidCacheLock.unlock()
+
         var err: NSError?
         let result = go.resolvePN(toLID: jid, error: &err)
-        if err != nil || result.isEmpty { return jid }
+        guard err == nil, !result.isEmpty, result != jid else {
+            jidCacheLock.lock()
+            pnMissUntil[jid] = now + Self.jidMissCooldown
+            jidCacheLock.unlock()
+            return jid
+        }
+        jidCacheLock.lock()
+        pnToLIDCache[jid] = result
+        lidToPNCache[result] = jid
+        pnMissUntil.removeValue(forKey: jid)
+        lidMissUntil.removeValue(forKey: result)
+        jidCacheLock.unlock()
         return result
+    }
+
+    /// Warms both directions of the local LID/phone mapping cache before a
+    /// message window is published to SwiftUI. The bridge lookups may touch
+    /// SQLite, so callers invoke this from the detached snapshot builder.
+    nonisolated func prewarmJIDMappings(_ jids: [String]) {
+        for jid in Set(jids) {
+            if jid.hasSuffix("@lid") {
+                let pn = resolveLIDToPN(jid)
+                if pn != jid { _ = resolvePNToLID(pn) }
+            } else if jid.hasSuffix("@s.whatsapp.net") {
+                let lid = resolvePNToLID(jid)
+                if lid != jid { _ = resolveLIDToPN(lid) }
+            }
+        }
     }
 
     nonisolated func requestOlderHistory(chatJID: String,
@@ -806,7 +881,7 @@ class WAClient: PhoneValidating, LIDResolving {
     /// invite link and joins via the returned code. Returns the joined
     /// JID. Throws the bridge error (forbidden / not-in-community)
     /// verbatim when the server rejects the call.
-    func joinSubGroup(subJID: String) throws -> String {
+    nonisolated func joinSubGroup(subJID: String) throws -> String {
         bump("joinSubGroup")
         var err: NSError?
         let result = go.joinSubGroup(subJID, error: &err)
@@ -974,17 +1049,17 @@ class WAClient: PhoneValidating, LIDResolving {
         try go.leaveGroup(jid)
     }
 
-    func sendTyping(_ chatJID: String, _ typing: Bool) throws {
+    nonisolated func sendTyping(_ chatJID: String, _ typing: Bool) throws {
         bump("sendTyping")
         try go.sendTyping(chatJID, typing: typing)
     }
 
-    func subscribePresence(_ jid: String) throws {
+    nonisolated func subscribePresence(_ jid: String) throws {
         bump("subscribePresence")
         try go.subscribePresence(jid)
     }
 
-    func sendPresence(available: Bool) throws {
+    nonisolated func sendPresence(available: Bool) throws {
         bump("sendPresence")
         try go.sendPresence(available)
     }
@@ -1063,7 +1138,7 @@ class WAClient: PhoneValidating, LIDResolving {
         }
     }
 
-    func updateGroupParticipants(chatJID: String,
+    nonisolated func updateGroupParticipants(chatJID: String,
                                  action: String,
                                  participantJIDs: [String])
         throws -> [BridgeParticipantModel] {
@@ -1078,7 +1153,7 @@ class WAClient: PhoneValidating, LIDResolving {
         return try Self.decodeJSON(json)
     }
 
-    func setGroupPhoto(chatJID: String, jpeg: Data) throws -> String {
+    nonisolated func setGroupPhoto(chatJID: String, jpeg: Data) throws -> String {
         bump("setGroupPhoto")
         var err: NSError?
         let pictureID = go.setGroupPhoto(chatJID, jpeg: jpeg, error: &err)
@@ -1111,7 +1186,7 @@ class WAClient: PhoneValidating, LIDResolving {
         try go.setSelfPushName(name)
     }
 
-    func getGroupInviteLink(chatJID: String, reset: Bool) throws -> String {
+    nonisolated func getGroupInviteLink(chatJID: String, reset: Bool) throws -> String {
         bump("getGroupInviteLink")
         var err: NSError?
         let link = go.getGroupInviteLink(chatJID, reset: reset, error: &err)
@@ -1119,7 +1194,7 @@ class WAClient: PhoneValidating, LIDResolving {
         return link
     }
 
-    func groupInfoFromLink(code: String) throws -> BridgeGroupModel {
+    nonisolated func groupInfoFromLink(code: String) throws -> BridgeGroupModel {
         bump("groupInfoFromLink")
         var err: NSError?
         let json = go.groupInfo(fromLink: code, error: &err)
@@ -1127,7 +1202,7 @@ class WAClient: PhoneValidating, LIDResolving {
         return try Self.decodeJSON(json)
     }
 
-    func joinGroupViaLink(code: String) throws -> String {
+    nonisolated func joinGroupViaLink(code: String) throws -> String {
         bump("joinGroupViaLink")
         var err: NSError?
         let jid = go.joinGroup(viaLink: code, error: &err)

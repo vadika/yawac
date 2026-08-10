@@ -364,7 +364,9 @@ struct ChatInfoView: View {
     private func reloadAfterNewSubGroup(newJID: String) {
         guard let client = session.client else { return }
         Task {
-            if let info = try? client.getGroupInfo(jid: newJID) {
+            if let info = await Task.detached(priority: .userInitiated, operation: {
+                try? client.getGroupInfo(jid: newJID)
+            }).value {
                 session.chatList?.mergeGroups([info])
             }
             await loadGroup()
@@ -632,8 +634,11 @@ struct ChatInfoView: View {
                     }.value
                     NSLog("[yawac/uploadAvatar] ok self")
                 } else {
-                    let pictureID = try client.setGroupPhoto(
-                        chatJID: chatJID, jpeg: data)
+                    let pictureID = try await Task.detached(
+                        priority: .userInitiated
+                    ) {
+                        try client.setGroupPhoto(chatJID: chatJID, jpeg: data)
+                    }.value
                     NSLog("[yawac/uploadAvatar] ok pictureID=%@", pictureID)
                 }
                 await AvatarCache.shared.invalidate(
@@ -805,7 +810,10 @@ struct ChatInfoView: View {
         userAbout = nil
         loadingUserInfo = true
         defer { loadingUserInfo = false }
-        let info = try? client.getUserInfo(jid: chatJID)
+        let jid = chatJID
+        let info = await Task.detached(priority: .userInitiated) {
+            try? client.getUserInfo(jid: jid)
+        }.value
         userAbout = info?.status
         if isSelfChat {
             let current = userAbout ?? ""
@@ -1800,12 +1808,16 @@ struct ChatInfoView: View {
         joinStatusByJID[sub.jid] = nil
         defer { joiningSubJID = nil }
         do {
-            let joinedJID = try client.joinSubGroup(subJID: sub.jid)
+            let joinedJID = try await Task.detached(priority: .userInitiated) {
+                try client.joinSubGroup(subJID: sub.jid)
+            }.value
             // JoinGroupWithLink returns a JID for both instant-join
             // AND pending-approval; whatsmeow swallows the distinction.
             // Probe via getGroupInfo — succeeds only when the user is
             // actually a member.
-            if let info = try? client.getGroupInfo(jid: joinedJID) {
+            if let info = await Task.detached(priority: .userInitiated, operation: {
+                try? client.getGroupInfo(jid: joinedJID)
+            }).value {
                 session.chatList?.mergeGroups([info])
             } else {
                 joinStatusByJID[sub.jid] =
@@ -1928,9 +1940,11 @@ struct ChatInfoView: View {
         Task { @MainActor in
             defer { model.inFlight = false }
             do {
-                let resp = try client.updateGroupParticipants(
-                    chatJID: chatJID, action: "add",
-                    participantJIDs: bareJIDs)
+                let resp = try await Task.detached(priority: .userInitiated) {
+                    try client.updateGroupParticipants(
+                        chatJID: chatJID, action: "add",
+                        participantJIDs: bareJIDs)
+                }.value
                 NSLog("[yawac/commitAdd] resp=%@", resp.description)
                 model.applyResult(resp)
                 await loadGroup()
@@ -1957,9 +1971,11 @@ struct ChatInfoView: View {
               chatJID, action, bare)
         Task { @MainActor in
             do {
-                _ = try client.updateGroupParticipants(
-                    chatJID: chatJID, action: action,
-                    participantJIDs: [bare])
+                _ = try await Task.detached(priority: .userInitiated) {
+                    try client.updateGroupParticipants(
+                        chatJID: chatJID, action: action,
+                        participantJIDs: [bare])
+                }.value
                 await loadGroup()
             } catch {
                 NSLog("[yawac/applyParticipantOp] failed action=%@ jid=%@ err=%@",

@@ -28,7 +28,8 @@ final class ChatLastTimestampShortTests: XCTestCase {
     }
 
     func testTodayUsesLocaleAwareTime() {
-        let s = chat(secondsAgo: 3 * 3600).lastTimestampShort
+        // Use the current instant so this remains "today" around midnight.
+        let s = chat(secondsAgo: 0).lastTimestampShort
         XCTAssertTrue(s.contains(":") || s.contains("."),
                       "expected time-of-day with locale separator, got \(s)")
         XCTAssertTrue(s.contains(where: \.isNumber), "expected digits, got \(s)")

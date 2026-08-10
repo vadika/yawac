@@ -3,11 +3,14 @@ import XCTest
 
 @MainActor
 final class FakeWAClient: WAClient {
-    var cannedPollResult: BridgeSendPollResult?
-    var pollError: Error?
-    var lastPollQuestion: String?
-    var lastPollOptions: [String]?
-    var lastPollSelectable: Int?
+    // The production bridge method is intentionally nonisolated so poll
+    // network I/O can run off MainActor. Each test awaits the call before
+    // reading these values, so this fake has the same single-writer contract.
+    nonisolated(unsafe) var cannedPollResult: BridgeSendPollResult?
+    nonisolated(unsafe) var pollError: Error?
+    nonisolated(unsafe) var lastPollQuestion: String?
+    nonisolated(unsafe) var lastPollOptions: [String]?
+    nonisolated(unsafe) var lastPollSelectable: Int?
 
     static func make() throws -> FakeWAClient {
         let dir = NSTemporaryDirectory().appending("yawac-fake-\(UUID().uuidString)")
@@ -16,11 +19,11 @@ final class FakeWAClient: WAClient {
         return try FakeWAClient(dbPath: dir + "/state.db")
     }
 
-    override func sendPollCreation(_ chatJID: String,
-                                   question: String,
-                                   options: [String],
-                                   selectableCount: Int,
-                                   ephemeralSeconds: Int32 = 0) throws
+    override nonisolated func sendPollCreation(_ chatJID: String,
+                                               question: String,
+                                               options: [String],
+                                               selectableCount: Int,
+                                               ephemeralSeconds: Int32 = 0) throws
         -> BridgeSendPollResult
     {
         lastPollQuestion = question

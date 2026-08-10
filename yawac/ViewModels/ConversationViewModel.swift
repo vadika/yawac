@@ -129,11 +129,12 @@ final class ConversationViewModel {
     /// expired media. Stops the loadHistory pass from re-firing the
     /// burst on every refresh.
     @ObservationIgnored private var didAutoRefetchExpired = false
-    // On-demand older-history state. `loadingOlder` is private(set) so the
-    // view can read it for the spinner; `olderUnavailable` is set when a
-    // RequestOlderHistory call produced no new rows within the wait window,
-    // letting the UI hide the "Load earlier" button.
+    // Keyset-paginated older-history state. Stored pages are loaded before
+    // the bridge is asked to retrieve anything from the phone.
+    @ObservationIgnored private var olderHistoryCursor: ConversationHistoryCursor?
+    private(set) var hasMoreStoredHistory = false
     private(set) var loadingOlder = false
+    // Set only after a bridge history request yields no additional rows.
     var olderUnavailable = false
     private(set) var refreshingPolls = false
     var replyTarget: UIMessage?
@@ -626,8 +627,9 @@ final class ConversationViewModel {
     func executeForward(to chatJID: String, senderName: (String) -> String) async {
         let ids = forwardSelection
         let ordered = messages.filter { ids.contains($0.id) }
+        let bridge = client
         for m in ordered {
-            let srcJID = m.fromMe ? client.ownJID : m.senderJID
+            let srcJID = m.fromMe ? bridge.ownJID : m.senderJID
             var author = senderName(srcJID)
             if author.isEmpty || author == srcJID {
                 author = m.fromMe ? "You" : ""
@@ -643,23 +645,35 @@ final class ConversationViewModel {
                 switch m.body {
                 case .text(let t):
                     let body = prefix + t
-                    result = try client.forwardText(chatJID, text: body,
-                                                    ephemeralSeconds: dstEphemeralSec(chatJID))
+                    let ephemeralSeconds = dstEphemeralSec(chatJID)
+                    result = try await Task.detached(priority: .userInitiated) {
+                        try bridge.forwardText(
+                            chatJID, text: body,
+                            ephemeralSeconds: ephemeralSeconds)
+                    }.value
                     outText = body
                 case .media(let kind, let caption, let fileName, _, _, _):
                     if let ref = mediaRefJSON(for: m.id) {
                         let cap = prefix + (caption ?? "")
-                        result = try client.forwardMedia(chatJID, refJSON: ref,
-                                                          caption: cap, fileName: fileName ?? "",
-                                                          ephemeralSeconds: dstEphemeralSec(chatJID))
+                        let ephemeralSeconds = dstEphemeralSec(chatJID)
+                        result = try await Task.detached(priority: .userInitiated) {
+                            try bridge.forwardMedia(
+                                chatJID, refJSON: ref, caption: cap,
+                                fileName: fileName ?? "",
+                                ephemeralSeconds: ephemeralSeconds)
+                        }.value
                         outKind = kind
                         outCaption = cap.isEmpty ? nil : cap
                         outFileName = fileName
                         outRef = ref
                     } else if let c = caption, !c.isEmpty {
                         let body = prefix + c
-                        result = try client.forwardText(chatJID, text: body,
-                                                        ephemeralSeconds: dstEphemeralSec(chatJID))
+                        let ephemeralSeconds = dstEphemeralSec(chatJID)
+                        result = try await Task.detached(priority: .userInitiated) {
+                            try bridge.forwardText(
+                                chatJID, text: body,
+                                ephemeralSeconds: ephemeralSeconds)
+                        }.value
                         outText = body
                     } else {
                         continue
@@ -744,22 +758,11 @@ final class ConversationViewModel {
         peerTypingClearTask?.cancel()
     }
 
-    /// Hard cap on initial load — large chats freeze SwiftUI's LazyVStack
-    /// prefetcher if we hand it 10k+ rows at once. Newest N kept; older
-    /// rows remain in storage and can be paged in later.
-    /// First-paint cap. Lower than `extendedHistoryLimit` so chat-switch
-    /// stays snappy; older rows page in via `loadMoreHistory` on scroll.
+    /// First-paint cap. Large chats freeze SwiftUI's LazyVStack and diffing
+    /// machinery if all persisted rows are published at once.
     static let historyLoadLimit = 60
-    /// F36: bumped back to 10000 for the default chat-open load (user
-    /// gets the whole persisted history at once), but `jumpToQuoted`
-    /// re-windows to a 2500-row slice centered on the target before
-    /// kicking the scroll — SwiftUI's ScrollViewReader.scrollTo on a
-    /// 10k-row LazyVStack with variable-height rows beachballs the
-    /// main thread because it has to lay out every preceding row to
-    /// compute the target offset. The re-window keeps the jump
-    /// instant; the user pages back to other windows via "Load
-    /// earlier" if needed.
-    static let extendedHistoryLimit = 10000
+    /// Number of persisted rows mapped per upward pagination step.
+    static let historyPageSize = 200
     /// F36: how many rows around the jump target to keep in the
     /// visible messages array. Empirically 2500 is the upper bound
     /// SwiftUI can scrollTo without a noticeable beachball.
@@ -774,15 +777,7 @@ final class ConversationViewModel {
     func loadHistory() {
         guard let container = context?.container else { return }
         let jid = chatJID
-        // F31v2: always fetch up to `extendedHistoryLimit` on first
-        // open. The original F9 historyLoadLimit=60 was sized for fast
-        // chat-switch, but F2 made the snapshot build detached so
-        // first-paint isn't on the critical path. With 10k cap and
-        // LazyVStack, paying the SwiftData read up-front means the
-        // whole persisted history is reachable without "Load earlier"
-        // taps. Chats with fewer than the cap just return what they
-        // have. Memory: ~1 KB per UIMessage × 10k = ~10 MB worst case.
-        let limit = Self.extendedHistoryLimit
+        let limit = Self.historyLoadLimit
         let client = self.client
         // Closure captures the @MainActor-isolated WAClient instance.
         // `resolveLIDToPN` / `resolvePNToLID` are nonisolated, so the
@@ -790,12 +785,16 @@ final class ConversationViewModel {
         let canonicalize: @Sendable (String) -> String = { jid in
             JIDNormalize.canonical(jid, client: client)
         }
+        let prewarmJIDs: @Sendable ([String]) -> Void = { jids in
+            client.prewarmJIDMappings(jids)
+        }
         restoreDraftIfNeeded()
         Task.detached(priority: .userInitiated) { [weak self] in
             let snapshot = Self.buildHistorySnapshot(
                 chatJID: jid,
                 container: container,
                 canonicalize: canonicalize,
+                prewarmJIDs: prewarmJIDs,
                 limit: limit)
             await self?.applyHistorySnapshot(snapshot)
         }
@@ -853,6 +852,9 @@ final class ConversationViewModel {
         }
         // Rebuild the dedupe Set after the wholesale assignment.
         self.messageIDs = Set(self.messages.map(\.id))
+        self.olderHistoryCursor = snap.olderCursor
+        self.hasMoreStoredHistory = snap.hasMoreStoredHistory
+        self.olderUnavailable = false
         self.receiptStatus.merge(snap.receiptStatus) { _, new in new }
         self.reactionsBySender.merge(snap.reactionsBySender) { _, new in new }
         self.pollVotes.merge(snap.pollVotes) { _, new in new }
@@ -913,6 +915,7 @@ final class ConversationViewModel {
         chatJID jid: String,
         container: ModelContainer,
         canonicalize: @Sendable (String) -> String,
+        prewarmJIDs: @Sendable ([String]) -> Void = { _ in },
         limit: Int
     ) -> ConversationHistorySnapshot {
         let context = ModelContext(container)
@@ -949,9 +952,18 @@ final class ConversationViewModel {
         let t1 = CFAbsoluteTimeGetCurrent()
         var descriptor = FetchDescriptor<PersistedMessage>(
             predicate: #Predicate { $0.chatJID == jid },
-            sortBy: [SortDescriptor(\.timestamp, order: .reverse)])
-        descriptor.fetchLimit = limit
-        let recentRows = (try? context.fetch(descriptor)) ?? []
+            sortBy: [
+                SortDescriptor(\.timestamp, order: .reverse),
+                SortDescriptor(\.id, order: .reverse),
+            ])
+        let pageLimit = max(limit, 1)
+        descriptor.fetchLimit = pageLimit + 1
+        let fetchedRows = (try? context.fetch(descriptor)) ?? []
+        let hasMoreStoredHistory = fetchedRows.count > pageLimit
+        let recentRows = Array(fetchedRows.prefix(pageLimit))
+        let olderCursor = recentRows.last.map {
+            ConversationHistoryCursor(timestamp: $0.timestamp, messageID: $0.id)
+        }
         let t2 = CFAbsoluteTimeGetCurrent()
         let rows = recentRows.reversed().map { $0 }
         // Sweep legacy rows of non-displayable kinds. Gated per-chat
@@ -980,6 +992,9 @@ final class ConversationViewModel {
                 && (p.kind != "system" || !(p.text ?? "").isEmpty)
         }
         let messages: [UIMessage] = displayable.map { Self.uiMessage(from: $0) }
+        prewarmJIDs(Array(Set(messages.map {
+            JIDNormalize.bare($0.senderJID)
+        })))
         // Hydrate persisted delivery status (fromMe only — receipts for
         // inbound messages aren't shown).
         var receiptStatus: [String: UIMessage.Status] = [:]
@@ -1117,8 +1132,7 @@ final class ConversationViewModel {
         // OLDEST loaded message so the user lands on the deepest
         // unread we have instead of snapping to the bottom (which
         // hid the entire offline backlog). "Load earlier messages"
-        // then digs further. Loading limit is already scaled by
-        // unread in `loadHistory`, capped at extendedHistoryLimit.
+        // then digs further through the bounded stored-history pages.
         if unread > 0 && !messages.isEmpty {
             if unread <= messages.count {
                 let firstUnreadIdx = messages.count - unread
@@ -1252,6 +1266,8 @@ final class ConversationViewModel {
         let t3 = CFAbsoluteTimeGetCurrent()
         return ConversationHistorySnapshot(
             messages: messages,
+            olderCursor: olderCursor,
+            hasMoreStoredHistory: hasMoreStoredHistory,
             receiptStatus: receiptStatus,
             reactionsBySender: reactionsBySender,
             pollVotes: pollVotes,
@@ -1280,23 +1296,45 @@ final class ConversationViewModel {
     nonisolated static func buildEarlierSnapshot(
         chatJID jid: String,
         container: ModelContainer,
+        cursor: ConversationHistoryCursor,
+        prewarmJIDs: @Sendable ([String]) -> Void = { _ in },
         limit: Int
     ) -> ConversationEarlierSnapshot {
         let context = ModelContext(container)
+        let cursorTimestamp = cursor.timestamp
+        let cursorID = cursor.messageID
         var descriptor = FetchDescriptor<PersistedMessage>(
-            predicate: #Predicate { $0.chatJID == jid },
-            sortBy: [SortDescriptor(\.timestamp, order: .reverse)])
-        descriptor.fetchLimit = limit
-        guard let recentRows = try? context.fetch(descriptor) else {
-            return .init(messages: [])
+            predicate: #Predicate {
+                $0.chatJID == jid
+                    && ($0.timestamp < cursorTimestamp
+                        || ($0.timestamp == cursorTimestamp && $0.id < cursorID))
+            },
+            sortBy: [
+                SortDescriptor(\.timestamp, order: .reverse),
+                SortDescriptor(\.id, order: .reverse),
+            ])
+        let pageLimit = max(limit, 1)
+        descriptor.fetchLimit = pageLimit + 1
+        guard let fetchedRows = try? context.fetch(descriptor) else {
+            return .init(messages: [], olderCursor: nil,
+                         hasMoreStoredHistory: false)
         }
-        let rows = recentRows.reversed().map { $0 }
+        let hasMoreStoredHistory = fetchedRows.count > pageLimit
+        let pageRows = Array(fetchedRows.prefix(pageLimit))
+        let olderCursor = pageRows.last.map {
+            ConversationHistoryCursor(timestamp: $0.timestamp, messageID: $0.id)
+        }
+        let rows = pageRows.reversed().map { $0 }
         let displayable = rows.filter { p in
             p.kind != "reaction" && p.kind != "protocol"
                 && (p.kind != "system" || !(p.text ?? "").isEmpty)
         }
         let messages: [UIMessage] = displayable.map { Self.uiMessage(from: $0) }
-        return .init(messages: messages)
+        prewarmJIDs(Array(Set(messages.map {
+            JIDNormalize.bare($0.senderJID)
+        })))
+        return .init(messages: messages, olderCursor: olderCursor,
+                     hasMoreStoredHistory: hasMoreStoredHistory)
     }
 
     /// Probes the deterministic MediaCache path for a row without
@@ -1386,12 +1424,17 @@ final class ConversationViewModel {
     /// Asks the phone for ~50 messages older than the oldest one we currently
     /// have loaded for this chat. The phone's reply arrives as a normal
     /// HistorySync event; messages persist via the existing ChatList path,
-    /// then we re-query PersistedMessage with a bigger window.
+    /// then we fetch one cursor page. Stored pages are always consumed first.
     func requestOlderHistory() {
+        if hasMoreStoredHistory {
+            loadMoreStoredHistory()
+            return
+        }
         guard !loadingOlder, !olderUnavailable,
               let container = context?.container else { return }
         loadingOlder = true
         let jid = chatJID
+        let bridge = client
         Task { @MainActor [weak self] in
             // Find oldest persisted message for this chat (not just
             // in-memory, since the in-memory cap is 500). Fetch on a
@@ -1417,19 +1460,20 @@ final class ConversationViewModel {
             }
             defer { self.loadingOlder = false }
             do {
-                try self.client.requestOlderHistory(
-                    chatJID: self.chatJID,
-                    oldestMsgID: anchor.id,
-                    oldestSenderJID: anchor.senderJID,
-                    oldestFromMe: anchor.fromMe,
-                    oldestTimestampSec: anchor.ts,
-                    count: 50)
+                try await Task.detached(priority: .userInitiated) {
+                    try bridge.requestOlderHistory(
+                        chatJID: jid,
+                        oldestMsgID: anchor.id,
+                        oldestSenderJID: anchor.senderJID,
+                        oldestFromMe: anchor.fromMe,
+                        oldestTimestampSec: anchor.ts,
+                        count: 50)
+                }.value
                 // After ~5 s, if no new rows landed, mark unavailable so the
                 // user isn't given an indefinite "Loading…" UI.
                 try? await Task.sleep(for: .seconds(5))
-                let beforeCount = self.messages.count
-                await self.loadEarlier(by: 200)
-                if self.messages.count == beforeCount {
+                let added = await self.loadEarlierPage()
+                if added == 0 {
                     self.olderUnavailable = true
                 }
             } catch {
@@ -1447,33 +1491,62 @@ final class ConversationViewModel {
         }
     }
 
-    /// Re-runs the loadHistory query but with a larger fetchLimit so newly-
-    /// arrived older rows become visible. SwiftData fetch + mapping run
-    /// off MainActor; the assignment is committed back on MainActor.
-    ///
-    /// Race guard: the earlier-snapshot is a superset of the current
-    /// window (larger fetchLimit, same chat), so ids in `self.messages`
-    /// should be present. A brand-new message arriving between fetch
-    /// and apply would not be in the snapshot — preserve those rows so
-    /// they aren't wiped.
-    private func loadEarlier(by additional: Int) async {
-        let newLimit = max(messages.count + additional, Self.historyLoadLimit)
-        let jid = chatJID
-        guard let container = context?.container else { return }
-        let snapshot = await Task.detached(priority: .userInitiated) {
-            Self.buildEarlierSnapshot(
-                chatJID: jid, container: container, limit: newLimit)
-        }.value
-        let snapIDs = Set(snapshot.messages.map { $0.id })
-        let lateArrivals = self.messages.filter { !snapIDs.contains($0.id) }
-        if lateArrivals.isEmpty {
-            self.messages = snapshot.messages
-        } else {
-            self.messages = snapshot.messages + lateArrivals.sorted { $0.timestamp < $1.timestamp }
+    /// Starts one local keyset-pagination step. The top-of-list affordance
+    /// calls this on appearance and also remains clickable as a fallback.
+    func loadMoreStoredHistory() {
+        guard !loadingOlder, hasMoreStoredHistory,
+              olderHistoryCursor != nil else { return }
+        loadingOlder = true
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.loadingOlder = false }
+            _ = await self.loadEarlierPage()
         }
-        // Rebuild the dedupe Set after the wholesale assignment.
-        self.messageIDs = Set(self.messages.map(\.id))
-        invalidateTimeline()
+    }
+
+    /// Fetches and prepends only rows older than the current stable cursor.
+    /// Unlike the previous growing-fetchLimit implementation, page N does
+    /// not re-map pages 0...(N-1), keeping fetch, mapping, and SwiftUI diff
+    /// work bounded by `historyPageSize`.
+    @discardableResult
+    private func loadEarlierPage() async -> Int {
+        let jid = chatJID
+        guard let container = context?.container else { return 0 }
+        let bridge = client
+        var addedCount = 0
+        var attempts = 0
+
+        // Empty carrier-only pages should advance the cursor rather than
+        // leaving the top sentinel stuck. Cap the loop to keep one UI action
+        // bounded even on a legacy store with many protocol rows.
+        while attempts < 4, let cursor = olderHistoryCursor {
+            attempts += 1
+            let snapshot = await Task.detached(priority: .userInitiated) {
+                Self.buildEarlierSnapshot(
+                    chatJID: jid, container: container, cursor: cursor,
+                    prewarmJIDs: { bridge.prewarmJIDMappings($0) },
+                    limit: Self.historyPageSize)
+            }.value
+
+            if let nextCursor = snapshot.olderCursor {
+                olderHistoryCursor = nextCursor
+            }
+            hasMoreStoredHistory = snapshot.hasMoreStoredHistory
+
+            let newMessages = snapshot.messages.filter {
+                !messageIDs.contains($0.id)
+            }
+            if !newMessages.isEmpty {
+                messages.insert(contentsOf: newMessages, at: 0)
+                messageIDs.formUnion(newMessages.map(\.id))
+                addedCount += newMessages.count
+                olderUnavailable = false
+                break
+            }
+            if !hasMoreStoredHistory { break }
+        }
+        if addedCount > 0 { invalidateTimeline() }
+        return addedCount
     }
 
     func retryDownload(messageID: String, kind: String, refJSON: String) {
@@ -2013,7 +2086,11 @@ final class ConversationViewModel {
         messages.append(contentsOf: newRows)
         invalidateTimeline()
         for b in ingested {
-            persist(b)
+            // The global ChatListViewModel subscriber persists every inbound
+            // event through MessageWriter's background ModelContext. Avoid a
+            // second fetch + save on MainActor in the normal app path. Keep
+            // the fallback for isolated/test CVMs that have no chat-list sink.
+            if chatList == nil { persist(b) }
             ensureDownload(for: b)
             if !b.fromMe {
                 // Don't fire the receipt yet — wait until the row has
@@ -2079,16 +2156,29 @@ final class ConversationViewModel {
            !typing || now.timeIntervalSince(typingSentAt) < 10 { return }
         typingState = typing
         typingSentAt = now
-        try? client.sendTyping(chatJID, typing)
+        let client = self.client
+        let chatJID = self.chatJID
+        Task.detached(priority: .utility) {
+            try? client.sendTyping(chatJID, typing)
+        }
     }
 
     func sendVoiceNote(_ result: VoiceRecorder.Result) async {
         do {
-            let res = try client.sendVoiceNote(chatJID,
-                                               path: result.url.path,
-                                               duration: Int32(result.durationSec),
-                                               waveform: result.waveform,
-                                               ephemeralSeconds: ephemeralExpirationSeconds)
+            let client = self.client
+            let chatJID = self.chatJID
+            let path = result.url.path
+            let duration = Int32(result.durationSec)
+            let waveform = result.waveform
+            let ephemeralSeconds = ephemeralExpirationSeconds
+            let res = try await Task.detached(priority: .userInitiated) {
+                try client.sendVoiceNote(
+                    chatJID,
+                    path: path,
+                    duration: duration,
+                    waveform: waveform,
+                    ephemeralSeconds: ephemeralSeconds)
+            }.value
             // Move the ogg from temp into the media cache under a
             // per-message filename so the local bubble keeps playing
             // after restarts (AudioPlayerView resolves the stored
@@ -2239,25 +2329,38 @@ final class ConversationViewModel {
     private func sendOneAttachment(url: URL, kind: String, caption: String,
                                    viewOnce: Bool = false) async {
         do {
-            let res: BridgeSendResult
+            let client = self.client
+            let chatJID = self.chatJID
+            let path = url.path
             let eph = ephemeralExpirationSeconds
-            switch kind {
-            case "image": res = try client.sendImage(chatJID, path: url.path, caption: caption,
-                                                     ephemeralSeconds: eph,
-                                                     viewOnce: viewOnce)
-            case "video": res = try client.sendVideo(chatJID, path: url.path, caption: caption,
-                                                     ephemeralSeconds: eph,
-                                                     viewOnce: viewOnce)
-            case "audio": res = try client.sendAudio(chatJID, path: url.path,
-                                                     ephemeralSeconds: eph)
-            default:      res = try client.sendDocument(chatJID, path: url.path, caption: caption,
-                                                        ephemeralSeconds: eph)
-            }
+            let res: BridgeSendResult = try await Task.detached(
+                priority: .userInitiated
+            ) {
+                switch kind {
+                case "image":
+                    return try client.sendImage(
+                        chatJID, path: path, caption: caption,
+                        ephemeralSeconds: eph, viewOnce: viewOnce)
+                case "video":
+                    return try client.sendVideo(
+                        chatJID, path: path, caption: caption,
+                        ephemeralSeconds: eph, viewOnce: viewOnce)
+                case "audio":
+                    return try client.sendAudio(
+                        chatJID, path: path, ephemeralSeconds: eph)
+                default:
+                    return try client.sendDocument(
+                        chatJID, path: path, caption: caption,
+                        ephemeralSeconds: eph)
+                }
+            }.value
             // Own sent messages aren't echoed back by the server, so append the
             // bubble optimistically (mirrors sendDraft / sendVoiceNote). Copy the
             // picked file into the media cache so it keeps rendering after the
             // security-scoped URL is released and across restarts.
-            let cached = cacheOutgoingMedia(url, messageID: res.messageID)
+            let cached = await Task.detached(priority: .utility) {
+                Self.cacheOutgoingMedia(url, messageID: res.messageID)
+            }.value
             let m = UIMessage(
                 id: res.messageID,
                 chatJID: chatJID,
@@ -2293,13 +2396,18 @@ final class ConversationViewModel {
     /// is appended on failure so the user sees the surface.
     private func sendOneLocation(_ loc: LocationPayload) async {
         do {
-            let res = try client.sendLocation(
-                chatJID: chatJID,
-                latitude: loc.lat,
-                longitude: loc.lng,
-                name: loc.name,
-                address: loc.address,
-                ephemeralSeconds: ephemeralExpirationSeconds)
+            let client = self.client
+            let chatJID = self.chatJID
+            let ephemeralSeconds = ephemeralExpirationSeconds
+            let res = try await Task.detached(priority: .userInitiated) {
+                try client.sendLocation(
+                    chatJID: chatJID,
+                    latitude: loc.lat,
+                    longitude: loc.lng,
+                    name: loc.name,
+                    address: loc.address,
+                    ephemeralSeconds: ephemeralSeconds)
+            }.value
             let m = UIMessage(
                 id: res.messageID,
                 chatJID: chatJID,
@@ -2330,11 +2438,16 @@ final class ConversationViewModel {
     /// an optimistic bubble.
     private func sendOneContact(_ card: ContactPayload) async {
         do {
-            let res = try client.sendContact(
-                chatJID: chatJID,
-                vcard: card.vcard,
-                displayName: card.displayName,
-                ephemeralSeconds: ephemeralExpirationSeconds)
+            let client = self.client
+            let chatJID = self.chatJID
+            let ephemeralSeconds = ephemeralExpirationSeconds
+            let res = try await Task.detached(priority: .userInitiated) {
+                try client.sendContact(
+                    chatJID: chatJID,
+                    vcard: card.vcard,
+                    displayName: card.displayName,
+                    ephemeralSeconds: ephemeralSeconds)
+            }.value
             let m = UIMessage(
                 id: res.messageID,
                 chatJID: chatJID,
@@ -2375,11 +2488,17 @@ final class ConversationViewModel {
                 : first.displayName
         }()
         do {
-            let res = try client.sendContacts(
-                chatJID: chatJID,
-                displayName: displayName,
-                vcards: cards.map { $0.vcard },
-                ephemeralSeconds: ephemeralExpirationSeconds)
+            let client = self.client
+            let chatJID = self.chatJID
+            let vcards = cards.map { $0.vcard }
+            let ephemeralSeconds = ephemeralExpirationSeconds
+            let res = try await Task.detached(priority: .userInitiated) {
+                try client.sendContacts(
+                    chatJID: chatJID,
+                    displayName: displayName,
+                    vcards: vcards,
+                    ephemeralSeconds: ephemeralSeconds)
+            }.value
             let m = UIMessage(
                 id: res.messageID,
                 chatJID: chatJID,
@@ -2409,7 +2528,9 @@ final class ConversationViewModel {
     /// Copies a just-sent attachment into the media cache under a per-message
     /// filename so the optimistic bubble keeps resolving after the picked
     /// (security-scoped) URL is released. Falls back to the source path.
-    private func cacheOutgoingMedia(_ src: URL, messageID: String) -> String {
+    nonisolated private static func cacheOutgoingMedia(
+        _ src: URL, messageID: String
+    ) -> String {
         guard let dir = try? AppPaths.mediaCacheURL() else { return src.path }
         let ext = src.pathExtension.isEmpty ? "" : ".\(src.pathExtension)"
         let dest = dir.appendingPathComponent("out-\(messageID)\(ext)")
@@ -2540,12 +2661,17 @@ final class ConversationViewModel {
 
         let selectable = allowMultiple ? 0 : 1
         do {
-            let res = try client.sendPollCreation(
-                chatJID,
-                question: q,
-                options: opts,
-                selectableCount: selectable,
-                ephemeralSeconds: ephemeralExpirationSeconds)
+            let client = self.client
+            let chatJID = self.chatJID
+            let ephemeralSeconds = ephemeralExpirationSeconds
+            let res = try await Task.detached(priority: .userInitiated) {
+                try client.sendPollCreation(
+                    chatJID,
+                    question: q,
+                    options: opts,
+                    selectableCount: selectable,
+                    ephemeralSeconds: ephemeralSeconds)
+            }.value
 
             let m = UIMessage(
                 id: res.messageID,
@@ -2687,9 +2813,15 @@ final class ConversationViewModel {
         let (body, mentionedJIDs) = Self.encodeMentions(
             body: trimmed, mentions: mentionsSnapshot, allParticipants: allP)
         do {
-            _ = try client.editText(chatJID, m.id, body,
-                                    mentionedJIDs: mentionedJIDs,
-                                    ephemeralSeconds: ephemeralExpirationSeconds)
+            let client = self.client
+            let chatJID = self.chatJID
+            let ephemeralSeconds = ephemeralExpirationSeconds
+            _ = try await Task.detached(priority: .userInitiated) {
+                try client.editText(
+                    chatJID, m.id, body,
+                    mentionedJIDs: mentionedJIDs,
+                    ephemeralSeconds: ephemeralSeconds)
+            }.value
             applyLocalEdit(messageID: m.id, newText: body, at: Date())
             editTarget = nil
         } catch {
@@ -2700,7 +2832,12 @@ final class ConversationViewModel {
 
     func deleteForEveryone(_ msg: UIMessage) async {
         do {
-            _ = try client.revokeMessage(chatJID, msg.id, msg.senderJID, msg.fromMe)
+            let client = self.client
+            let chatJID = self.chatJID
+            _ = try await Task.detached(priority: .userInitiated) {
+                try client.revokeMessage(
+                    chatJID, msg.id, msg.senderJID, msg.fromMe)
+            }.value
             applyLocalRevoke(messageID: msg.id, by: msg.senderJID, at: Date())
         } catch {
             transientError = "Couldn't delete for everyone: \(error.localizedDescription)"
@@ -2916,14 +3053,19 @@ final class ConversationViewModel {
             // the bridge.
             let resolvedSender = pollFromMe ? self.client.ownJID : pollSenderJID
             do {
-                _ = try self.client.sendPollVote(
-                    chatJID: self.chatJID,
-                    pollMsgID: messageID,
-                    pollSenderJID: resolvedSender,
-                    pollFromMe: pollFromMe,
-                    optionHashes: hashes,
-                    pollOptions: options,
-                    ephemeralSeconds: self.ephemeralExpirationSeconds)
+                let client = self.client
+                let chatJID = self.chatJID
+                let ephemeralSeconds = self.ephemeralExpirationSeconds
+                _ = try await Task.detached(priority: .userInitiated) {
+                    try client.sendPollVote(
+                        chatJID: chatJID,
+                        pollMsgID: messageID,
+                        pollSenderJID: resolvedSender,
+                        pollFromMe: pollFromMe,
+                        optionHashes: hashes,
+                        pollOptions: options,
+                        ephemeralSeconds: ephemeralSeconds)
+                }.value
                 // Optimistically tally our own vote so the bubble updates
                 // immediately. Use the account's bare JID so the phone's
                 // PollUpdate echo coalesces with this entry instead of
@@ -3002,13 +3144,18 @@ final class ConversationViewModel {
         Task { @MainActor [weak self] in
             guard let self else { return }
             do {
-                _ = try self.client.sendReaction(
-                    chatJID: self.chatJID,
-                    targetMsgID: messageID,
-                    targetSenderJID: targetSenderJID,
-                    targetFromMe: targetFromMe,
-                    emoji: emoji,
-                    ephemeralSeconds: self.ephemeralExpirationSeconds)
+                let client = self.client
+                let chatJID = self.chatJID
+                let ephemeralSeconds = self.ephemeralExpirationSeconds
+                _ = try await Task.detached(priority: .userInitiated) {
+                    try client.sendReaction(
+                        chatJID: chatJID,
+                        targetMsgID: messageID,
+                        targetSenderJID: targetSenderJID,
+                        targetFromMe: targetFromMe,
+                        emoji: emoji,
+                        ephemeralSeconds: ephemeralSeconds)
+                }.value
                 let rx = BridgeReaction(
                     chatJID: self.chatJID,
                     targetMessageID: messageID,
@@ -3048,12 +3195,16 @@ final class ConversationViewModel {
         Task { @MainActor [weak self] in
             guard let self else { return }
             do {
-                try self.client.starMessage(
-                    chatJID: self.chatJID,
-                    targetMsgID: msg.id,
-                    targetSenderJID: msg.senderJID,
-                    targetFromMe: msg.fromMe,
-                    starred: starred)
+                let client = self.client
+                let chatJID = self.chatJID
+                try await Task.detached(priority: .userInitiated) {
+                    try client.starMessage(
+                        chatJID: chatJID,
+                        targetMsgID: msg.id,
+                        targetSenderJID: msg.senderJID,
+                        targetFromMe: msg.fromMe,
+                        starred: starred)
+                }.value
                 let when = Date()
                 self.applyLocalStar(messageID: msg.id,
                                     starredAt: starred ? when : nil)
@@ -3138,12 +3289,16 @@ final class ConversationViewModel {
         Task { @MainActor [weak self] in
             guard let self else { return }
             do {
-                _ = try self.client.pinMessageInChat(
-                    chatJID: self.chatJID,
-                    targetMsgID: msg.id,
-                    targetSenderJID: msg.senderJID,
-                    targetFromMe: msg.fromMe,
-                    pinned: pinned)
+                let client = self.client
+                let chatJID = self.chatJID
+                _ = try await Task.detached(priority: .userInitiated) {
+                    try client.pinMessageInChat(
+                        chatJID: chatJID,
+                        targetMsgID: msg.id,
+                        targetSenderJID: msg.senderJID,
+                        targetFromMe: msg.fromMe,
+                        pinned: pinned)
+                }.value
                 let when = Date()
                 self.applyLocalMessagePin(messageID: msg.id,
                                           pinnedAt: pinned ? when : nil)

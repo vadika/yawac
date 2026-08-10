@@ -1095,7 +1095,9 @@ final class ChatListViewModel {
         guard let client else { return }
         Task { @MainActor in
             do {
-                try client.pinChat(chatJID: chat.jid, pinned: pinned)
+                try await Task.detached(priority: .userInitiated) {
+                    try client.pinChat(chatJID: chat.jid, pinned: pinned)
+                }.value
                 self.applyLocalPin(chatJID: chat.jid,
                                    pinnedAt: pinned ? Date() : nil)
             } catch {
@@ -1117,24 +1119,28 @@ final class ChatListViewModel {
     func reconcilePinsWithStore() {
         guard let client else { return }
         let jids = chats.map(\.jid)
-        let pinned: Set<String>
-        do {
-            pinned = Set(try client.listPinnedChats(jids: jids))
-        } catch {
-            NSLog("[yawac/pin-reconcile] failed: %@", String(describing: error))
-            return
+        Task { @MainActor in
+            let pinned: Set<String>
+            do {
+                pinned = try await Task.detached(priority: .utility) {
+                    Set(try client.listPinnedChats(jids: jids))
+                }.value
+            } catch {
+                NSLog("[yawac/pin-reconcile] failed: %@", String(describing: error))
+                return
+            }
+            var changed = false
+            let now = Date()
+            for i in chats.indices {
+                let isPinned = pinned.contains(chats[i].jid)
+                let wasPinned = chats[i].pinnedAt != nil
+                if isPinned == wasPinned { continue }
+                chats[i].pinnedAt = isPinned ? (chats[i].pinnedAt ?? now) : nil
+                upsertPersisted(chats[i], save: false)
+                changed = true
+            }
+            if changed { try? context?.save(); sortChats() }
         }
-        var changed = false
-        let now = Date()
-        for i in chats.indices {
-            let isPinned = pinned.contains(chats[i].jid)
-            let wasPinned = chats[i].pinnedAt != nil
-            if isPinned == wasPinned { continue }
-            chats[i].pinnedAt = isPinned ? (chats[i].pinnedAt ?? now) : nil
-            upsertPersisted(chats[i], save: false)
-            changed = true
-        }
-        if changed { try? context?.save(); sortChats() }
     }
 
     /// Collapse `@lid` chats that now resolve (via whatsmeow's LID map) to a
@@ -1263,9 +1269,11 @@ final class ChatListViewModel {
         let muteMs: Int64 = until.map { Int64($0.timeIntervalSince1970 * 1000) } ?? 0
         Task { @MainActor in
             do {
-                try client.muteChat(chatJID: chat.jid,
-                                    mute: until != nil,
-                                    mutedUntilMs: muteMs)
+                try await Task.detached(priority: .userInitiated) {
+                    try client.muteChat(chatJID: chat.jid,
+                                        mute: until != nil,
+                                        mutedUntilMs: muteMs)
+                }.value
                 self.applyLocalMute(chatJID: chat.jid, mutedUntil: until)
             } catch {
                 NSLog("[yawac/muteChat] failed jid=%@ err=%@",
@@ -1311,28 +1319,32 @@ final class ChatListViewModel {
     func reconcileMutedWithStore() {
         guard let client else { return }
         let jids = chats.map(\.jid)
-        let entries: [(jid: String, mutedUntilMs: Int64)]
-        do {
-            entries = try client.listMutedChats(jids: jids)
-        } catch {
-            NSLog("[yawac/mute-reconcile] failed: %@",
-                  String(describing: error))
-            return
+        Task { @MainActor in
+            let entries: [(jid: String, mutedUntilMs: Int64)]
+            do {
+                entries = try await Task.detached(priority: .utility) {
+                    try client.listMutedChats(jids: jids)
+                }.value
+            } catch {
+                NSLog("[yawac/mute-reconcile] failed: %@",
+                      String(describing: error))
+                return
+            }
+            let byJID = Dictionary(entries.map { ($0.jid, $0.mutedUntilMs) },
+                                   uniquingKeysWith: { first, _ in first })
+            var changed = false
+            for i in chats.indices {
+                let serverMs = byJID[chats[i].jid] ?? 0
+                let serverUntil: Date? = serverMs == 0
+                    ? nil
+                    : Date(timeIntervalSince1970: TimeInterval(serverMs) / 1000)
+                if chats[i].mutedUntil == serverUntil { continue }
+                chats[i].mutedUntil = serverUntil
+                upsertPersisted(chats[i], save: false)
+                changed = true
+            }
+            if changed { try? context?.save(); sortChats() }
         }
-        let byJID = Dictionary(entries.map { ($0.jid, $0.mutedUntilMs) },
-                               uniquingKeysWith: { first, _ in first })
-        var changed = false
-        for i in chats.indices {
-            let serverMs = byJID[chats[i].jid] ?? 0
-            let serverUntil: Date? = serverMs == 0
-                ? nil
-                : Date(timeIntervalSince1970: TimeInterval(serverMs) / 1000)
-            if chats[i].mutedUntil == serverUntil { continue }
-            chats[i].mutedUntil = serverUntil
-            upsertPersisted(chats[i], save: false)
-            changed = true
-        }
-        if changed { try? context?.save(); sortChats() }
     }
 
     // MARK: - Group info (name + description)
@@ -1344,7 +1356,9 @@ final class ChatListViewModel {
         guard !trimmed.isEmpty else { return }
         Task { @MainActor in
             do {
-                try client.setGroupName(chatJID: chat.jid, name: trimmed)
+                try await Task.detached(priority: .userInitiated) {
+                    try client.setGroupName(chatJID: chat.jid, name: trimmed)
+                }.value
                 self.applyLocalGroupInfo(chatJID: chat.jid,
                                         name: trimmed,
                                         description: nil)
@@ -1363,8 +1377,10 @@ final class ChatListViewModel {
         let trimmed = description.trimmingCharacters(in: .whitespacesAndNewlines)
         Task { @MainActor in
             do {
-                try client.setGroupDescription(chatJID: chat.jid,
-                                               description: trimmed)
+                try await Task.detached(priority: .userInitiated) {
+                    try client.setGroupDescription(chatJID: chat.jid,
+                                                   description: trimmed)
+                }.value
                 self.applyLocalGroupInfo(chatJID: chat.jid,
                                         name: nil,
                                         description: trimmed)
@@ -1568,8 +1584,12 @@ final class ChatListViewModel {
         let last = lastMessageMeta(chat.jid)
         Task { @MainActor in
             do {
-                try client.archiveChat(chatJID: chat.jid, archived: archived,
-                                       lastTS: last.ts, lastMsgID: last.id, fromMe: last.fromMe)
+                try await Task.detached(priority: .userInitiated) {
+                    try client.archiveChat(
+                        chatJID: chat.jid, archived: archived,
+                        lastTS: last.ts, lastMsgID: last.id,
+                        fromMe: last.fromMe)
+                }.value
                 self.applyLocalArchive(chatJID: chat.jid, archivedAt: archived ? Date() : nil)
             } catch {
                 NSLog("[yawac/archiveChat] failed jid=%@ err=%@",
@@ -1609,8 +1629,11 @@ final class ChatListViewModel {
         if let client {
             Task { @MainActor in
                 do {
-                    try client.deleteChat(chatJID: chat.jid, lastTS: last.ts,
-                                          lastMsgID: last.id, fromMe: last.fromMe)
+                    try await Task.detached(priority: .userInitiated) {
+                        try client.deleteChat(
+                            chatJID: chat.jid, lastTS: last.ts,
+                            lastMsgID: last.id, fromMe: last.fromMe)
+                    }.value
                 } catch {
                     NSLog("[yawac/deleteChat] failed jid=%@ err=%@",
                           chat.jid, String(describing: error))
@@ -1653,7 +1676,11 @@ final class ChatListViewModel {
         guard let client, !fullName.isEmpty else { return }
         Task { @MainActor in
             do {
-                try client.setContactName(jid: chat.jid, fullName: fullName, firstName: firstName)
+                try await Task.detached(priority: .userInitiated) {
+                    try client.setContactName(
+                        jid: chat.jid, fullName: fullName,
+                        firstName: firstName)
+                }.value
                 self.applyIncomingContact(jid: chat.jid, fullName: fullName)
             } catch {
                 NSLog("[yawac/addContact] failed jid=%@ err=%@",

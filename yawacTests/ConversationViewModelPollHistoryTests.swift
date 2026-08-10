@@ -121,6 +121,168 @@ final class ConversationViewModelPollHistoryTests: XCTestCase {
         XCTAssertNil(snap.pollVotes["ORPHAN_POLL"])
     }
 
+    // MARK: keyset history pagination
+
+    func testHistorySnapshotAndEarlierPagesStayBounded() async throws {
+        let container = try Self.makeInMemoryContainer()
+        let context = ModelContext(container)
+        let jid = "pagination-(UUID().uuidString)@s.whatsapp.net"
+        let base = Date(timeIntervalSince1970: 1_730_000_000)
+        for index in 0..<8 {
+            context.insert(PersistedMessage(
+                id: "m\(index)", chatJID: jid, senderJID: jid,
+                fromMe: false,
+                timestamp: base.addingTimeInterval(TimeInterval(index)),
+                kind: "text", text: "message \(index)"))
+        }
+        try context.save()
+
+        let first = await Task.detached { [container] in
+            ConversationViewModel.buildHistorySnapshot(
+                chatJID: jid, container: container,
+                canonicalize: { $0 }, limit: 3)
+        }.value
+
+        XCTAssertEqual(first.messages.map(\.id), ["m5", "m6", "m7"])
+        XCTAssertTrue(first.hasMoreStoredHistory)
+        let firstCursor = try XCTUnwrap(first.olderCursor)
+
+        let second = await Task.detached { [container] in
+            ConversationViewModel.buildEarlierSnapshot(
+                chatJID: jid, container: container,
+                cursor: firstCursor, limit: 3)
+        }.value
+        XCTAssertEqual(second.messages.map(\.id), ["m2", "m3", "m4"])
+        XCTAssertTrue(second.hasMoreStoredHistory)
+        let secondCursor = try XCTUnwrap(second.olderCursor)
+
+        let third = await Task.detached { [container] in
+            ConversationViewModel.buildEarlierSnapshot(
+                chatJID: jid, container: container,
+                cursor: secondCursor, limit: 3)
+        }.value
+        XCTAssertEqual(third.messages.map(\.id), ["m0", "m1"])
+        XCTAssertFalse(third.hasMoreStoredHistory)
+    }
+
+    func testHistoryCursorBreaksTimestampTiesWithoutGaps() async throws {
+        let container = try Self.makeInMemoryContainer()
+        let context = ModelContext(container)
+        let jid = "pagination-tie-(UUID().uuidString)@s.whatsapp.net"
+        let timestamp = Date(timeIntervalSince1970: 1_730_000_000)
+        for index in 0..<6 {
+            context.insert(PersistedMessage(
+                id: "m\(index)", chatJID: jid, senderJID: jid,
+                fromMe: false, timestamp: timestamp,
+                kind: "text", text: "message \(index)"))
+        }
+        try context.save()
+
+        let first = await Task.detached { [container] in
+            ConversationViewModel.buildHistorySnapshot(
+                chatJID: jid, container: container,
+                canonicalize: { $0 }, limit: 2)
+        }.value
+        let firstCursor = try XCTUnwrap(first.olderCursor)
+        let second = await Task.detached { [container] in
+            ConversationViewModel.buildEarlierSnapshot(
+                chatJID: jid, container: container,
+                cursor: firstCursor, limit: 2)
+        }.value
+        let secondCursor = try XCTUnwrap(second.olderCursor)
+        let third = await Task.detached { [container] in
+            ConversationViewModel.buildEarlierSnapshot(
+                chatJID: jid, container: container,
+                cursor: secondCursor, limit: 2)
+        }.value
+
+        let allIDs = first.messages.map(\.id)
+            + second.messages.map(\.id)
+            + third.messages.map(\.id)
+        XCTAssertEqual(Set(allIDs), Set((0..<6).map { "m\($0)" }))
+        XCTAssertEqual(allIDs.count, 6)
+        XCTAssertFalse(third.hasMoreStoredHistory)
+    }
+
+    // MARK: shared-media background snapshot
+
+    func testChatMediaSnapshotAppliesLimitsButKeepsFullCounts() async throws {
+        let container = try Self.makeInMemoryContainer()
+        let context = ModelContext(container)
+        let jid = "media-(UUID().uuidString)@s.whatsapp.net"
+        let base = Date(timeIntervalSince1970: 1_740_000_000)
+
+        for index in 0..<5 {
+            let row = PersistedMessage(
+                id: "image-\(index)", chatJID: jid, senderJID: jid,
+                fromMe: false,
+                timestamp: base.addingTimeInterval(TimeInterval(index)),
+                kind: "image")
+            if index == 4 { row.starredAt = base.addingTimeInterval(20) }
+            context.insert(row)
+        }
+        let document = PersistedMessage(
+            id: "document", chatJID: jid, senderJID: jid,
+            fromMe: false, timestamp: base.addingTimeInterval(10),
+            kind: "document", mediaFileName: "report.pdf")
+        document.starredAt = base.addingTimeInterval(21)
+        context.insert(document)
+        let revoked = PersistedMessage(
+            id: "revoked", chatJID: jid, senderJID: jid,
+            fromMe: false, timestamp: base.addingTimeInterval(30),
+            kind: "image")
+        revoked.revokedAt = base.addingTimeInterval(31)
+        context.insert(revoked)
+        try context.save()
+
+        let snapshot = await Task.detached { [container] in
+            ChatMediaViewModel.buildSnapshot(
+                chatJID: jid, container: container, limit: 2)
+        }.value
+
+        XCTAssertEqual(snapshot.media.map(\.id), ["image-4", "image-3"])
+        XCTAssertEqual(snapshot.mediaTotal, 5)
+        XCTAssertEqual(snapshot.files.map(\.id), ["document"])
+        XCTAssertEqual(snapshot.filesTotal, 1)
+        XCTAssertEqual(snapshot.starred.map(\.id), ["document", "image-4"])
+        XCTAssertEqual(snapshot.starredTotal, 2)
+        XCTAssertEqual(snapshot.starred.first?.snippet, "report.pdf")
+    }
+
+    // MARK: sender mapping prewarm
+
+    func testHistorySnapshotPrewarmsUniqueBareSenders() async throws {
+        let container = try Self.makeInMemoryContainer()
+        let context = ModelContext(container)
+        let jid = "prewarm-(UUID().uuidString)@g.us"
+        let base = Date(timeIntervalSince1970: 1_750_000_000)
+        let senders = [
+            "12345:1@lid", "12345:2@lid",
+            "358400929611:7@s.whatsapp.net",
+        ]
+        for (index, sender) in senders.enumerated() {
+            context.insert(PersistedMessage(
+                id: "sender-\(index)", chatJID: jid, senderJID: sender,
+                fromMe: false,
+                timestamp: base.addingTimeInterval(TimeInterval(index)),
+                kind: "text", text: "message"))
+        }
+        try context.save()
+        let recorder = JIDPrewarmRecorder()
+
+        _ = await Task.detached { [container] in
+            ConversationViewModel.buildHistorySnapshot(
+                chatJID: jid, container: container,
+                canonicalize: { $0 },
+                prewarmJIDs: { recorder.record($0) },
+                limit: 10)
+        }.value
+
+        XCTAssertEqual(recorder.values, Set([
+            "12345@lid", "358400929611@s.whatsapp.net",
+        ]))
+    }
+
     // MARK: helpers
 
     private static func makeInMemoryContainer() throws -> ModelContainer {
@@ -134,6 +296,23 @@ final class ConversationViewModelPollHistoryTests: XCTestCase {
             PersistedReaction.self,
             PersistedPollVote.self,
             configurations: config)
+    }
+}
+
+private final class JIDPrewarmRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage: Set<String> = []
+
+    func record(_ jids: [String]) {
+        lock.lock()
+        storage.formUnion(jids)
+        lock.unlock()
+    }
+
+    var values: Set<String> {
+        lock.lock()
+        defer { lock.unlock() }
+        return storage
     }
 }
 

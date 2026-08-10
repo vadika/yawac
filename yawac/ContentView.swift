@@ -158,10 +158,14 @@ struct ContentView: View {
                     session.openRootChat(lastSelectedChatJID)
                 }
             }
-            let groups = (try? client.listGroups()) ?? []
+            let groups = await Task.detached(priority: .utility) {
+                (try? client.listGroups()) ?? []
+            }.value
             vm.mergeGroups(groups)
             session.ingestGroups(groups)
-            let contacts = (try? client.listContacts()) ?? []
+            let contacts = await Task.detached(priority: .utility) {
+                (try? client.listContacts()) ?? []
+            }.value
             vm.resolveNames(contacts)
             vm.mergeContacts(contacts)
             session.ingestContacts(contacts)

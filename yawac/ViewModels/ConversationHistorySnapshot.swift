@@ -12,6 +12,14 @@ struct PreheatImage: @unchecked Sendable {
     init(_ image: NSImage) { self.image = image }
 }
 
+/// Stable keyset-pagination cursor for persisted conversation history.
+/// Message IDs break timestamp ties, which are common because WhatsApp
+/// timestamps are generally second-granularity.
+struct ConversationHistoryCursor: Sendable, Equatable {
+    let timestamp: Date
+    let messageID: String
+}
+
 /// Immutable result of a background `ConversationViewModel` history /
 /// load-earlier build. Carries everything the view needs to render the
 /// chat after a single MainActor commit step. See
@@ -19,6 +27,8 @@ struct PreheatImage: @unchecked Sendable {
 /// `applyHistorySnapshot` for the consumer.
 struct ConversationHistorySnapshot: Sendable {
     let messages: [UIMessage]
+    let olderCursor: ConversationHistoryCursor?
+    let hasMoreStoredHistory: Bool
     let receiptStatus: [String: UIMessage.Status]
     let reactionsBySender: [String: [String: String]]  // msgID → senderJID → emoji
     let pollVotes: [String: [String: Set<String>]]      // msgID → optionHash → voterJIDs
@@ -94,4 +104,6 @@ struct ConversationHistorySnapshot: Sendable {
 /// the earlier snapshot only carries the freshly-paged message window.
 struct ConversationEarlierSnapshot: Sendable {
     let messages: [UIMessage]
+    let olderCursor: ConversationHistoryCursor?
+    let hasMoreStoredHistory: Bool
 }

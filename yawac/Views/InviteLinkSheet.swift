@@ -122,7 +122,9 @@ struct InviteLinkSheet: View {
         let chatJID = self.chatJID
         let client = self.client
         do {
-            let l = try client.getGroupInviteLink(chatJID: chatJID, reset: reset)
+            let l = try await Task.detached(priority: .userInitiated) {
+                try client.getGroupInviteLink(chatJID: chatJID, reset: reset)
+            }.value
             link = l
             if reset {
                 revokeCooldownUntil = Date().addingTimeInterval(3)

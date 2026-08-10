@@ -92,10 +92,9 @@ final class ThumbnailCache {
 
     private let cache: NSCache<NSString, NSImage> = {
         let c = NSCache<NSString, NSImage>()
-        // F31: bumped 256 / 64 MB → 1024 / 256 MB. The extendedHistoryLimit
-        // bump to 10000 means a single chat-open can paint thousands of
-        // image bubbles; previous countLimit triggered eviction storms
-        // → re-decode → revision bumps → re-paint = visible flicker.
+        // Keep enough decoded images resident across several paginated
+        // history windows; a lower limit caused eviction/redecode flicker
+        // while scrolling media-heavy chats.
         c.countLimit = 1024
         c.totalCostLimit = 256 * 1024 * 1024
         return c
@@ -280,12 +279,9 @@ final class ThumbnailCache {
     /// large group threads; the 16 MB byte budget caps memory.
     private let avatarCache: NSCache<NSString, NSImage> = {
         let c = NSCache<NSString, NSImage>()
-        // F31: bumped 512 / 16 MB → 4096 / 64 MB. After the
-        // extendedHistoryLimit bump to 10000, a single chat-open in a
-        // large group renders an avatar per message — thousands of
-        // distinct senders. Previous countLimit blew its budget and
-        // every scroll re-evicted half the visible avatars, looking
-        // exactly like "all avatars blinking" the user reported.
+        // Keep avatars resident across several paginated history windows.
+        // A lower count evicted visible group participants during scroll,
+        // producing placeholder/avatar flicker.
         c.countLimit = 4096
         c.totalCostLimit = 64 * 1024 * 1024
         return c

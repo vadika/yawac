@@ -647,7 +647,11 @@ final class SessionViewModel {
         // session re-runs it against whatever state the new account has.
         historyBackfillCompleted = false
         lastReconnectCatchupAt = 0  // F92: reset catch-up throttle on logout
-        try? client?.logout()
+        if let client {
+            await Task.detached(priority: .userInitiated) {
+                try? client.logout()
+            }.value
+        }
         client = nil
         qrCode = nil
         syncWatchdog?.cancel()
@@ -713,7 +717,11 @@ final class SessionViewModel {
             // SubscribePresence(jid) calls — peers don't share presence
             // with companions that look offline. Best-effort: errors
             // here mean we'll just not see online dots.
-            try? client?.sendPresence(available: true)
+            if let client {
+                Task.detached(priority: .utility) {
+                    try? client.sendPresence(available: true)
+                }
+            }
             // Seed pending join-request counts for every admin approval
             // group so the chat-list badge is correct as soon as the
             // sidebar renders post-connect.

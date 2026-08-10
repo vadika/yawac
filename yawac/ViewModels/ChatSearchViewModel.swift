@@ -217,7 +217,9 @@ final class ChatSearchViewModel {
         listVM?.inviteLinkPreview = .loading(code: code)
         inviteLinkTask = Task { @MainActor [weak self] in
             do {
-                let info = try client.groupInfoFromLink(code: code)
+                let info = try await Task.detached(priority: .userInitiated) {
+                    try client.groupInfoFromLink(code: code)
+                }.value
                 guard let _ = self, !Task.isCancelled else { return }
                 listVM?.inviteLinkPreview = .ready(info, code: code)
             } catch {

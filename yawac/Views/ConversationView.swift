@@ -369,7 +369,31 @@ struct ConversationView: View {
                                 // top-of-array (oldest) rows don't get laid out
                                 // on first paint and the user doesn't see the
                                 // "oldest-first then jump to bottom" flash.
-                                if !vm.olderUnavailable {
+                                if vm.hasMoreStoredHistory {
+                                    HStack {
+                                        Spacer()
+                                        Button {
+                                            vm.loadMoreStoredHistory()
+                                        } label: {
+                                            if vm.loadingOlder {
+                                                HStack(spacing: 4) {
+                                                    ProgressView().controlSize(.small)
+                                                    Text("Loading earlier messages…")
+                                                }
+                                            } else {
+                                                Text("Load earlier messages")
+                                            }
+                                        }
+                                        .buttonStyle(.borderless)
+                                        .disabled(vm.loadingOlder)
+                                        .padding(.vertical, 6)
+                                        Spacer()
+                                    }
+                                    // Reaching the top loads one bounded local
+                                    // page. Stable row IDs plus scrollPosition
+                                    // preserve the visible anchor on prepend.
+                                    .onAppear { vm.loadMoreStoredHistory() }
+                                } else if !vm.olderUnavailable {
                                     HStack {
                                         Spacer()
                                         Button {
@@ -755,7 +779,9 @@ struct ConversationView: View {
                 session.pendingReplyTarget = nil
             }
             vm.replayPendingForLoadedRows()
-            try? client.subscribePresence(chatJID)
+            await Task.detached(priority: .utility) {
+                try? client.subscribePresence(chatJID)
+            }.value
             let stream = client.eventStream()
             for await event in stream {
                 switch event {

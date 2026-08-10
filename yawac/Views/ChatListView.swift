@@ -806,7 +806,9 @@ struct ChatListView: View {
     @MainActor
     private func mergeNewlyCreatedChat(jid: String, client: WAClient) {
         Task {
-            if let info = try? client.getGroupInfo(jid: jid) {
+            if let info = await Task.detached(priority: .userInitiated, operation: {
+                try? client.getGroupInfo(jid: jid)
+            }).value {
                 vm.mergeGroups([info])
             }
             session.requestSelectChat(jid)
@@ -818,9 +820,13 @@ struct ChatListView: View {
         guard let client = vm.clientRef else { return }
         vm.inviteLinkPreview = .joining(code: code)
         do {
-            let joinedJID = try client.joinGroupViaLink(code: code)
+            let joinedJID = try await Task.detached(priority: .userInitiated) {
+                try client.joinGroupViaLink(code: code)
+            }.value
             // Probe to distinguish "joined" from "pending approval".
-            if let info = try? client.getGroupInfo(jid: joinedJID) {
+            if let info = await Task.detached(priority: .userInitiated, operation: {
+                try? client.getGroupInfo(jid: joinedJID)
+            }).value {
                 vm.mergeGroups([info])
                 vm.inviteLinkPreview = nil
                 search.clear()

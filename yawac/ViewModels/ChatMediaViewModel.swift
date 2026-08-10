@@ -9,26 +9,35 @@ import SwiftData
 /// accurate even when the inline preview is capped at 6 cells.
 @Observable @MainActor
 final class ChatMediaViewModel {
-    struct MediaItem: Identifiable, Hashable {
+    struct MediaItem: Identifiable, Hashable, Sendable {
         let id: String          // message id
         let kind: String        // "image" | "video" | "sticker"
         let path: String?
         let timestamp: Date
     }
 
-    struct FileItem: Identifiable, Hashable {
+    struct FileItem: Identifiable, Hashable, Sendable {
         let id: String
         let fileName: String
         let path: String?
         let timestamp: Date
     }
 
-    struct StarredItem: Identifiable, Hashable {
+    struct StarredItem: Identifiable, Hashable, Sendable {
         let id: String        // message id
         let kind: String      // text / image / video / audio / document / sticker
         let snippet: String   // text body, caption, fileName, or placeholder
         let timestamp: Date
         let starredAt: Date
+    }
+
+    struct QuerySnapshot: Sendable {
+        let media: [MediaItem]
+        let files: [FileItem]
+        let starred: [StarredItem]
+        let mediaTotal: Int
+        let filesTotal: Int
+        let starredTotal: Int
     }
 
     private(set) var media: [MediaItem] = []
@@ -39,7 +48,9 @@ final class ChatMediaViewModel {
     private(set) var starredTotal: Int = 0
 
     let chatJID: String
-    private let context: ModelContext?
+    private let container: ModelContainer?
+    @ObservationIgnored private var reloadTask: Task<Void, Never>?
+    @ObservationIgnored private var reloadRevision = 0
     /// Optional external override that maps messageID → on-disk path.
     /// Plumbed from `ConversationViewModel.localPaths` so the info
     /// pane can resolve media paths that landed via the in-flight
@@ -49,16 +60,14 @@ final class ChatMediaViewModel {
 
     init(chatJID: String, context: ModelContext?) {
         self.chatJID = chatJID
-        self.context = context
+        self.container = context?.container
     }
 
-    private func resolvePath(_ stored: String?, id: String,
-                             diskPaths: [String: String]) -> String? {
-        if let external = externalPathResolver?(id),
-           !external.isEmpty,
-           FileManager.default.fileExists(atPath: external) {
-            return external
-        }
+    deinit { reloadTask?.cancel() }
+
+    nonisolated private static func resolvePath(
+        _ stored: String?, id: String, diskPaths: [String: String]
+    ) -> String? {
         if let stored, FileManager.default.fileExists(atPath: stored) {
             return stored
         }
@@ -69,7 +78,7 @@ final class ChatMediaViewModel {
     /// media cache. Used to repair MediaItem.path when the persisted
     /// row's mediaPath is nil (e.g. inbound media downloaded after the
     /// row was first saved, where the path wasn't backfilled).
-    private func diskMediaPaths() -> [String: String] {
+    nonisolated private static func diskMediaPaths() -> [String: String] {
         guard let baseDir = try? AppPaths.mediaCacheURL(),
               let entries = try? FileManager.default.contentsOfDirectory(
                 atPath: baseDir.path)
@@ -85,8 +94,31 @@ final class ChatMediaViewModel {
     }
 
     func reload(limit: Int? = 24) {
-        guard let context else { return }
+        guard let container else { return }
+        reloadRevision += 1
+        let revision = reloadRevision
         let jid = chatJID
+        reloadTask?.cancel()
+        reloadTask = Task { @MainActor [weak self] in
+            let snapshot = await Task.detached(priority: .userInitiated) {
+                Self.buildSnapshot(chatJID: jid, container: container,
+                                   limit: limit)
+            }.value
+            guard let self, !Task.isCancelled,
+                  self.reloadRevision == revision else { return }
+            self.apply(snapshot)
+        }
+    }
+
+    /// Runs every SwiftData fetch/count, row projection, media-cache scan,
+    /// and stored-path file probe on a background context. Only value types
+    /// cross back to MainActor.
+    nonisolated static func buildSnapshot(
+        chatJID jid: String,
+        container: ModelContainer,
+        limit: Int?
+    ) -> QuerySnapshot {
+        let context = ModelContext(container)
         let mediaKinds: Set<String> = ["image", "video", "sticker"]
         let diskPaths = diskMediaPaths()
 
@@ -132,23 +164,25 @@ final class ChatMediaViewModel {
         if let limit { starredDescriptor.fetchLimit = limit }
         let starredRows = (try? context.fetch(starredDescriptor)) ?? []
 
-        media = mediaRows.compactMap { row in
+        let media: [MediaItem] = mediaRows.compactMap { row in
             guard mediaKinds.contains(row.kind) else { return nil }
-            let resolved = resolvePath(row.mediaPath, id: row.id, diskPaths: diskPaths)
+            let resolved = resolvePath(row.mediaPath, id: row.id,
+                                       diskPaths: diskPaths)
             return MediaItem(id: row.id,
                              kind: row.kind,
                              path: resolved,
                              timestamp: row.timestamp)
         }
-        files = fileRows.map { row in
-            let resolved = resolvePath(row.mediaPath, id: row.id, diskPaths: diskPaths)
+        let files: [FileItem] = fileRows.map { row in
+            let resolved = resolvePath(row.mediaPath, id: row.id,
+                                       diskPaths: diskPaths)
             return FileItem(id: row.id,
                             fileName: row.mediaFileName ?? "Document",
                             path: resolved,
                             timestamp: row.timestamp)
         }
 
-        starred = starredRows.compactMap { row in
+        let starred: [StarredItem] = starredRows.compactMap { row in
             guard let when = row.starredAt else { return nil }
             return StarredItem(id: row.id,
                                kind: row.kind,
@@ -182,12 +216,43 @@ final class ChatMediaViewModel {
                 && p.starredAt != nil
             }
         )
-        mediaTotal = (try? context.fetchCount(mediaCountDescriptor)) ?? media.count
-        filesTotal = (try? context.fetchCount(filesCountDescriptor)) ?? files.count
-        starredTotal = (try? context.fetchCount(starredCountDescriptor)) ?? starred.count
+        return QuerySnapshot(
+            media: media,
+            files: files,
+            starred: starred,
+            mediaTotal: (try? context.fetchCount(mediaCountDescriptor)) ?? media.count,
+            filesTotal: (try? context.fetchCount(filesCountDescriptor)) ?? files.count,
+            starredTotal: (try? context.fetchCount(starredCountDescriptor)) ?? starred.count)
     }
 
-    private static func snippet(for row: PersistedMessage) -> String {
+    private func apply(_ snapshot: QuerySnapshot) {
+        // The external resolver reads the open conversation's in-flight
+        // localPaths dictionary, so consult it only on MainActor. Those paths
+        // were just produced by MediaCache and do not need another disk probe.
+        if let externalPathResolver {
+            media = snapshot.media.map { item in
+                guard let external = externalPathResolver(item.id),
+                      !external.isEmpty else { return item }
+                return MediaItem(id: item.id, kind: item.kind, path: external,
+                                 timestamp: item.timestamp)
+            }
+            files = snapshot.files.map { item in
+                guard let external = externalPathResolver(item.id),
+                      !external.isEmpty else { return item }
+                return FileItem(id: item.id, fileName: item.fileName,
+                                path: external, timestamp: item.timestamp)
+            }
+        } else {
+            media = snapshot.media
+            files = snapshot.files
+        }
+        starred = snapshot.starred
+        mediaTotal = snapshot.mediaTotal
+        filesTotal = snapshot.filesTotal
+        starredTotal = snapshot.starredTotal
+    }
+
+    nonisolated private static func snippet(for row: PersistedMessage) -> String {
         if let t = row.text, !t.isEmpty { return t }
         if let c = row.mediaCaption, !c.isEmpty { return c }
         if let n = row.mediaFileName, !n.isEmpty { return n }
