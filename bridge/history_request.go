@@ -65,6 +65,38 @@ func (c *Client) RequestOlderHistory(
 	return nil
 }
 
+// RequestRecentHistory asks the primary device for the newest messages in a
+// chat. HISTORY_SYNC_ON_DEMAND returns messages before its anchor, so a fresh
+// generated ID and a near-future timestamp place the requested window after
+// any real message. BuildHistorySyncRequest encodes that timestamp in
+// milliseconds and enables inline responses, matching WhatsApp Web.
+func (c *Client) RequestRecentHistory(chatJID string, count int) error {
+	if c.wa == nil {
+		return errors.New("client closed")
+	}
+	chat, err := types.ParseJID(chatJID)
+	if err != nil {
+		return fmt.Errorf("parse chat: %w", err)
+	}
+	if count <= 0 {
+		count = 50
+	}
+	msg := c.wa.BuildHistorySyncRequest(&types.MessageInfo{
+		MessageSource: types.MessageSource{
+			Chat:     chat,
+			Sender:   chat,
+			IsGroup:  chat.Server == types.GroupServer,
+			IsFromMe: false,
+		},
+		ID:        c.wa.GenerateMessageID(),
+		Timestamp: time.Now().Add(24 * time.Hour),
+	}, count)
+	if _, err = c.wa.SendPeerMessage(context.Background(), msg); err != nil {
+		return fmt.Errorf("send recent-history peer request: %w", err)
+	}
+	return nil
+}
+
 // RequestFullHistorySync issues whatsmeow's FULL_HISTORY_SYNC_ON_DEMAND
 // PeerDataOperationRequestMessage (type 6) — the account-wide
 // deep-history variant — and sends it via SendPeerMessage. The builder

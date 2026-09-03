@@ -90,6 +90,8 @@ func (c *Client) handleWAEvent(evt any) {
 		c.dispatchChatPresence(v)
 	case *events.HistorySync:
 		c.dispatchHistory(v)
+	case *events.GroupHistory:
+		c.dispatchGroupHistory(v)
 	case *events.MediaRetry:
 		c.handleMediaRetry(v)
 	case *events.DeleteForMe:
@@ -105,6 +107,17 @@ func (c *Client) handleWAEvent(evt any) {
 	case *events.GroupInfo:
 		c.dispatchGroupInfo(v)
 		c.dispatchGroupParticipants(v)
+	case *events.JoinedGroup:
+		c.dispatchJoinedGroup(v)
+	case *events.FullHistorySyncResponse:
+		b, _ := json.Marshal(JFullHistorySyncResponse{
+			RequestID:    v.RequestID,
+			ResponseCode: v.ResponseCode.String(),
+		})
+		fmt.Fprintf(os.Stderr,
+			"[yawac/catchup] primary response request=%s code=%s\n",
+			v.RequestID, v.ResponseCode.String())
+		c.dispatch("FullHistorySyncResponse", string(b))
 	case *events.DeleteChat:
 		c.dispatchDeleteChat(v)
 	case *events.Contact:
@@ -121,6 +134,22 @@ func (c *Client) handleWAEvent(evt any) {
 			c.dispatchIdentityChange(v)
 		}
 	}
+}
+
+func (c *Client) dispatchJoinedGroup(evt *events.JoinedGroup) {
+	if evt == nil {
+		return
+	}
+	actor := ""
+	if evt.Sender != nil {
+		actor = evt.Sender.String()
+	}
+	b, _ := json.Marshal(JGroupJoined{
+		Group:     mapGroupInfo(&evt.GroupInfo),
+		ActorJID:  actor,
+		Timestamp: evt.Timestamp.Unix(),
+	})
+	c.dispatch("GroupJoined", string(b))
 }
 
 // dispatchIdentityChange emits a synthetic Message with kind="system"

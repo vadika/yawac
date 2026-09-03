@@ -159,6 +159,24 @@ func (c *Client) applyHistorySync(evt *events.HistorySync) {
 			}
 		}
 
+		// Preserve the conversation envelope's chat-list timestamp even when
+		// its newest item is a system stub with Message=nil (notably the
+		// "added you" and recent-history-sharing rows for a newly joined
+		// group). dispatchWebMessage intentionally ignores those stubs, but
+		// dropping this metadata leaves the discovered group at timestamp 0.
+		conversationTS := conv.GetConversationTimestamp()
+		if lastMessageTS := conv.GetLastMsgTimestamp(); lastMessageTS > conversationTS {
+			conversationTS = lastMessageTS
+		}
+		if conversationTS > 0 {
+			b, _ := json.Marshal(JHistoryConversation{
+				ChatJID:   chatJIDStr,
+				Name:      name,
+				Timestamp: int64(conversationTS),
+			})
+			c.dispatch("HistoryConversation", string(b))
+		}
+
 		// Two-pass: store every message's secret first so subsequent vote
 		// decryption can find creation-message keys regardless of iteration
 		// order in this HistorySync chunk.
@@ -212,6 +230,41 @@ func (c *Client) applyHistorySync(evt *events.HistorySync) {
 	// flattens WebMessageInfo.PollUpdates across the whole blob so we
 	// don't have to walk it per-message ourselves.
 	c.emitHistoricalPollUpdatesFromBlob(evt)
+}
+
+// dispatchGroupHistory injects the message-history bundle WhatsApp shares
+// when the account is added to an existing group. whatsmeow delivers the
+// decoded bundle separately from normal HistorySync chunks.
+func (c *Client) dispatchGroupHistory(evt *events.GroupHistory) {
+	if evt == nil || evt.Data == nil {
+		return
+	}
+	chatJID := evt.Info.Chat.String()
+	count := 0
+	dispatch := func(wm *waWeb.WebMessageInfo) {
+		if wm == nil {
+			return
+		}
+		c.dispatchWebMessage(chatJID, wm)
+		count++
+	}
+	for _, wm := range evt.Data.GetMessages() {
+		dispatch(wm)
+	}
+	for _, associated := range evt.Data.GetUncountedAssociatedMessageLists() {
+		for _, wm := range associated.GetMessages() {
+			dispatch(wm)
+		}
+	}
+	for _, wm := range evt.Data.GetCommentMessages() {
+		dispatch(wm)
+	}
+	for _, wm := range evt.Data.GetOutOfWindowPinnedMessages() {
+		dispatch(wm)
+	}
+	fmt.Fprintf(os.Stderr,
+		"[yawac/group-history] chat=%s carrier=%s messages=%d\n",
+		chatJID, evt.Info.ID, count)
 }
 
 // emitHistoricalPollUpdatesFromBlob dispatches one synthetic "PollVote"

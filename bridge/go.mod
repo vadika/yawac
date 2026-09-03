@@ -42,7 +42,9 @@ require (
 // merged into whatsmeow main: #1160 binary-decoder panic resilience,
 // #1168 signal session lock (likely closes our issue #6), #1171
 // SkipBrokenAppStatePatches opt-in, and #1163 LID→PN mappings from
-// GetGroupRequestParticipants. (#1151 poll-vote extractor was
-// closed upstream; its logic lives in bridge/history.go now.)
+// GetGroupRequestParticipants, plus reconnect history request fixes,
+// joined-group timestamps and shared group-history bundle decoding.
+// (#1151 poll-vote extractor was closed upstream; its logic lives in
+// bridge/history.go now.)
 // See docs/whatsmeow-patches.md.
-replace go.mau.fi/whatsmeow => github.com/vadika/whatsmeow v0.0.0-20260707191601-45fac9cd24ec
+replace go.mau.fi/whatsmeow => github.com/vadika/whatsmeow v0.0.0-20260903162328-48c3cb4e077d

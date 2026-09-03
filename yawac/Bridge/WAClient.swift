@@ -53,6 +53,9 @@ class WAClient: PhoneValidating, LIDResolving {
         case chatPinned(chatJID: String, pinned: Bool, timestamp: Int64)
         case chatMuted(chatJID: String, mutedUntilMs: Int64, timestamp: Int64)
         case groupInfoChanged(chatJID: String, name: String, description: String, timestamp: Int64)
+        case groupJoined(group: BridgeGroupModel, actorJID: String, timestamp: Int64)
+        case historyConversation(chatJID: String, name: String, timestamp: Int64)
+        case fullHistorySyncResponse(requestID: String, responseCode: String)
         case groupParticipantsChanged(chatJID: String, action: String,
                                       actorJID: String, jids: [String],
                                       timestamp: Int64)
@@ -811,6 +814,12 @@ class WAClient: PhoneValidating, LIDResolving {
             count: count)
     }
 
+    nonisolated func requestRecentHistory(chatJID: String,
+                                          count: Int) throws {
+        bump("requestRecentHistory")
+        try go.requestRecentHistory(chatJID, count: count)
+    }
+
     nonisolated func requestFullHistorySync(beforeChatJID: String,
                                             beforeMsgID: String,
                                             beforeFromMe: Bool,
@@ -1418,6 +1427,51 @@ class WAClient: PhoneValidating, LIDResolving {
                                          name: g.name,
                                          description: g.description,
                                          timestamp: g.timestamp)
+            }
+        case "GroupJoined":
+            struct G: Codable {
+                let group: BridgeGroupModel
+                let actorJID: String?
+                let timestamp: Int64
+                enum CodingKeys: String, CodingKey {
+                    case group
+                    case actorJID = "actor_jid"
+                    case timestamp
+                }
+            }
+            if let g = try? dec.decode(G.self, from: data) {
+                return .groupJoined(group: g.group,
+                                    actorJID: g.actorJID ?? "",
+                                    timestamp: g.timestamp)
+            }
+        case "HistoryConversation":
+            struct HC: Codable {
+                let chatJID: String
+                let name: String?
+                let timestamp: Int64
+                enum CodingKeys: String, CodingKey {
+                    case chatJID = "chat_jid"
+                    case name, timestamp
+                }
+            }
+            if let h = try? dec.decode(HC.self, from: data) {
+                return .historyConversation(chatJID: h.chatJID,
+                                            name: h.name ?? "",
+                                            timestamp: h.timestamp)
+            }
+        case "FullHistorySyncResponse":
+            struct FHS: Codable {
+                let requestID: String
+                let responseCode: String
+                enum CodingKeys: String, CodingKey {
+                    case requestID = "request_id"
+                    case responseCode = "response_code"
+                }
+            }
+            if let response = try? dec.decode(FHS.self, from: data) {
+                return .fullHistorySyncResponse(
+                    requestID: response.requestID,
+                    responseCode: response.responseCode)
             }
         case "MessagePinned":
             struct MP: Codable {

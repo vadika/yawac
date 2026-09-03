@@ -23,6 +23,8 @@ xcodebuild \
     -configuration Release \
     -archivePath "$ARCHIVE" \
     archive \
+    ARCHS="arm64 x86_64" \
+    ONLY_ACTIVE_ARCH=NO \
     CODE_SIGN_IDENTITY="-" \
     CODE_SIGNING_REQUIRED=YES \
     CODE_SIGNING_ALLOWED=YES
@@ -42,6 +44,11 @@ xcodebuild \
     -exportPath "$EXPORT"
 
 APP="${EXPORT}/${SCHEME}.app"
+APP_BINARY="${APP}/Contents/MacOS/${SCHEME}"
+
+# The release is distributed as a universal app. GitHub's arm64 runner can
+# otherwise archive only its active architecture with some Xcode versions.
+lipo -verify_arch arm64 x86_64 "$APP_BINARY"
 
 # Optional: re-sign with Developer ID + notarize when CI passes the
 # secrets. Local dev runs skip this and keep ad-hoc.
@@ -94,7 +101,6 @@ if [ -n "${NOTARY_APPLE_ID:-}" ] \
         --password "$NOTARY_APP_PASSWORD" \
         --team-id "$NOTARY_TEAM_ID" \
         --wait
-    xcrun stapler staple "$APP"
     rm -f "$NOTARY_ZIP"
 fi
 
@@ -102,6 +108,19 @@ fi
 # plain `zip` corrupts them.
 ZIP="${DIST}/yawac-${VERSION}.zip"
 ditto -c -k --sequesterRsrc --keepParent "$APP" "$ZIP"
+
+# Verify the exact payload users receive, not only the pre-package app. The
+# notarization ticket remains available to Gatekeeper online; intentionally
+# do not staple it here because tickets produced on the macOS 15 runner have
+# made otherwise-valid signatures fail verification on macOS 26.
+VERIFY_DIR=$(mktemp -d "${TMPDIR:-/tmp}/yawac-release-verify.XXXXXX")
+trap 'rm -rf "$VERIFY_DIR"' EXIT
+ditto -x -k "$ZIP" "$VERIFY_DIR"
+VERIFY_APP="${VERIFY_DIR}/${SCHEME}.app"
+codesign --verify --deep --strict --verbose=2 "$VERIFY_APP"
+lipo -verify_arch arm64 x86_64 "${VERIFY_APP}/Contents/MacOS/${SCHEME}"
+rm -rf "$VERIFY_DIR"
+trap - EXIT
 
 # F41: Sparkle appcast. When SPARKLE_PRIVATE_KEY_FILE points at a
 # readable PEM, sign the final zip with sign_update and emit a

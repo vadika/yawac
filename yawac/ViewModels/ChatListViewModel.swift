@@ -840,6 +840,9 @@ final class ChatListViewModel {
                 c.isLocked = g.isLocked
                 c.isAllMemberAdd = g.isAllMemberAdd
                 if c.name == jid && !g.name.isEmpty { c.name = g.name }
+                if c.lastTimestamp == 0 && g.created > 0 {
+                    c.lastTimestamp = g.created
+                }
                 chats[idx] = c
                 upsertPersisted(c, save: false)
                 continue
@@ -849,7 +852,7 @@ final class ChatListViewModel {
                 jid: jid,
                 name: g.name.isEmpty ? jid : g.name,
                 lastMessage: g.topic,
-                lastTimestamp: 0,
+                lastTimestamp: max(0, g.created),
                 unread: 0,
                 isCommunityParent: g.isParent,
                 communityParentJID: parentJID,
@@ -865,6 +868,48 @@ final class ChatListViewModel {
             upsertPersisted(chats[chats.count - 1], save: false)
         }
         try? context?.save()
+        sortChats()
+    }
+
+    /// Apply a live JoinedGroup notification. Unlike the periodic group-list
+    /// snapshot, this carries the time this account was added, so a newly
+    /// joined old group sorts at the join event rather than its creation date.
+    func mergeJoinedGroup(_ group: BridgeGroupModel, at date: Date) {
+        let jid = JIDNormalize.canonical(group.jid, client: client)
+        untombstone(jid)
+        mergeGroups([group])
+        guard let idx = chats.firstIndex(where: { $0.jid == jid }) else { return }
+        let timestamp = Int64(date.timeIntervalSince1970)
+        guard timestamp > chats[idx].lastTimestamp else { return }
+        chats[idx].lastTimestamp = timestamp
+        upsertPersisted(chats[idx])
+        sortChats()
+    }
+
+    /// Preserve history-sync conversation metadata for groups whose newest
+    /// item is a non-renderable system stub (for example "added you"). The
+    /// group snapshot may already have supplied its much older creation date,
+    /// so advance the row whenever the history envelope is newer. A rendered
+    /// message arriving afterward remains authoritative for the preview.
+    func applyHistoryConversation(chatJID: String, name: String, at date: Date) {
+        guard chatJID.hasSuffix("@g.us") else { return }
+        guard let idx = chats.firstIndex(where: { $0.jid == chatJID }) else {
+            let chat = Chat(
+                jid: chatJID,
+                name: name.isEmpty ? chatJID : name,
+                lastMessage: "",
+                lastTimestamp: Int64(date.timeIntervalSince1970),
+                unread: 0)
+            chats.append(chat)
+            upsertPersisted(chat)
+            sortChats()
+            return
+        }
+        let timestamp = Int64(date.timeIntervalSince1970)
+        guard timestamp > chats[idx].lastTimestamp else { return }
+        if !name.isEmpty { chats[idx].name = name }
+        chats[idx].lastTimestamp = timestamp
+        upsertPersisted(chats[idx])
         sortChats()
     }
 

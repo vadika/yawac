@@ -272,6 +272,19 @@ struct ContentView: View {
                         name:        name.isEmpty        ? nil : name,
                         description: description.isEmpty ? nil : description,
                         at: when)
+                case .groupJoined(let group, _, let ts):
+                    vm.mergeJoinedGroup(
+                        group,
+                        at: Date(timeIntervalSince1970: TimeInterval(ts)))
+                    session.ingestGroups([group])
+                case .historyConversation(let chatJID, let name, let ts):
+                    vm.applyHistoryConversation(
+                        chatJID: JIDNormalize.canonical(chatJID, client: client),
+                        name: name,
+                        at: Date(timeIntervalSince1970: TimeInterval(ts)))
+                case .fullHistorySyncResponse(let requestID, let responseCode):
+                    NSLog("[yawac/catchup] decoded primary response request=%@ code=%@",
+                          requestID, responseCode)
                 case .messagePinned(let chatJID, let targetID, _, let pinned, let ts):
                     let when = Date(timeIntervalSince1970: TimeInterval(ts))
                     let canonical = JIDNormalize.canonical(chatJID, client: client)

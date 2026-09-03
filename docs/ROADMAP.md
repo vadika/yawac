@@ -213,6 +213,20 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **F128 — verified reconnect catch-up + joined-group shared history** (v0.10.56) —
+  Live recurrence disproved F127's type-6 configuration diagnosis: the primary
+  silently ignored repeated `FULL_HISTORY_SYNC_ON_DEMAND` requests. Current
+  WhatsApp Web instead builds per-chat `HISTORY_SYNC_ON_DEMAND` requests with
+  `oldestMsgTimestampMS` in milliseconds and
+  `supportInlineResponse=true`; whatsmeow used seconds and omitted the flag.
+  The fork now matches those fields, yawac runs a throttled per-chat
+  future-anchor reconciliation sweep, and newly joined chats are prioritized.
+  whatsmeow also decodes the `MessageHistoryBundle`/`GroupHistory` payload and
+  preserves `JoinedGroup` timestamps; yawac consumes both that event and
+  conversation-level history timestamps. Live verification recovered two
+  missing Kirsi Mio messages (Aug 27 → Aug 28) and 45 shared-history messages
+  in `Helkyn valmennusryhmä 2026` (previously an empty/epoch row).
+
 - ✅ **F127 — reconnect history recovery is a whatsmeow request bug** (v0.10.54) —
   Reclassified the read-on-phone-while-yawac-was-offline gap as a client
   implementation bug, not a protocol limitation. The type-6
@@ -226,7 +240,8 @@ surfaces.
   time range. Payload-level Go tests assert the type-6 operation, copied
   config, range, and request ID.
   F92 remains the reconnect trigger; its earlier “server cleared it, therefore
-  unrecoverable” diagnosis is superseded.
+  unrecoverable” diagnosis is superseded. The type-6 fix itself was later
+  superseded by the verified per-chat request correction in F128.
 - ✅ **F126 — group-info IQ off main + 403 resilience** (v0.10.53) —
   Composer focus in a group ran the blocking group-info IQ (whatsmeow
   sleeps 750ms + retries on cold socket) on MainActor — beachball on

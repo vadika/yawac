@@ -46,6 +46,8 @@ github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu
 github.com/stretchr/testify v1.11.1/go.mod h1:wZwfW3scLgRK+23gO65QZefKpKQRnfz6sD981Nm4B6U=
 github.com/vadika/whatsmeow v0.0.0-20260707191601-45fac9cd24ec h1:qPuLWPj8gezXzM59V4EvTt8/zPt02vjYW9k3uOuZz6Q=
 github.com/vadika/whatsmeow v0.0.0-20260707191601-45fac9cd24ec/go.mod h1:9dmNTYZ/1pHjPw/bz+azBsGjAkcrZbqzMrKcvG5bJ8U=
+github.com/vadika/whatsmeow v0.0.0-20260903162328-48c3cb4e077d h1:g5Kl4jRdjaFG7F/+gBrnf+8yHq5rTE0FLzYv+KLyrRI=
+github.com/vadika/whatsmeow v0.0.0-20260903162328-48c3cb4e077d/go.mod h1:9dmNTYZ/1pHjPw/bz+azBsGjAkcrZbqzMrKcvG5bJ8U=
 github.com/vektah/gqlparser/v2 v2.5.27 h1:RHPD3JOplpk5mP5JGX8RKZkt2/Vwj/PZv0HxTdwFp0s=
 github.com/vektah/gqlparser/v2 v2.5.27/go.mod h1:D1/VCZtV3LPnQrcPBeR/q5jkSQIPti0uYCP/RI0gIeo=
 go.mau.fi/libsignal v0.2.2 h1:QV+XdzQkm3x3aSG7FcqfGSZuFXz83pRZPBFaPygHbOU=

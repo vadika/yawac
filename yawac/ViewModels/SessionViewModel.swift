@@ -38,9 +38,8 @@ final class SessionViewModel {
                                         forKey: Self.historyBackfillCompletedKey) }
     }
 
-    /// F92: timestamp (Unix seconds) of the last on-reconnect
-    /// catch-up history sync. Used to throttle the per-connect 7-day
-    /// catch-up so reconnect flapping doesn't hammer the phone.
+    /// Timestamp (Unix seconds) of the last on-reconnect per-chat history
+    /// sweep, used to suppress overlapping work during reconnect flapping.
     private static let lastReconnectCatchupKey = "yawac.lastReconnectCatchupAt"
 
     var lastReconnectCatchupAt: TimeInterval {
@@ -48,13 +47,9 @@ final class SessionViewModel {
         set { UserDefaults.standard.set(newValue, forKey: Self.lastReconnectCatchupKey) }
     }
 
-    /// F92 hardening (v0.10.24): dropped from 5 min to 30 s. The
-    /// original throttle was set to prevent reconnect-flap from
-    /// hammering the phone, but a 30 s window still prevents
-    /// hammering in practice while letting a user who launches +
-    /// quickly relaunches still re-fire the catch-up. Phone-side
-    /// catch-up dedupes anyway (idempotent FULL_HISTORY_SYNC_ON_DEMAND
-    /// request IDs collide and the phone discards the second).
+    /// Short persisted throttle complements reconnectCatchupInFlight: it
+    /// covers a second Connected event while a prior app process is exiting,
+    /// while still allowing a quick relaunch to retry an interrupted sweep.
     static let reconnectCatchupThrottle: TimeInterval = 30
     /// User-triggered full history sync progress state. Read by the
     /// AccountPanel "Full history sync" row to render a linear
@@ -99,6 +94,7 @@ final class SessionViewModel {
 
     /// Watchdog cleared 60s after the last chunk arrives.
     @ObservationIgnored private var fullSyncTimeoutTask: Task<Void, Never>?
+    @ObservationIgnored private var reconnectCatchupInFlight = false
     /// Throttle for `didBecomeActive` refresh fan-out (30s).
     private var lastForegroundRefresh: Date?
     @ObservationIgnored
@@ -789,6 +785,8 @@ final class SessionViewModel {
             // contactNames map — otherwise senders are only learned when
             // their chat happens to be open.
             ingestPushName(jid: m.senderJID, name: m.senderPushName)
+        case .groupJoined(let group, _, _):
+            ingestGroups([group])
         case .receipt(let r):
             persistReceipt(r)
         case .pollVote(let chat, let pmid, let voter, let hashes):
@@ -1127,14 +1125,10 @@ final class SessionViewModel {
         // Flag flipped on first HistorySync arrival — see T12 (ContentView).
     }
 
-    /// F92: on every `.connected` event AFTER the one-shot full history
-    /// backfill has already happened, request a small (7-day) catch-up
-    /// sync. WhatsApp clears its offline buffer for messages the phone
-    /// has already read, so messages missed while yawac was down don't
-    /// re-deliver via the normal `.connected` path. This catch-up bypasses
-    /// the server-side clearing by asking the phone directly via type-6
-    /// FULL_HISTORY_SYNC_ON_DEMAND. Throttled to 5 min so reconnect
-    /// flapping doesn't hammer.
+    /// Reconcile the newest messages of every known chat after reconnect with
+    /// correctly encoded per-chat HISTORY_SYNC_ON_DEMAND requests. Locally
+    /// recent chats go first, so the visible working set and newly active chats
+    /// recover while the remainder of the sweep continues.
     @MainActor
     func requestReconnectCatchupSyncIfNeeded() async {
         guard historyBackfillCompleted else {
@@ -1143,6 +1137,7 @@ final class SessionViewModel {
             return
         }
         guard let client else { return }
+        guard !reconnectCatchupInFlight else { return }
         let now = Date().timeIntervalSince1970
         let last = lastReconnectCatchupAt
         if now - last < Self.reconnectCatchupThrottle {
@@ -1151,21 +1146,40 @@ final class SessionViewModel {
             return
         }
         lastReconnectCatchupAt = now
-        NSLog("[yawac/catchup] sending FULL_HISTORY_SYNC_ON_DEMAND count=30 (days)")
-        do {
-            try await Task.detached { [client] in
-                try client.requestFullHistorySync(
-                    beforeChatJID: "",
-                    beforeMsgID: "",
-                    beforeFromMe: false,
-                    beforeTSUnix: 0,
-                    count: 30)
-            }.value
-            NSLog("[yawac/catchup] SendPeerMessage ok — waiting for HistorySync chunks")
-        } catch {
-            NSLog("[yawac/catchup] catch-up sync failed: %@",
-                  String(describing: error))
+        reconnectCatchupInFlight = true
+        defer { reconnectCatchupInFlight = false }
+
+        // Group discovery runs from the same Connected event. Give its merge a
+        // moment to insert groups that arrived while the app was offline.
+        try? await Task.sleep(for: .seconds(2))
+        guard let container = modelContext?.container else { return }
+        let chatJIDs: [String] = await Task.detached(priority: .utility) {
+            let context = ModelContext(container)
+            guard let chats = try? context.fetch(FetchDescriptor<PersistedChat>()) else {
+                return []
+            }
+            return chats.sorted { $0.lastTimestamp > $1.lastTimestamp }.map(\.jid)
+        }.value
+
+        NSLog("[yawac/catchup] recent-history sweep chats=%d count_per_chat=50",
+              chatJIDs.count)
+        var sent = 0
+        var failed = 0
+        for jid in chatJIDs {
+            do {
+                try await Task.detached(priority: .utility) { [client] in
+                    try client.requestRecentHistory(chatJID: jid, count: 50)
+                }.value
+                sent += 1
+            } catch {
+                failed += 1
+                NSLog("[yawac/catchup] recent-history failed chat=%@ error=%@",
+                      jid, String(describing: error))
+            }
+            try? await Task.sleep(for: .milliseconds(75))
         }
+        NSLog("[yawac/catchup] recent-history sweep complete sent=%d failed=%d",
+              sent, failed)
     }
 
     /// F119: gap sweep. Replies store their quoted target's chat + sender

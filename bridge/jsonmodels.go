@@ -25,8 +25,8 @@ type JMessage struct {
 type JLocationPayload struct {
 	Lat     float64 `json:"lat"`
 	Lng     float64 `json:"lng"`
-	Name    string  `json:"name,omitempty"`
-	Address string  `json:"address,omitempty"`
+	Name    string  `json:"name"`
+	Address string  `json:"address"`
 }
 
 type JContactPayload struct {
@@ -173,6 +173,33 @@ type JGroupInfoChanged struct {
 	LinkedParentJID   string `json:"linked_parent_jid,omitempty"`
 	IsDefaultSubGroup bool   `json:"is_default_subgroup,omitempty"`
 	Timestamp         int64  `json:"timestamp"`
+}
+
+// JGroupJoined carries the full group snapshot from whatsmeow's
+// JoinedGroup event. Timestamp is the notification time (when this
+// companion was added), not the group's original creation time.
+type JGroupJoined struct {
+	Group     JGroup `json:"group"`
+	ActorJID  string `json:"actor_jid,omitempty"`
+	Timestamp int64  `json:"timestamp"`
+}
+
+// JHistoryConversation carries chat-list metadata that surrounds the
+// messages in a HistorySync conversation. This is needed for conversations
+// whose newest item is a WhatsApp system stub (for example "added you"):
+// the bridge intentionally doesn't render every stub as a message, but the
+// conversation must still appear at the correct position in the chat list.
+type JHistoryConversation struct {
+	ChatJID   string `json:"chat_jid"`
+	Name      string `json:"name,omitempty"`
+	Timestamp int64  `json:"timestamp"`
+}
+
+// JFullHistorySyncResponse exposes the primary device's explicit acceptance
+// or rejection of a FULL_HISTORY_SYNC_ON_DEMAND request.
+type JFullHistorySyncResponse struct {
+	RequestID    string `json:"request_id"`
+	ResponseCode string `json:"response_code"`
 }
 
 // JJoinApprovalModeChanged carries a community/group's

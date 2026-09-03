@@ -1,15 +1,24 @@
 # Local whatsmeow patches
 
-We carry four upstream PRs that haven't merged into whatsmeow main.
+We carry four upstream PRs plus yawac-specific history fixes that haven't
+merged into whatsmeow main.
 Pinned via a `replace` directive in `bridge/go.mod` pointing at the
 github.com/vadika/whatsmeow fork. The fork mirrors upstream tip with
 cherry-picked patches on top.
 
-Current fork tip: `45fac9cd24ec` (pseudo-version
-`v0.0.0-20260707191601-45fac9cd24ec`), based on upstream
+Current fork tip: `48c3cb4e077d` (pseudo-version
+`v0.0.0-20260903162328-48c3cb4e077d`), based on upstream
 `b572e5bcb92b` (Jun 30 2026).
 
 ## Applied patches
+
+- **Reconnect and joined-group history fixes** — correct
+  `HISTORY_SYNC_ON_DEMAND` to send its anchor timestamp in milliseconds and
+  advertise inline-response support, preserve joined-group notification
+  timestamps, and download/decode `MessageHistoryBundle` payloads as
+  `GroupHistory` events. Also exposes type-6 response codes for diagnostics.
+  The timestamp and inline flag match the current WhatsApp Web request builder;
+  the previous seconds value made the anchor appear near January 1970.
 
 - **PR #1160** — binary decoder doesn't panic on malformed nodes.
   Upstream: https://github.com/tulir/whatsmeow/pull/1160

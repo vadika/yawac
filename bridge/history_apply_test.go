@@ -7,8 +7,10 @@ import (
 
 	waCommon "go.mau.fi/whatsmeow/proto/waCommon"
 	waE2E "go.mau.fi/whatsmeow/proto/waE2E"
+	waGroupHistory "go.mau.fi/whatsmeow/proto/waGroupHistory"
 	waHistoryPb "go.mau.fi/whatsmeow/proto/waHistorySync"
 	waWeb "go.mau.fi/whatsmeow/proto/waWeb"
+	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 	"google.golang.org/protobuf/proto"
 )
@@ -37,9 +39,10 @@ func TestApplyHistorySyncEmitsMessages(t *testing.T) {
 		},
 	}
 	conv := &waHistoryPb.Conversation{
-		ID:       proto.String(chatJID),
-		Name:     proto.String("Test Person"),
-		Messages: []*waHistoryPb.HistorySyncMsg{{Message: wm}},
+		ID:                    proto.String(chatJID),
+		Name:                  proto.String("Test Person"),
+		ConversationTimestamp: proto.Uint64(ts),
+		Messages:              []*waHistoryPb.HistorySyncMsg{{Message: wm}},
 	}
 	pname := &waHistoryPb.Pushname{
 		ID:       proto.String(chatJID),
@@ -70,6 +73,15 @@ func TestApplyHistorySyncEmitsMessages(t *testing.T) {
 		t.Fatalf("bad ts: %d", jm.Timestamp)
 	}
 
+	metadataEvent := sink.wait(t, "HistoryConversation", time.Second)
+	var metadata JHistoryConversation
+	if err := json.Unmarshal([]byte(metadataEvent.payload), &metadata); err != nil {
+		t.Fatal(err)
+	}
+	if metadata.ChatJID != chatJID || metadata.Name != "Test Person" || metadata.Timestamp != int64(ts) {
+		t.Fatalf("bad history conversation metadata: %+v", metadata)
+	}
+
 	e2 := sink.wait(t, "HistorySync", time.Second)
 	var m map[string]any
 	if err := json.Unmarshal([]byte(e2.payload), &m); err != nil {
@@ -77,5 +89,55 @@ func TestApplyHistorySyncEmitsMessages(t *testing.T) {
 	}
 	if cv, ok := m["conversations"].(float64); !ok || int(cv) != 1 {
 		t.Fatalf("bad conversations count: %v", m["conversations"])
+	}
+}
+
+func TestDispatchGroupHistoryEmitsSharedMessages(t *testing.T) {
+	c, _ := NewClient(t.TempDir() + "/group-history.db")
+	defer c.Close()
+	sink := newRecSink()
+	c.SetEventSink(sink)
+
+	chat := types.JID{User: "120363407507540222", Server: types.GroupServer}
+	c.dispatchGroupHistory(&events.GroupHistory{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{Chat: chat, IsGroup: true},
+			ID:            "bundle-1",
+		},
+		Data: &waGroupHistory.GroupHistory{Messages: []*waWeb.WebMessageInfo{{
+			Key: &waCommon.MessageKey{
+				ID:          proto.String("shared-1"),
+				RemoteJID:   proto.String(chat.String()),
+				Participant: proto.String("12345@s.whatsapp.net"),
+			},
+			MessageTimestamp: proto.Uint64(1_788_422_400),
+			Message:          &waE2E.Message{Conversation: proto.String("hello from shared history")},
+		}}},
+	})
+
+	e := sink.wait(t, "Message", time.Second)
+	var message JMessage
+	if err := json.Unmarshal([]byte(e.payload), &message); err != nil {
+		t.Fatal(err)
+	}
+	if message.ID != "shared-1" || message.ChatJID != chat.String() || message.Text != "hello from shared history" {
+		t.Fatalf("bad shared group message: %+v", message)
+	}
+}
+
+func TestLocationJSONKeepsEmptyRequiredStrings(t *testing.T) {
+	payload, err := json.Marshal(JLocationPayload{Lat: 59.3, Lng: 24.6})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]any
+	if err = json.Unmarshal(payload, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := decoded["name"]; !ok {
+		t.Fatal("location JSON omitted required name")
+	}
+	if _, ok := decoded["address"]; !ok {
+		t.Fatal("location JSON omitted required address")
 	}
 }
