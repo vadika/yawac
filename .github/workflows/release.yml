@@ -77,6 +77,7 @@ jobs:
           # Reuse sign_update from the Sparkle SwiftPM artifact already
           # required by the app. The Homebrew Sparkle cask may be disabled
           # independently of the package version used to build yawac.
+          xcodegen generate
           xcodebuild -resolvePackageDependencies \
             -project yawac.xcodeproj \
             -scheme yawac
