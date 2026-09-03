@@ -21,10 +21,9 @@ jobs:
         with:
           go-version-file: bridge/go.mod
           cache-dependency-path: bridge/go.sum
-      - name: Install XcodeGen + Sparkle
+      - name: Install XcodeGen
         run: |
           brew install xcodegen
-          brew install --cask sparkle
       - name: Install gomobile
         run: |
           go install golang.org/x/mobile/cmd/gomobile@latest
@@ -75,10 +74,16 @@ jobs:
           printf "%s" "$SPARKLE_ED_PRIVATE_KEY" > "$KEY_PATH"
           chmod 600 "$KEY_PATH"
           echo "SPARKLE_PRIVATE_KEY_FILE=$KEY_PATH" >> "$GITHUB_ENV"
-          # generate_keys + sign_update ship from the Sparkle cask in
-          # /opt/homebrew/Caskroom/sparkle/<version>/bin; surface the
-          # path so release-edge.sh can call them.
-          SIGN_UPDATE=$(find /opt/homebrew/Caskroom/sparkle -name sign_update | head -1)
+          # Reuse sign_update from the Sparkle SwiftPM artifact already
+          # required by the app. The Homebrew Sparkle cask may be disabled
+          # independently of the package version used to build yawac.
+          xcodebuild -resolvePackageDependencies \
+            -project yawac.xcodeproj \
+            -scheme yawac
+          SIGN_UPDATE=$(find "$HOME/Library/Developer/Xcode/DerivedData" \
+            -path "*/SourcePackages/artifacts/sparkle/Sparkle/bin/sign_update" \
+            -type f -print -quit)
+          test -x "$SIGN_UPDATE"
           echo "SIGN_UPDATE_BIN=$SIGN_UPDATE" >> "$GITHUB_ENV"
       - name: Build + sign + notarize + zip
         env:
