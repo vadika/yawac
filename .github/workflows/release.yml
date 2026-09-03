@@ -11,7 +11,10 @@ permissions:
   contents: write
 jobs:
   release:
-    runs-on: macos-15
+    # Sign and verify on the oldest currently supported Tahoe runner. Artifacts
+    # signed on the macOS 15 image can pass codesign there but fail validation
+    # on macOS 26 (observed for both 0.10.55 and the first 0.10.56 artifact).
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
         with:
