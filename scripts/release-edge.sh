@@ -48,7 +48,7 @@ APP_BINARY="${APP}/Contents/MacOS/${SCHEME}"
 
 # The release is distributed as a universal app. GitHub's arm64 runner can
 # otherwise archive only its active architecture with some Xcode versions.
-lipo -verify_arch arm64 x86_64 "$APP_BINARY"
+lipo "$APP_BINARY" -verify_arch arm64 x86_64
 
 # Optional: re-sign with Developer ID + notarize when CI passes the
 # secrets. Local dev runs skip this and keep ad-hoc.
@@ -118,7 +118,7 @@ trap 'rm -rf "$VERIFY_DIR"' EXIT
 ditto -x -k "$ZIP" "$VERIFY_DIR"
 VERIFY_APP="${VERIFY_DIR}/${SCHEME}.app"
 codesign --verify --deep --strict --verbose=2 "$VERIFY_APP"
-lipo -verify_arch arm64 x86_64 "${VERIFY_APP}/Contents/MacOS/${SCHEME}"
+lipo "${VERIFY_APP}/Contents/MacOS/${SCHEME}" -verify_arch arm64 x86_64
 rm -rf "$VERIFY_DIR"
 trap - EXIT
 
