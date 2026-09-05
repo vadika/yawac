@@ -22,6 +22,8 @@ xcodebuild \
     -scheme "$SCHEME" \
     -configuration Release \
     -archivePath "$ARCHIVE" \
+    -skipPackagePluginValidation \
+    -skipMacroValidation \
     archive \
     ARCHS="arm64 x86_64" \
     ONLY_ACTIVE_ARCH=NO \
