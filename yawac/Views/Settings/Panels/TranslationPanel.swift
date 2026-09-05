@@ -145,12 +145,12 @@ struct TranslationPanel: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 8) {
-                    Text("Qwen2.5-3B-Instruct")
+                    Text("TranslateGemma 4B")
                         .font(.system(size: 13.5, weight: .semibold))
                         .foregroundStyle(Theme.text)
                     installedBadge
                 }
-                Text("4-bit · on-device · 1.9 GB")
+                Text("4-bit · on-device · 2.2 GB")
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(Theme.textFaint)
                 modelStateBody

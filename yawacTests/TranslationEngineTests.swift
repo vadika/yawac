@@ -2,6 +2,14 @@ import XCTest
 @testable import yawac
 
 final class TranslationEngineTests: XCTestCase {
+    func testTranslationContextUsesTranslateGemmaLanguageKeys() {
+        let context = TranslationEngine.translationContext(
+            source: "fi_FI", target: "en")
+
+        XCTAssertEqual(context["source_lang_code"], "fi-FI")
+        XCTAssertEqual(context["target_lang_code"], "en")
+    }
+
     func testTranslateGermanToEnglish() async throws {
         guard ProcessInfo.processInfo
             .environment["YAWAC_RUN_ML_TESTS"] == "1" else {

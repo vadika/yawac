@@ -8,9 +8,12 @@ settings:
     SWIFT_VERSION: "5.10"
     ENABLE_HARDENED_RUNTIME: YES
 packages:
-  MLXSwiftExamples:
-    url: https://github.com/ml-explore/mlx-swift-examples
-    from: "2.29.1"
+  MLXSwiftLM:
+    url: https://github.com/ml-explore/mlx-swift-lm
+    revision: e5d6cfb182b24f460de44990991b6fe32bc74414
+  SwiftTransformers:
+    url: https://github.com/huggingface/swift-transformers
+    from: "1.3.4"
   COpus:
     path: Packages/COpus
   Sparkle:
@@ -29,10 +32,12 @@ targets:
     dependencies:
       - framework: build/Bridge.xcframework
         embed: true
-      - package: MLXSwiftExamples
+      - package: MLXSwiftLM
         product: MLXLLM
-      - package: MLXSwiftExamples
+      - package: MLXSwiftLM
         product: MLXLMCommon
+      - package: SwiftTransformers
+        product: Tokenizers
       - package: COpus
         product: Opus
       - package: COpus
@@ -66,8 +71,8 @@ targets:
         NSLocationWhenInUseUsageDescription: yawac uses your location only when you choose Send current location.
         LSMinimumSystemVersion: "14.0"
         CFBundleDisplayName: yawac
-        CFBundleShortVersionString: "0.10.56"
-        CFBundleVersion: "139"
+        CFBundleShortVersionString: "0.10.57"
+        CFBundleVersion: "140"
         ATSApplicationFontsPath: Fonts
         CFBundleIconName: AppIcon
         # F72: prevent macOS from spawning a second yawac instance when

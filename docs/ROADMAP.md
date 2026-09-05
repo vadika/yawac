@@ -213,6 +213,13 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **TranslateGemma on-device translation** (v0.10.57) —
+  Replaced the general-purpose Qwen 2.5 3B model with Google's
+  translation-specialized TranslateGemma 4B 4-bit checkpoint. Translation
+  now uses the model's structured source/target language metadata and chat
+  template. The downloader streams the 2.2 GB weights to disk and retains the
+  old model until the replacement is installed successfully.
+
 - ✅ **F128 — verified reconnect catch-up + joined-group shared history** (v0.10.56) —
   Live recurrence disproved F127's type-6 configuration diagnosis: the primary
   silently ignored repeated `FULL_HISTORY_SYNC_ON_DEMAND` requests. Current

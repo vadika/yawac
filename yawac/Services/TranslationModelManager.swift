@@ -16,17 +16,16 @@ final class TranslationModelManager {
     private(set) var state: State = .absent
 
     private let root: URL
-    /// Qwen 2.5 3B Instruct quantized to 4-bit. Text-only, multilingual
-    /// (DE/FI/EN strong), single safetensors shard (~1.8 GB), proven
-    /// loader path in mlx-swift 2.29.x. Previously tried gemma-3-4b-it
-    /// but mlx-community's checkpoint ships the multimodal vocab
-    /// (262208) which MLX's Gemma3TextModel rejects.
-    private static let repoSlug = "mlx-community/Qwen2.5-3B-Instruct-4bit"
-    private static let dirName = "Qwen2.5-3B-Instruct-4bit"
+    /// Google's translation-specialized Gemma 3 4B checkpoint, quantized
+    /// to 4-bit for on-device inference with MLX (~2.2 GB).
+    private static let repoSlug = "mlx-community/translategemma-4b-it-4bit"
+    private static let dirName = "translategemma-4b-it-4bit"
+    private static let legacyDirName = "Qwen2.5-3B-Instruct-4bit"
     /// Files we treat as the minimum-viable manifest. Any of these
     /// missing keeps the state at `.absent`.
     private static let requiredFiles = [
         "config.json",
+        "chat_template.jinja",
         "tokenizer.json",
         "tokenizer_config.json",
     ]
@@ -50,6 +49,11 @@ final class TranslationModelManager {
 
     var localDir: URL {
         root.appendingPathComponent("models/\(Self.dirName)",
+                                    isDirectory: true)
+    }
+
+    private var legacyDir: URL {
+        root.appendingPathComponent("models/\(Self.legacyDirName)",
                                     isDirectory: true)
     }
 
@@ -105,25 +109,31 @@ final class TranslationModelManager {
 
         state = .downloading(progress: 0)
         let files = Self.requiredFiles + [
+            "added_tokens.json",
+            "generation_config.json",
             "model.safetensors.index.json",
             "model.safetensors",
+            "special_tokens_map.json",
+            "tokenizer.model",
         ]
 
         for (idx, name) in files.enumerated() {
             let url = URL(string:
                 "https://huggingface.co/\(Self.repoSlug)/resolve/main/\(name)")!
             do {
-                let (data, response) = try await URLSession.shared.data(from: url)
+                // A download task writes to a temporary file instead of
+                // retaining the multi-gigabyte weight shard in memory.
+                let (downloaded, response) = try await URLSession.shared
+                    .download(from: url)
                 if let http = response as? HTTPURLResponse,
-                   http.statusCode == 404 {
-                    if name == "model.safetensors.index.json" {
-                        continue
-                    }
-                    state = .failed("missing \(name) (404)")
+                   !(200 ..< 300).contains(http.statusCode) {
+                    state = .failed("\(name): HTTP \(http.statusCode)")
                     try? fm.removeItem(at: tempDir)
                     return
                 }
-                try data.write(to: tempDir.appendingPathComponent(name))
+                try fm.moveItem(
+                    at: downloaded,
+                    to: tempDir.appendingPathComponent(name))
                 state = .downloading(
                     progress: Double(idx + 1) / Double(files.count))
             } catch {
@@ -141,11 +151,15 @@ final class TranslationModelManager {
             state = .failed("rename: \(error.localizedDescription)")
             return
         }
+        // Keep the previous model until the replacement is complete, then
+        // reclaim its disk space.
+        try? fm.removeItem(at: legacyDir)
         refreshState()
     }
 
     func delete() async {
         try? FileManager.default.removeItem(at: localDir)
+        try? FileManager.default.removeItem(at: legacyDir)
         state = .absent
     }
 }
