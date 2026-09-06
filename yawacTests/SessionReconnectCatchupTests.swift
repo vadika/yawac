@@ -1,119 +1,135 @@
+import Foundation
 import XCTest
 @testable import yawac
 
-/// Verifies the F92 reconnect catch-up sync gate on SessionViewModel.
-///   - When `historyBackfillCompleted` is false, the method is a no-op
-///     (first-pair flow owns the sync).
-///   - When `client` is nil, the method is a no-op (no connection to use).
-///   - When both are satisfied but the throttle window hasn't expired,
-///     the method skips and leaves the timestamp unchanged.
-///   - When the throttle window has expired, the method advances
-///     `lastReconnectCatchupAt` to ~now (even if the send fails due to
-///     no real bridge underneath).
-///
-/// Implementation order inside `requestReconnectCatchupSyncIfNeeded`:
-///   1. guard historyBackfillCompleted
-///   2. guard client
-///   3. throttle check
-///   4. advance timestamp + send
+/// Regression coverage for targeted recent-history recovery. Automatic
+/// reconnect fan-out used to issue one peer request per stored chat, waking the
+/// primary phone repeatedly. Recovery now runs only for a chat the user opens
+/// (or a newly joined group) and is deduplicated for the app session.
 @MainActor
 final class SessionReconnectCatchupTests: XCTestCase {
-
-    private static let catchupKey = "yawac.lastReconnectCatchupAt"
-    private static let flagKey    = "historyBackfillCompleted"
+    private static let flagKey = "historyBackfillCompleted"
 
     override func setUp() {
         super.setUp()
-        UserDefaults.standard.removeObject(forKey: Self.catchupKey)
         UserDefaults.standard.removeObject(forKey: Self.flagKey)
     }
 
     override func tearDown() {
-        UserDefaults.standard.removeObject(forKey: Self.catchupKey)
         UserDefaults.standard.removeObject(forKey: Self.flagKey)
         super.tearDown()
     }
 
-    // MARK: - no-op paths
-
-    func testSkipsWhenInitialBackfillIncomplete() async {
-        // historyBackfillCompleted = false → catch-up is a no-op.
-        UserDefaults.standard.set(false, forKey: Self.flagKey)
-        let session = SessionViewModel()
-        await session.requestReconnectCatchupSyncIfNeeded()
-        // lastReconnectCatchupAt should remain 0 because the function early-returned.
-        XCTAssertEqual(
-            UserDefaults.standard.double(forKey: Self.catchupKey), 0,
-            "catch-up must not advance the timestamp when the one-shot backfill hasn't completed")
-    }
-
-    func testSkipsWhenClientNil() async {
-        // No client set on the session → no-op (guard client fires after guard historyBackfillCompleted).
-        UserDefaults.standard.set(true, forKey: Self.flagKey)
-        let session = SessionViewModel()
-        await session.requestReconnectCatchupSyncIfNeeded()
-        XCTAssertEqual(
-            UserDefaults.standard.double(forKey: Self.catchupKey), 0,
-            "catch-up must not advance the timestamp when client is nil")
-    }
-
-    func testSkipsWhenWithinThrottleWindow() async throws {
-        // Set lastReconnectCatchupAt to "10 seconds ago" and historyBackfillCompleted true.
-        // 10 s is well inside the new 30 s throttle (F92 hardening v0.10.24).
-        // Use a real stub so the client guard passes; the throttle fires before the send.
-        UserDefaults.standard.set(true, forKey: Self.flagKey)
-        let recentTs = Date().timeIntervalSince1970 - 10   // 10 s ago — inside 30 s throttle
-        UserDefaults.standard.set(recentTs, forKey: Self.catchupKey)
-
-        let stub = try StubBackfillClient.make()
+    func testSkipsWhenInitialBackfillIncomplete() async throws {
+        let stub = try StubRecentHistoryClient.make()
         let session = SessionViewModel()
         session.client = stub
-        await session.requestReconnectCatchupSyncIfNeeded()
 
-        // Timestamp must remain unchanged — no send occurred.
-        let after = UserDefaults.standard.double(forKey: Self.catchupKey)
-        XCTAssertEqual(after, recentTs, accuracy: 0.5,
-                       "10s ago is inside the 30s throttle — timestamp should not advance")
-        // And no requestFullHistorySync was called on the stub.
-        XCTAssertEqual(stub.snapshot().count, 0,
-                       "no history-sync IQ should be sent within the throttle window")
+        await session.requestRecentHistoryIfNeeded(for: "12345@s.whatsapp.net")
+
+        XCTAssertEqual(stub.capture.snapshot().count, 0)
     }
 
-    // MARK: - fires path
-
-    func testFiresWhenThrottleExpiredAndStampsNow() async throws {
-        // Set lastReconnectCatchupAt to "10 minutes ago" (past throttle).
-        // historyBackfillCompleted true, stub client attached.
-        // The function advances the timestamp BEFORE the send, so even
-        // though the stub doesn't error, we can assert the stamp moved.
+    func testRequestsOnlyTheRelevantChatOncePerSession() async throws {
         UserDefaults.standard.set(true, forKey: Self.flagKey)
-        let tenMinAgo = Date().timeIntervalSince1970 - 600
-        UserDefaults.standard.set(tenMinAgo, forKey: Self.catchupKey)
-
-        let stub = try StubBackfillClient.make()
+        let stub = try StubRecentHistoryClient.make()
         let session = SessionViewModel()
         session.client = stub
-        await session.requestReconnectCatchupSyncIfNeeded()
 
-        let after = UserDefaults.standard.double(forKey: Self.catchupKey)
-        XCTAssertGreaterThan(after, tenMinAgo + 500,
-                             "lastReconnectCatchupAt must advance to ~now after throttle expires")
-        // Stub captured one call with count=7.
-        let snap = stub.snapshot()
-        XCTAssertEqual(snap.count, 1, "exactly one requestFullHistorySync should fire")
-        XCTAssertEqual(snap.chatJID, "",  "catch-up uses empty anchor chatJID")
-        XCTAssertEqual(snap.msgID,   "",  "catch-up uses empty anchor msgID")
-        XCTAssertEqual(snap.fromMe,  false)
-        XCTAssertEqual(snap.tsUnix,  0,   "catch-up uses zero anchor timestamp")
+        await session.requestRecentHistoryIfNeeded(for: "12345@s.whatsapp.net")
+        await session.requestRecentHistoryIfNeeded(for: "12345@s.whatsapp.net")
+
+        let snapshot = stub.capture.snapshot()
+        XCTAssertEqual(snapshot.count, 1)
+        XCTAssertEqual(snapshot.chatJIDs, ["12345@s.whatsapp.net"])
+        XCTAssertEqual(snapshot.limits, [50])
     }
 
-    func testLogoutResetsThrottleTimestamp() async {
-        // Verify that logout() zeroes lastReconnectCatchupAt (so re-pair starts fresh).
-        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: Self.catchupKey)
+    func testDifferentRelevantChatsEachGetOneRequest() async throws {
+        UserDefaults.standard.set(true, forKey: Self.flagKey)
+        let stub = try StubRecentHistoryClient.make()
         let session = SessionViewModel()
-        await session.logout()
+        session.client = stub
+
+        await session.requestRecentHistoryIfNeeded(for: "12345@s.whatsapp.net")
+        await session.requestRecentHistoryIfNeeded(for: "67890@s.whatsapp.net")
+
         XCTAssertEqual(
-            UserDefaults.standard.double(forKey: Self.catchupKey), 0,
-            "logout() must reset the catch-up throttle timestamp")
+            stub.capture.snapshot().chatJIDs,
+            ["12345@s.whatsapp.net", "67890@s.whatsapp.net"])
+    }
+
+    func testFailedRequestCanRetry() async throws {
+        UserDefaults.standard.set(true, forKey: Self.flagKey)
+        let stub = try StubRecentHistoryClient.make(failFirst: true)
+        let session = SessionViewModel()
+        session.client = stub
+
+        await session.requestRecentHistoryIfNeeded(for: "12345@s.whatsapp.net")
+        await session.requestRecentHistoryIfNeeded(for: "12345@s.whatsapp.net")
+
+        XCTAssertEqual(stub.capture.snapshot().count, 2)
+    }
+}
+
+final class StubRecentHistoryCapture: @unchecked Sendable {
+    struct Snapshot {
+        var count = 0
+        var chatJIDs: [String] = []
+        var limits: [Int] = []
+    }
+
+    private let lock = NSLock()
+    private var state = Snapshot()
+    private var failNext: Bool
+
+    init(failFirst: Bool) {
+        failNext = failFirst
+    }
+
+    func record(chatJID: String, count: Int) throws {
+        lock.lock()
+        defer { lock.unlock() }
+        state.count += 1
+        state.chatJIDs.append(chatJID)
+        state.limits.append(count)
+        if failNext {
+            failNext = false
+            throw StubError.requestFailed
+        }
+    }
+
+    func snapshot() -> Snapshot {
+        lock.lock()
+        defer { lock.unlock() }
+        return state
+    }
+
+    private enum StubError: Error {
+        case requestFailed
+    }
+}
+
+@MainActor
+final class StubRecentHistoryClient: WAClient {
+    nonisolated let capture: StubRecentHistoryCapture
+
+    private init(dbPath: String, failFirst: Bool) throws {
+        capture = StubRecentHistoryCapture(failFirst: failFirst)
+        try super.init(dbPath: dbPath)
+    }
+
+    static func make(failFirst: Bool = false) throws -> StubRecentHistoryClient {
+        let dir = NSTemporaryDirectory()
+            .appending("yawac-recent-history-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(
+            atPath: dir, withIntermediateDirectories: true)
+        return try StubRecentHistoryClient(
+            dbPath: dir + "/state.db", failFirst: failFirst)
+    }
+
+    override nonisolated func requestRecentHistory(chatJID: String,
+                                                   count: Int) throws {
+        try capture.record(chatJID: chatJID, count: count)
     }
 }

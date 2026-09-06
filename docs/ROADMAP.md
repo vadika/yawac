@@ -213,6 +213,14 @@ the important list is materially shorter.
 Kept here for context — flip back to open only if a regression
 surfaces.
 
+- ✅ **F129 — targeted reconnect history recovery** (v0.10.58) —
+  Fixed the v0.10.56 regression where every reconnect sent an on-demand
+  history request for every stored chat. Runtime evidence showed 728 peer
+  requests from one reconnect, repeatedly waking the primary phone and causing
+  false alerts and battery drain. Automatic recovery is now scoped to the chat
+  the user opens and newly joined groups, deduplicated once per chat per app
+  session; failed requests remain retryable.
+
 - ✅ **TranslateGemma on-device translation** (v0.10.57) —
   Replaced the general-purpose Qwen 2.5 3B model with Google's
   translation-specialized TranslateGemma 4B 4-bit checkpoint. Translation
@@ -226,8 +234,9 @@ surfaces.
   WhatsApp Web instead builds per-chat `HISTORY_SYNC_ON_DEMAND` requests with
   `oldestMsgTimestampMS` in milliseconds and
   `supportInlineResponse=true`; whatsmeow used seconds and omitted the flag.
-  The fork now matches those fields, yawac runs a throttled per-chat
-  future-anchor reconciliation sweep, and newly joined chats are prioritized.
+  The fork now matches those fields. yawac initially ran a reconnect-wide
+  per-chat future-anchor reconciliation sweep; F129 replaced that battery-heavy
+  fan-out with targeted on-demand recovery.
   whatsmeow also decodes the `MessageHistoryBundle`/`GroupHistory` payload and
   preserves `JoinedGroup` timestamps; yawac consumes both that event and
   conversation-level history timestamps. Live verification recovered two
