@@ -170,6 +170,8 @@ struct AccountPanel: View {
             }
             return "\(s.chunks) chunks • \(s.messages) messages"
         }
+        if let failure = s.failure { return "History request failed: \(failure)" }
+        if let completion = s.completion { return completion }
         if s.chunks > 0 {
             if s.fresh + s.dupe > 0 {
                 return "Last run: \(s.fresh) new, \(s.dupe) already had across \(s.chunks) chunks"
@@ -180,7 +182,7 @@ struct AccountPanel: View {
             // Tap fired + 60 s silence + zero chunks. Phone either
             // rate-limited the FULL_HISTORY_SYNC_ON_DEMAND request or
             // had nothing newer than what we already hold.
-            return "Phone replied with no new history"
+            return "No new history observed"
         }
         return "Pull older messages from phone"
     }

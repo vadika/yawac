@@ -148,7 +148,9 @@ final class MessageIndexTests: XCTestCase {
                 ZQUOTEDTEXTSNIPPET TEXT,
                 ZSENDERPUSHNAME TEXT,
                 ZFROMME INTEGER DEFAULT 0,
-                ZSENDERJID TEXT
+                ZSENDERJID TEXT,
+                ZLOCALLYDELETED INTEGER DEFAULT 0,
+                ZREVOKEDAT REAL
             );
         """, nil, nil, nil)
         for (id, jid, ts, kind, txt, cap, quo, sender) in rows {
@@ -199,4 +201,24 @@ final class MessageIndexTests: XCTestCase {
         await idx.bootstrapIfNeeded()
         XCTAssertEqual(idx.countAll(), 1, "second run must not duplicate")
     }
+    func testReconciliationStreamsLargeSourceAndRemainsIdempotent() throws {
+        seedZPersistedMessage(tmpDB, [])
+        var db: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(tmpDB.path, &db), SQLITE_OK)
+        defer { sqlite3_close(db) }
+        XCTAssertEqual(sqlite3_exec(db, """
+            WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x < 20000)
+            INSERT INTO ZPERSISTEDMESSAGE (ZID, ZCHATJID, ZTIMESTAMP, ZKIND, ZTEXT)
+            SELECT 'm' || x, 'chat' || (x % 100), x, 'text', 'searchable text ' || x FROM n;
+            """, nil, nil, nil), SQLITE_OK)
+        let index = MessageIndex(storeURL: tmpDB)
+        let start = Date()
+        try index.reconcile()
+        let elapsed = Date().timeIntervalSince(start)
+        XCTAssertEqual(index.countAll(), 20000)
+        try index.reconcile()
+        XCTAssertEqual(index.countAll(), 20000)
+        print("index benchmark: 20000 rows across 100 chats, streamed repair \(elapsed) seconds")
+    }
+
 }

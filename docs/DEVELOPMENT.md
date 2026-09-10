@@ -17,7 +17,7 @@ Local build, project layout, troubleshooting, and release flow for `yawac`.
 │                    │ AsyncStream<Event>      │
 │  ┌─────────────────▼──────────────────────┐  │
 │  │  WAClient (@MainActor wrapper)         │  │
-│  │  • multicast event fanout              │  │
+│  │  • one session event consumer              │  │
 │  │  • Codable JSON ⇄ BridgeMessage etc.   │  │
 │  └─────────────────┬──────────────────────┘  │
 └────────────────────┼─────────────────────────┘
@@ -36,7 +36,7 @@ Local build, project layout, troubleshooting, and release flow for `yawac`.
 └──────────────────────────────────────────────┘
 ```
 
-The Go bridge exposes a flat, gomobile-friendly API: basic types (string, int, []byte) and JSON strings for complex payloads. Swift wraps the generated Objective-C classes in a `@MainActor` `WAClient` actor that publishes a multicast `AsyncStream<Event>`.
+The Go bridge exposes a flat, gomobile-friendly API: basic types (string, int, []byte) and JSON strings for complex payloads. Swift wraps the generated Objective-C classes in a `@MainActor` `WAClient` actor whose `AsyncStream<Event>` is consumed by the session. See [ARCHITECTURE.md](ARCHITECTURE.md) for state and persistence ownership.
 
 ## Requirements
 
@@ -101,28 +101,20 @@ The `yawac.xcodeproj` directory is generated from `project.yml`; do not commit i
 - **Build hangs at "Compiling whatsmeow"** — first gomobile bind takes 5–15 minutes (cross-compiles whatsmeow + transitive deps for arm64 + x86_64). Subsequent builds are cached.
 - **Metal toolchain missing** during MLX compile — run `xcodebuild -downloadComponent MetalToolchain` once, then retry.
 
-## Edge release (automatic, every commit on `main`)
+## Release
 
-`.github/workflows/release.yml` builds, ad-hoc signs, and uploads a `.zip` to GitHub Releases tagged `0.1.0+<short-sha>` on every push to `main` that isn't ignored by `paths-ignore` (Casks, docs, `*.md`). The workflow then rewrites `Casks/yawac.rb` with the new version + sha256 and commits the bump back with `[skip ci]`. Users on `brew install --cask vadika/yawac/yawac` pull the latest commit's build.
+Releases are triggered by pushing a `v*` tag. Bump `CFBundleShortVersionString`
+and `CFBundleVersion` in `project.yml`, regenerate the project (which also
+updates `yawac/Info.plist`), run validation, and commit. Push `main` and the
+matching version tag.
 
-The cask `postflight` strips `com.apple.quarantine` since the build is ad-hoc signed rather than Developer-ID signed.
+`.github/workflows/release.yml` builds a universal app on macOS 26, signs it
+with Developer ID, submits it for notarization, verifies the packaged app,
+and publishes the zip and signed Sparkle appcast. The workflow then updates
+`Casks/yawac.rb` and pushes the cask commit to `main`. Fast-forward the local
+branch after the workflow completes.
 
-## Notarized release (manual)
-
-For a Gatekeeper-clean, notarized `.app` outside the brew channel:
-
-1. Have an active **Apple Developer ID Application** certificate in your keychain.
-2. Create a notarytool keychain profile once:
-
-       xcrun notarytool store-credentials yawac \
-           --apple-id you@example.com \
-           --team-id ABCDE12345 \
-           --password app-specific-pw
-
-3. Run:
-
-       export DEV_ID_APPLICATION="Developer ID Application: Your Name (ABCDE12345)"
-       export NOTARY_PROFILE=yawac
-       ./scripts/release.sh
-
-The script builds the XCFramework, archives the app, signs it with the Developer ID, submits to Apple's notary service, waits for completion, and staples the resulting ticket. Output: `build/export/yawac.app`.
+Manual workflow dispatch builds and validates a development artifact without
+creating a public release. `scripts/release-edge.sh` is the shared build and
+packaging entry point; signing and notarization credentials are supplied by
+CI secrets.

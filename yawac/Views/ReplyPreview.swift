@@ -120,28 +120,14 @@ private struct ReplyThumb: View {
     let kind: String
 
     var body: some View {
-        // Shared in-memory cache + coalesced revision bump: no
-        // per-instance @State / .task means staged-reply previews don't
-        // flash the placeholder on a disk hit (F12). Subscribe to the
-        // per-type revision matching this reply's media kind.
-        let cache = ThumbnailCache.shared
-        let _ = (kind == "video") ? cache.videoRevision : cache.imageRevision
-        let img: NSImage? = kind == "video"
-            ? cache.videoImage(forPath: path)
-            : cache.image(forPath: path)
-        ZStack {
-            if let img {
-                Image(nsImage: img)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-            } else {
-                Theme.surfaceAlt
-            }
-            if kind == "video" {
-                Image(systemName: "play.fill")
-                    .scaledIcon(10, weight: .bold)
-                    .foregroundStyle(.white)
-                    .shadow(radius: 1)
+        ResourceThumbnail(source: kind == "video" ? .video(path) : .image(path)) { image in
+            ZStack {
+                if let image { Image(nsImage: image).resizable().aspectRatio(contentMode: .fill) }
+                else { Theme.surfaceAlt }
+                if kind == "video" {
+                    Image(systemName: "play.fill").scaledIcon(10, weight: .bold)
+                        .foregroundStyle(.white).shadow(radius: 1)
+                }
             }
         }
     }

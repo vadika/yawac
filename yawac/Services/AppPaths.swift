@@ -1,6 +1,23 @@
 import Foundation
 
 enum AppPaths {
+    static var isRunningTests: Bool {
+        ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+            || ProcessInfo.processInfo.arguments.first?.hasSuffix("/xctest") == true
+    }
+
+    /// One configured source-store location, including an isolated XCTest host.
+    static let messageStoreURL: URL = {
+        if isRunningTests {
+            let directory = FileManager.default.temporaryDirectory
+                .appendingPathComponent("yawac-test-host-" + UUID().uuidString)
+            try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            return directory.appendingPathComponent("default.store")
+        }
+        return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("default.store")
+    }()
+
     static func databaseURL() throws -> URL {
         let support = try FileManager.default.url(
             for: .applicationSupportDirectory,

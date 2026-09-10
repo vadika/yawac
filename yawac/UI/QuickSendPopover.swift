@@ -45,42 +45,7 @@ struct QuickSendPopover: View {
             chatJID: jid,
             displayName: resolvedName(for: jid),
             send: { [session] chatJID, body in
-                // F87: lazy read so the popover doesn't carry a stale
-                // WAClient reference across logout → re-pair churn. The
-                // closure is @Sendable so we hop to MainActor to read the
-                // currently-bound client + its bare JID (both are
-                // MainActor-isolated SessionViewModel/WAClient state).
-                let (client, ownJID): (WAClient, String) = try await MainActor.run {
-                    guard let c = session.client else { throw NotPairedError() }
-                    return (c, c.ownJID)
-                }
-                let result = try await Task.detached(priority: .userInitiated) {
-                    try client.sendText(chatJID, body)
-                }.value
-                // F87: yawac is the originator of this send and whatsmeow doesn't
-                // echo own outbound sends back as events.Message. Inject a
-                // synthetic .message into the bridge event stream so the chat
-                // list + any open ConversationView pick it up via their existing
-                // subscribers — same downstream behavior as a real inbound msg.
-                let synthetic = BridgeMessage(
-                    id: result.messageID,
-                    chatJID: chatJID,
-                    senderJID: ownJID,
-                    senderPushName: nil,
-                    fromMe: true,
-                    timestamp: result.timestamp,
-                    kind: "text",
-                    text: body,
-                    media: nil,
-                    poll: nil,
-                    quoted: nil,
-                    isForwarded: false,
-                    location: nil,
-                    locationSequence: nil,
-                    contact: nil,
-                    contactsArray: nil,
-                    isViewOnce: false)
-                client.dispatchSynthetic(.message(synthetic))
+                _ = try await session.sendText(chatJID: chatJID, body: body)
             },
             onClose: onClose,
             onBack: { selectedChatJID = nil })

@@ -28,6 +28,35 @@ import SQLite3
 /// don't immediately fail.
 enum SwiftDataMaintenance {
 
+    /// CoreData history is retained for seven days; yawac does not use
+    /// CloudKit history consumers. A failed prune rolls back both tables.
+    static func pruneHistory(at url: URL, keepDays: Int) throws {
+        var handle: OpaquePointer?
+        guard sqlite3_open_v2(url.path, &handle, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK,
+              let db = handle else {
+            if let handle { sqlite3_close(handle) }
+            throw NSError(domain: "yawac.storage", code: 1, userInfo: [NSLocalizedDescriptionKey: "Cannot open history store"])
+        }
+        defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 2000)
+        func execute(_ sql: String) throws {
+            guard sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK else {
+                throw NSError(domain: "yawac.storage", code: Int(sqlite3_errcode(db)),
+                              userInfo: [NSLocalizedDescriptionKey: String(cString: sqlite3_errmsg(db))])
+            }
+        }
+        let cutoff = Date().addingTimeInterval(-Double(keepDays) * 86400).timeIntervalSinceReferenceDate
+        try execute("BEGIN IMMEDIATE")
+        do {
+            try execute("DELETE FROM ACHANGE WHERE ZTRANSACTIONID IN (SELECT Z_PK FROM ATRANSACTION WHERE ZTIMESTAMP < \(cutoff))")
+            try execute("DELETE FROM ATRANSACTION WHERE ZTIMESTAMP < \(cutoff)")
+            try execute("COMMIT")
+        } catch {
+            try? execute("ROLLBACK")
+            throw error
+        }
+    }
+
     /// UserDefaults key recording the last successful VACUUM time
     /// (epoch seconds). Missing key = never run.
     static let lastVacuumKey = "yawac.lastDBVacuum"

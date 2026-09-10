@@ -2,20 +2,7 @@ import XCTest
 import SwiftData
 @testable import yawac
 
-/// Verifies the one-shot history backfill gate on SessionViewModel.
-///   - When the flag is unset and a globally-oldest PersistedMessage exists,
-///     `requestHistoryBackfillIfNeeded` issues exactly one
-///     `requestFullHistorySync` IQ anchored at that row.
-///   - When the flag is already set, the call is a no-op.
-///   - When the flag is unset and the SwiftData store is empty (fresh
-///     install), the IQ STILL fires — with empty anchor strings. The
-///     type-6 FULL_HISTORY_SYNC_ON_DEMAND packet doesn't use the anchor
-///     fields (bridge sets HistoryFromTimestamp = now); they exist only
-///     for source compatibility. F56 (v0.9.66) inverted the old v0.8.1
-///     short-circuit so fresh installs actually get deep history instead
-///     of only the INITIAL_BOOTSTRAP chunk.
-///   - The flag flip happens on the first HistorySync arrival in
-///     ContentView (T12), not inside `requestHistoryBackfillIfNeeded`.
+/// Full history uses a duration, independently of any locally stored anchor.
 @MainActor
 final class SessionViewModelBackfillTests: XCTestCase {
 
@@ -61,10 +48,7 @@ final class SessionViewModelBackfillTests: XCTestCase {
 
         let snap = stub.snapshot()
         XCTAssertEqual(snap.count, 1)
-        XCTAssertEqual(snap.chatJID, "1@s.whatsapp.net")
-        XCTAssertEqual(snap.msgID, "MSG-OLDEST")
-        XCTAssertEqual(snap.fromMe, false)
-        XCTAssertEqual(snap.tsUnix, 1_700_000_000)
+        XCTAssertEqual(snap.durationDays, 3650)
         // Flag stays false until the first HistorySync arrives (T12 flips it
         // from ContentView). Requesting the IQ alone does not flip it.
         XCTAssertFalse(UserDefaults.standard.bool(forKey: Self.flagKey))
@@ -94,7 +78,7 @@ final class SessionViewModelBackfillTests: XCTestCase {
 
         let snap = stub.snapshot()
         XCTAssertEqual(snap.count, 0)
-        XCTAssertNil(snap.chatJID)
+        XCTAssertNil(snap.durationDays)
     }
 
     func testEmptyPersistedStoreStillIssuesRequest() async throws {
@@ -114,10 +98,7 @@ final class SessionViewModelBackfillTests: XCTestCase {
 
         let snap = stub.snapshot()
         XCTAssertEqual(snap.count, 1)
-        XCTAssertEqual(snap.chatJID, "")
-        XCTAssertEqual(snap.msgID, "")
-        XCTAssertEqual(snap.fromMe, false)
-        XCTAssertEqual(snap.tsUnix, 0)
+        XCTAssertEqual(snap.durationDays, 3650)
         // Flag stays false until the first HistorySync arrives (T12 flips
         // it from ContentView). Requesting the IQ alone does not flip it.
         XCTAssertFalse(UserDefaults.standard.bool(forKey: Self.flagKey))
@@ -138,22 +119,15 @@ final class SessionViewModelBackfillTests: XCTestCase {
 final class StubBackfillCapture: @unchecked Sendable {
     struct Snapshot {
         var count: Int = 0
-        var chatJID: String?
-        var msgID: String?
-        var fromMe: Bool?
-        var tsUnix: Int64?
+        var durationDays: Int32?
     }
     private let lock = NSLock()
     private var state = Snapshot()
 
-    func record(chatJID: String, msgID: String,
-                fromMe: Bool, tsUnix: Int64) {
+    func record(durationDays: Int32) {
         lock.lock(); defer { lock.unlock() }
         state.count += 1
-        state.chatJID = chatJID
-        state.msgID = msgID
-        state.fromMe = fromMe
-        state.tsUnix = tsUnix
+        state.durationDays = durationDays
     }
 
     func snapshot() -> Snapshot {
@@ -174,15 +148,8 @@ final class StubBackfillClient: WAClient {
         return try StubBackfillClient(dbPath: dir + "/state.db")
     }
 
-    override nonisolated func requestFullHistorySync(beforeChatJID: String,
-                                                     beforeMsgID: String,
-                                                     beforeFromMe: Bool,
-                                                     beforeTSUnix: Int64,
-                                                     count: Int32) throws {
-        capture.record(chatJID: beforeChatJID,
-                       msgID: beforeMsgID,
-                       fromMe: beforeFromMe,
-                       tsUnix: beforeTSUnix)
+    override nonisolated func requestFullHistorySync(durationDays: Int32) throws {
+        capture.record(durationDays: durationDays)
     }
 
     func snapshot() -> StubBackfillCapture.Snapshot { capture.snapshot() }

@@ -111,30 +111,19 @@ func (c *Client) RequestRecentHistory(chatJID string, count int) error {
 // trace 2026-06-09 that the phone has years of history but never
 // shipped it because yawac never built the type-6 request.
 //
-// The Swift signature still takes (beforeChatJID, beforeMsgID,
-// beforeFromMe, beforeTSUnix, count) so the existing call site
-// compiles unchanged. For the FULL variant only `count` is used
-// (mapped to HistoryDurationDays). The other anchor fields are
-// kept for backward source compatibility and possible per-chat
-// retry use.
-//
 // Phone-side response is one or more events.HistorySync chunks of
 // SyncType ON_DEMAND; applyHistorySync persists their messages
 // through the existing classifier.
-func (c *Client) RequestFullHistorySync(
-	beforeChatJID, beforeMsgID string, beforeFromMe bool,
-	beforeTSUnix int64,
-	count int32,
-) error {
+func (c *Client) RequestFullHistorySync(durationDays int32) error {
 	if c.wa == nil {
 		return errors.New("client closed")
 	}
 	if c.wa.Store == nil || c.wa.Store.ID == nil {
 		return errors.New("not logged in")
 	}
-	// count maps to "how many days of history" for the FULL variant.
+	// Duration is measured in days for the FULL variant.
 	// Bracketed to a sane range so a bad caller can't ask for 100k days.
-	days := uint32(count)
+	days := uint32(durationDays)
 	if days == 0 {
 		days = 3650 // ~10 years default
 	}

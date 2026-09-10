@@ -11,7 +11,7 @@ final class MessageIndex {
 
     // MARK: - Public types
 
-    struct MessageFields: Equatable {
+    struct MessageFields: Equatable, Sendable {
         let messageID: String
         let chatJID: String
         let timestamp: Int64
@@ -51,13 +51,14 @@ final class MessageIndex {
         case idle
         case running(indexed: Int, total: Int)
         case done
+        case failed(String)
     }
 
     // MARK: - Singleton + init
 
     static let shared = MessageIndex(storeURL: defaultStoreURL())
 
-    private let storeURL: URL
+    let storeURL: URL
     private let queue = DispatchQueue(label: "yawac.MessageIndex")
     // Must be @ObservationIgnored. Same trap as F14: MessageIndex is
     // @Observable, so plain `var` properties are tracked by the macro.
@@ -81,16 +82,9 @@ final class MessageIndex {
         let cachedJID = UserDefaults.standard
             .string(forKey: "messageIndexOwnBareJID") ?? ""
         self.ownBareJID = cachedJID
-        self.bareJIDMissingAtBoot = cachedJID.isEmpty
     }
 
-    private static func defaultStoreURL() -> URL {
-        let supportDir = (try? FileManager.default.url(
-            for: .applicationSupportDirectory, in: .userDomainMask,
-            appropriateFor: nil, create: true))
-            ?? URL(fileURLWithPath: NSTemporaryDirectory())
-        return supportDir.appendingPathComponent("default.store")
-    }
+    private static func defaultStoreURL() -> URL { AppPaths.messageStoreURL }
 
     // MARK: - Schema
 
@@ -102,7 +96,8 @@ final class MessageIndex {
         if db == nil {
             var handle: OpaquePointer?
             guard sqlite3_open(storeURL.path, &handle) == SQLITE_OK else {
-                NSLog("[yawac/index] sqlite3_open failed")
+                if let handle { sqlite3_close(handle) }
+                progress = .failed("Cannot open search database")
                 return
             }
             db = handle
@@ -110,20 +105,18 @@ final class MessageIndex {
             sqlite3_exec(db, "PRAGMA journal_mode=WAL;", nil, nil, nil)
             sqlite3_exec(db, "PRAGMA synchronous=NORMAL;", nil, nil, nil)
         }
-        // Schema bumps drop + recreate the FTS5 table; `bootstrapIfNeeded`
-        // repopulates from ZPERSISTEDMESSAGE on next launch.
-        //  v1 → v2: added `kind` column.
-        //  v2 → v3: rebuilt for own-push-name fallback.
-        //  v3 → v4: added `sender_jid` so Sender filter is stable across
-        //           push-name changes.
-        //  v4 → v5: repopulate using the cached own bare JID + LID→PN
-        //           canonical form so 1:1 chip sees self and dedupes
-        //           LID / PN siblings of the same contact.
-        let schemaKey = "messageIndexSchemaVersion"
-        let currentVersion = UserDefaults.standard.integer(forKey: schemaKey)
-        if currentVersion < 5 {
-            sqlite3_exec(db, "DROP TABLE IF EXISTS MessageFTS;", nil, nil, nil)
-            UserDefaults.standard.set(5, forKey: schemaKey)
+        var statement: OpaquePointer?
+        var columns: Set<String> = []
+        if sqlite3_prepare_v2(db, "PRAGMA table_info(MessageFTS)", -1, &statement, nil) == SQLITE_OK {
+            while sqlite3_step(statement) == SQLITE_ROW {
+                if let name = sqlite3_column_text(statement, 1) { columns.insert(String(cString: name)) }
+            }
+        }
+        sqlite3_finalize(statement)
+        let required: Set<String> = ["msgid", "chatjid", "ts", "kind", "sender_jid", "text", "caption", "quoted", "sender"]
+        if !columns.isEmpty && !required.isSubset(of: columns) {
+            do { try checked("DROP TABLE MessageFTS") }
+            catch { progress = .failed(error.localizedDescription); return }
         }
         let create = """
             CREATE VIRTUAL TABLE IF NOT EXISTS MessageFTS USING fts5(
@@ -133,36 +126,65 @@ final class MessageIndex {
                 tokenize = 'unicode61'
             );
         """
-        sqlite3_exec(db, create, nil, nil, nil)
+        do { try checked(create) } catch { progress = .failed(error.localizedDescription) }
     }
 
     // MARK: - Write paths
 
-    func upsert(_ f: MessageFields) {
-        queue.sync { upsertLocked(f) }
+    func upsert(_ fields: MessageFields) {
+        do { try apply(upserts: [fields]) }
+        catch { reportFailure(error) }
     }
 
-    private func upsertLocked(_ f: MessageFields) {
-        ensureSchemaLocked()
-        let sender = senderForIndex(f)
-        let jid = senderJIDForIndex(f)
-        sqlite3_exec(db, "BEGIN IMMEDIATE;", nil, nil, nil)
-        var ok = execStep(sql: "DELETE FROM MessageFTS WHERE msgid = ?;",
-                          binds: [.text(f.messageID)])
-        if ok {
-            ok = execStep(sql: """
-                INSERT INTO MessageFTS(msgid, chatjid, ts, kind, sender_jid,
-                                       text, caption, quoted, sender)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
-                """,
-                binds: [
-                    .text(f.messageID), .text(f.chatJID), .int(f.timestamp),
-                    .text(f.kind), .text(jid),
-                    .text(f.text), .text(f.caption),
-                    .text(f.quoted), .text(sender),
-                ])
+    struct IndexError: LocalizedError {
+        let message: String
+        var errorDescription: String? { message }
+    }
+
+    private func checked(_ sql: String) throws {
+        guard sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK else {
+            throw IndexError(message: db.map { String(cString: sqlite3_errmsg($0)) } ?? "Search database unavailable")
         }
-        sqlite3_exec(db, ok ? "COMMIT;" : "ROLLBACK;", nil, nil, nil)
+    }
+
+    func reportFailure(_ error: Error) {
+        queue.sync { progress = .failed(error.localizedDescription) }
+        NSLog("[yawac/index] %@", error.localizedDescription)
+    }
+
+    /// One transaction per committed source batch. Caller serializes source
+    /// commits; this queue also excludes concurrent reconciliation.
+    func apply(upserts: [MessageFields], removing: [String] = []) throws {
+        guard !upserts.isEmpty || !removing.isEmpty else { return }
+        try queue.sync {
+            ensureSchemaLocked()
+            try checked("BEGIN IMMEDIATE;")
+            do {
+                for id in removing + upserts.map(\.messageID) {
+                    guard execStep(sql: "DELETE FROM MessageFTS WHERE msgid = ?;", binds: [.text(id)]) else {
+                        throw IndexError(message: "Could not update search index")
+                    }
+                }
+                for fields in upserts { try insertLocked(fields) }
+                try checked("COMMIT;")
+            } catch {
+                _ = sqlite3_exec(db, "ROLLBACK;", nil, nil, nil)
+                throw error
+            }
+        }
+    }
+
+    private func insertLocked(_ fields: MessageFields) throws {
+        guard execStep(sql: """
+            INSERT INTO MessageFTS(msgid, chatjid, ts, kind, sender_jid,
+                                   text, caption, quoted, sender)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+            """, binds: [
+                .text(fields.messageID), .text(canonicalizer?(fields.chatJID) ?? fields.chatJID),
+                .int(fields.timestamp), .text(fields.kind), .text(senderJIDForIndex(fields)),
+                .text(fields.text), .text(fields.caption), .text(fields.quoted),
+                .text(senderForIndex(fields)),
+            ]) else { throw IndexError(message: "Could not insert search row") }
     }
 
     /// Sender JID we should index for a row. Own outbound rows often
@@ -191,27 +213,11 @@ final class MessageIndex {
     /// to thread a client reference. Set on .connected.
     @ObservationIgnored private var ownBareJID: String = ""
 
-    /// True when `init` found UserDefaults `messageIndexOwnBareJID`
-    /// empty. The first non-empty `setOwnBareJID` then knows the
-    /// bootstrap walk that fired before this session can't have indexed
-    /// own outbound rows correctly — triggers a forceRebootstrap.
-    @ObservationIgnored private var bareJIDMissingAtBoot: Bool = false
-
     func setOwnBareJID(_ jid: String) {
         let bare = JIDNormalize.bare(jid)
         guard !bare.isEmpty else { return }
-        let wasMissing = queue.sync { () -> Bool in
-            let missing = bareJIDMissingAtBoot
-            ownBareJID = bare
-            bareJIDMissingAtBoot = false
-            return missing
-        }
+        queue.sync { ownBareJID = bare }
         UserDefaults.standard.set(bare, forKey: "messageIndexOwnBareJID")
-        if wasMissing {
-            Task.detached(priority: .utility) { [self] in
-                await self.forceRebootstrap()
-            }
-        }
     }
 
     /// Returns the sender string we should index for a row. Own outbound
@@ -409,179 +415,58 @@ final class MessageIndex {
 
     // MARK: - Bootstrap
 
-    /// Backfills MessageFTS from ZPERSISTEDMESSAGE. Safe to call on every
-    /// launch — exits early if the FTS row count is already at or above
-    /// the persisted-message count.
+    /// Reconcile all source rows, including edits with unchanged row counts.
+    /// A single checked transaction makes interruption leave the previous
+    /// index intact. Rows are streamed rather than materialized as models.
     func bootstrapIfNeeded() async {
         await Task.detached(priority: .utility) { [self] in
-            self.runBootstrap()
+            do { try reconcile() }
+            catch { reportFailure(error) }
         }.value
     }
 
-    /// UserDefaults key holding the fingerprint of the inputs that
-    /// fed the last successful `forceRebootstrap`. `rebootstrapIfFingerprintChanged`
-    /// only rebuilds when the live fingerprint differs from this value.
-    private static let bootstrapFingerprintKey =
-        "yawac.MessageIndex.lastBootstrapFingerprint"
-
-    /// Snapshot of the inputs that affect FTS row contents
-    /// (`canonicalVersion | ownPushName | ownBareJID`). Used to gate
-    /// `forceRebootstrap` on real state change — a `.connected` that
-    /// arrives with the same inputs as the last full bootstrap is a
-    /// no-op for the index.
-    func currentFingerprint() -> String {
-        queue.sync {
-            let pn  = ownPushName
-            let jid = ownBareJID
-            let ver = JIDNormalize.canonicalVersion
-            return "\(ver)|\(pn)|\(jid)"
-        }
-    }
-
-    /// Calls `forceRebootstrap()` only when the current fingerprint
-    /// differs from the value stored at the last successful rebuild.
-    /// The persisted fingerprint is written **after** the rebuild
-    /// completes, so a crash mid-rebuild re-runs on the next launch.
-    func rebootstrapIfFingerprintChanged() async {
-        let fp = currentFingerprint()
-        let last = UserDefaults.standard
-            .string(forKey: Self.bootstrapFingerprintKey)
-        guard fp != last else { return }
-        await forceRebootstrap()
-        UserDefaults.standard.set(fp, forKey: Self.bootstrapFingerprintKey)
-    }
-
-    /// Wipes the FTS5 table and re-walks ZPERSISTEDMESSAGE. Use after
-    /// state that affects `senderJIDForIndex` (own JID, canonicalizer)
-    /// arrives later than the initial bootstrap pass.
-    func forceRebootstrap() async {
-        await Task.detached(priority: .utility) { [self] in
-            self.queue.sync {
-                self.ensureSchemaLocked()
-                sqlite3_exec(self.db, "DELETE FROM MessageFTS;",
-                             nil, nil, nil)
-            }
-            self.runBootstrap()
-        }.value
-    }
-
-    private func runBootstrap() {
-        queue.sync { ensureSchemaLocked() }
-
-        let total = scalarFromStore(
-            sql: "SELECT COUNT(*) FROM ZPERSISTEDMESSAGE;")
-        let already = countAll()
-        if already >= total || total == 0 {
-            queue.sync { self.progress = .done }
-            return
-        }
-
-        queue.sync {
-            self.progress = .running(indexed: already, total: total)
-        }
-
-        // Stream rows in 1000-row pages, ascending by Z_PK so resumption
-        // after a crash continues forward.
-        let pageSize = 1000
-        var offset = already
-        var indexed = already
-        while offset < total {
-            let page = readPage(offset: offset, limit: pageSize)
-            if page.isEmpty { break }
-            queue.sync {
-                ensureSchemaLocked()
-                sqlite3_exec(db, "BEGIN IMMEDIATE;", nil, nil, nil)
-                var ok = true
-                for f in page {
-                    if !execStep(sql: "DELETE FROM MessageFTS WHERE msgid = ?;",
-                                 binds: [.text(f.messageID)]) { ok = false; break }
-                    if !execStep(sql: """
-                        INSERT INTO MessageFTS(msgid, chatjid, ts, kind, sender_jid,
-                                               text, caption, quoted, sender)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
-                        """,
-                        binds: [
-                            .text(f.messageID), .text(f.chatJID), .int(f.timestamp),
-                            .text(f.kind), .text(senderJIDForIndex(f)),
-                            .text(f.text), .text(f.caption),
-                            .text(f.quoted), .text(senderForIndex(f)),
-                        ]) { ok = false; break }
+    func reconcile() throws {
+        try queue.sync {
+            ensureSchemaLocked()
+            try checked("BEGIN IMMEDIATE;")
+            do {
+                let total = scalarInt(sql: "SELECT COUNT(*) FROM ZPERSISTEDMESSAGE;")
+                progress = .running(indexed: 0, total: total)
+                var statement: OpaquePointer?
+                let sql = """
+                    SELECT ZID, ZCHATJID, ZTIMESTAMP, ZKIND, ZTEXT, ZMEDIACAPTION,
+                           ZQUOTEDTEXTSNIPPET, ZSENDERPUSHNAME, ZFROMME, ZSENDERJID
+                    FROM ZPERSISTEDMESSAGE
+                    WHERE COALESCE(ZLOCALLYDELETED, 0) = 0 AND ZREVOKEDAT IS NULL
+                    ORDER BY Z_PK;
+                    """
+                guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+                    throw IndexError(message: "Could not read messages for search repair")
                 }
-                sqlite3_exec(db, ok ? "COMMIT;" : "ROLLBACK;", nil, nil, nil)
+                defer { sqlite3_finalize(statement) }
+                try checked("DELETE FROM MessageFTS;")
+                var count = 0
+                var result = sqlite3_step(statement)
+                while result == SQLITE_ROW {
+                    try insertLocked(MessageFields(
+                        messageID: stringCol(statement, 0), chatJID: stringCol(statement, 1),
+                        timestamp: Int64(sqlite3_column_double(statement, 2)),
+                        kind: stringCol(statement, 3), text: stringCol(statement, 4),
+                        caption: stringCol(statement, 5), quoted: stringCol(statement, 6),
+                        sender: stringCol(statement, 7), fromMe: sqlite3_column_int64(statement, 8) != 0,
+                        senderJID: stringCol(statement, 9)))
+                    count += 1
+                    if count % 1000 == 0 { progress = .running(indexed: count, total: total) }
+                    result = sqlite3_step(statement)
+                }
+                guard result == SQLITE_DONE else { throw IndexError(message: "Search repair read failed") }
+                try checked("COMMIT;")
+                progress = .done
+            } catch {
+                _ = sqlite3_exec(db, "ROLLBACK;", nil, nil, nil)
+                throw error
             }
-            indexed += page.count
-            offset  += page.count
-            queue.sync {
-                self.progress = .running(indexed: indexed, total: total)
-            }
         }
-
-        queue.sync { self.progress = .done }
-    }
-
-    /// Reads a paged slice of ZPERSISTEDMESSAGE via a fresh read-only
-    /// connection (avoids stepping on the main connection's transaction).
-    private func readPage(offset: Int, limit: Int) -> [MessageFields] {
-        var read: OpaquePointer?
-        guard sqlite3_open_v2(storeURL.path, &read,
-                              SQLITE_OPEN_READONLY, nil) == SQLITE_OK,
-              let read else { return [] }
-        defer { sqlite3_close(read) }
-        sqlite3_busy_timeout(read, 1000)
-
-        var stmt: OpaquePointer?
-        let sql = """
-            SELECT ZID, ZCHATJID, ZTIMESTAMP, ZKIND, ZTEXT, ZMEDIACAPTION,
-                   ZQUOTEDTEXTSNIPPET, ZSENDERPUSHNAME, ZFROMME, ZSENDERJID
-            FROM ZPERSISTEDMESSAGE
-            ORDER BY Z_PK ASC
-            LIMIT ? OFFSET ?;
-        """
-        guard sqlite3_prepare_v2(read, sql, -1, &stmt, nil) == SQLITE_OK else {
-            return []
-        }
-        defer { sqlite3_finalize(stmt) }
-        sqlite3_bind_int64(stmt, 1, Int64(limit))
-        sqlite3_bind_int64(stmt, 2, Int64(offset))
-
-        var out: [MessageFields] = []
-        while sqlite3_step(stmt) == SQLITE_ROW {
-            let id = stringFromStmt(stmt, 0)
-            guard !id.isEmpty else { continue }
-            let ts = Int64(sqlite3_column_double(stmt, 2))
-            out.append(MessageFields(
-                messageID: id,
-                chatJID:   stringFromStmt(stmt, 1),
-                timestamp: ts,
-                kind:      stringFromStmt(stmt, 3),
-                text:      stringFromStmt(stmt, 4),
-                caption:   stringFromStmt(stmt, 5),
-                quoted:    stringFromStmt(stmt, 6),
-                sender:    stringFromStmt(stmt, 7),
-                fromMe:    sqlite3_column_int64(stmt, 8) != 0,
-                senderJID: stringFromStmt(stmt, 9)))
-        }
-        return out
-    }
-
-    private func scalarFromStore(sql: String) -> Int {
-        var read: OpaquePointer?
-        guard sqlite3_open_v2(storeURL.path, &read,
-                              SQLITE_OPEN_READONLY, nil) == SQLITE_OK,
-              let read else { return 0 }
-        defer { sqlite3_close(read) }
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(read, sql, -1, &stmt, nil) == SQLITE_OK else {
-            return 0
-        }
-        defer { sqlite3_finalize(stmt) }
-        guard sqlite3_step(stmt) == SQLITE_ROW else { return 0 }
-        return Int(sqlite3_column_int64(stmt, 0))
-    }
-
-    private func stringFromStmt(_ stmt: OpaquePointer?, _ i: Int32) -> String {
-        guard let c = sqlite3_column_text(stmt, i) else { return "" }
-        return String(cString: c)
     }
 
     // MARK: - Query construction

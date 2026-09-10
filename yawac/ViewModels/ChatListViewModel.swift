@@ -21,48 +21,17 @@ final class ChatListViewModel {
     /// to vm.chats directly from app-level scope.
     @ObservationIgnored weak var session: SessionViewModel?
 
-    init(client: WAClient?, context: ModelContext? = nil) {
+    init(client: WAClient?, context: ModelContext? = nil, bootstrap: Bool = true) {
         self.client = client
         self.context = context
-        // Background message writer. `client` is a `@MainActor`-isolated
-        // reference, but `JIDNormalize.canonical` only reads the
-        // nonisolated `resolveLIDToPN` / `resolvePNToLID` maps, so the
-        // canonicalize closure is safe to invoke from the writer actor.
-        if let container = context?.container {
-            self.writer = MessageWriter(
-                container: container,
-                canonicalize: { jid in
-                    JIDNormalize.canonical(jid, client: client)
-                })
-        } else {
-            self.writer = nil
-        }
         // F5: defer the SwiftData fetch + raw SQLite scan that
         // `loadChats` performs to a background Task so the cold-start
         // MainActor is not blocked before the first sidebar paint. The
         // sidebar renders a ProgressView while `bootstrapping == true`.
-        Task { [weak self] in
-            await self?.runBootstrap()
+        if bootstrap {
+            Task { [weak self] in await self?.runBootstrap() }
         }
     }
-
-    // MARK: - Background message writer (F3)
-    //
-    // `ingest()` used to do dedupe-fetch + persistMessage (another fetch
-    // + insert + save + sync MessageIndex.upsert) on MainActor, per
-    // event. The writer moves that work off-main and batches a 50ms
-    // coalesce window into one `context.save()`.
-    @ObservationIgnored private let writer: MessageWriter?
-    @ObservationIgnored private var pendingIngest: [BridgeMessage] = []
-    @ObservationIgnored private var pendingIngestFlush: Task<Void, Never>?
-
-    // F20: batched reaction writer — see persistReaction().
-    @ObservationIgnored private var pendingReactions: [BridgeReaction] = []
-    @ObservationIgnored private var pendingReactionsFlush: Task<Void, Never>?
-
-    // F21: batched message-mutation writer — see enqueueMutation().
-    @ObservationIgnored private var pendingMutations: [MessageWriter.MessageMutation] = []
-    @ObservationIgnored private var pendingMutationsFlush: Task<Void, Never>?
 
     /// Per-event chat-row work coalescer. `.message` bursts (history
     /// sync, offline queue drain, group activity) hit `ingest` dozens
@@ -122,11 +91,15 @@ final class ChatListViewModel {
     /// `mergeContacts`/`ingest` would re-add it. A tombstoned chat resurfaces
     /// only when a message *newer than the deletion* arrives (matching
     /// WhatsApp) or when the user explicitly starts the chat again.
-    private static let tombstoneKey = "yawac.deletedChats"
+    private var tombstoneKey: String {
+        let url = context?.container.configurations.first?.url
+        if url == nil || url == AppPaths.messageStoreURL { return "yawac.deletedChats" }
+        return "yawac.deletedChats.\(url!.path)"
+    }
     private var deletedChats: [String: Double] {
-        get { (UserDefaults.standard.dictionary(forKey: Self.tombstoneKey)
+        get { (UserDefaults.standard.dictionary(forKey: tombstoneKey)
                 as? [String: Double]) ?? [:] }
-        set { UserDefaults.standard.set(newValue, forKey: Self.tombstoneKey) }
+        set { UserDefaults.standard.set(newValue, forKey: tombstoneKey) }
     }
     private func tombstone(_ jid: String) {
         var d = deletedChats; d[jid] = Date().timeIntervalSince1970; deletedChats = d
@@ -146,150 +119,22 @@ final class ChatListViewModel {
 
     // MARK: - F5: cold-start bootstrap (off MainActor)
 
-    /// Immutable result of `buildBootstrap`. Carries the assembled `Chat`
-    /// rows (with **raw** preview text — mention resolution happens on
-    /// MainActor in `runBootstrap` because `session.displayName` is
-    /// MainActor-isolated) plus the list of `PersistedChat`
-    /// `PersistentIdentifier`s the dedupe pass decided to drop and the
-    /// list of unique-key rebinds (`id` → `newJID`) the dedupe pass
-    /// decided to apply. Both mutations are round-tripped to the main
-    /// context in the apply phase because SwiftData refuses to persist
-    /// unique-key mutations from a background context in our setup
-    /// (see `SQLiteDedupe` rationale).
-    private struct ChatListBootstrap: Sendable {
-        struct Rebind: Sendable {
-            let id: PersistentIdentifier
-            let newJID: String
-        }
-        let chats: [Chat]
-        let deleteIDs: [PersistentIdentifier]
-        let rebinds: [Rebind]
-    }
+    /// Cached sidebar values read after storage preparation.
+    private struct ChatListBootstrap: Sendable { let chats: [Chat] }
 
-    /// Off-MainActor bootstrap builder. Owns its own background
-    /// `ModelContext` bound to the same `ModelContainer`. Performs the
-    /// `PersistedChat` fetch, the in-memory LID→PN dedupe, the
-    /// device-suffix dedupe, and the raw-SQLite
-    /// `SQLiteDedupe.latestMessagePerChat()` scan — all of which used
-    /// to block MainActor before the first sidebar paint. Returns a
-    /// value-type snapshot for the apply phase to consume.
-    ///
-    /// The `lidResolver` / `canonicalize` closures are passed in because
-    /// `WAClient` is `@MainActor`-isolated but its
-    /// `resolveLIDToPN` / `resolvePNToLID` methods are nonisolated, so
-    /// the closures themselves are safe to call from any thread (same
-    /// pattern as `MessageWriter`'s canonicalizer).
+    /// Read summaries off-main; message and identifier repairs belong to storage.
     nonisolated private static func buildBootstrap(
         container: ModelContainer,
-        tombstones: Set<String>,
-        lidResolver: @Sendable (String) -> String,
-        canonicalize: @Sendable (String) -> String
+        tombstones: Set<String>
     ) -> ChatListBootstrap {
         let context = ModelContext(container)
         let descriptor = FetchDescriptor<PersistedChat>(
             sortBy: [SortDescriptor(\.lastTimestamp, order: .reverse)])
         guard let rows = try? context.fetch(descriptor) else {
-            return ChatListBootstrap(chats: [], deleteIDs: [], rebinds: [])
+            return ChatListBootstrap(chats: [])
         }
 
-        // In-memory dedupe only: SwiftData refuses to persist deletions of
-        // these unique-key rows in our setup (verified — post-exit WAL is
-        // empty, rows remain on disk). Instead we filter them at read time
-        // so the UI is clean. The hidden @lid rows stay in the DB but are
-        // never surfaced. Future writes via ingest still go through
-        // JIDNormalize.canonical so new rows land under the PN form.
-        let pnJIDs = Set(
-            rows
-                .filter { $0.jid.hasSuffix("@s.whatsapp.net") }
-                .map { $0.jid }
-        )
-        var hiddenLIDs = Set<String>()
-        for r in rows where r.jid.hasSuffix("@lid") {
-            let canon = lidResolver(r.jid)
-            if canon != r.jid, pnJIDs.contains(canon) {
-                hiddenLIDs.insert(r.jid)
-            }
-        }
-        let rowsAfter = rows.filter { !hiddenLIDs.contains($0.jid) }
-
-        // Two-pass cleanup: collapse rows whose canonical jid matches
-        // (device-suffix dedupe + LID→PN resolution). First pass prefers
-        // canonical-form rows as anchors so we don't accidentally
-        // spawn duplicate PersistedChats that violate the unique JID
-        // constraint.
-        var keepers: [String: PersistedChat] = [:]
-        var toDelete: [PersistedChat] = []
-
-        // Pass 1: bind only the rows whose stored jid already IS the
-        // canonical form. These become the merge targets for everything
-        // else.
-        for r in rowsAfter {
-            let bare = canonicalize(r.jid)
-            if r.jid == bare {
-                keepers[bare] = r
-            }
-        }
-
-        // Pass 2: handle non-canonical (e.g. `@lid` or `:device@server`)
-        // rows. Merge into existing canonical anchor if present;
-        // otherwise stage a rebind that the MainActor apply phase will
-        // persist (SwiftData refuses to persist unique-key rebinds from
-        // a background context in our setup — see ChatListBootstrap doc).
-        var pendingRebinds: [ChatListBootstrap.Rebind] = []
-        for r in rowsAfter {
-            let bare = canonicalize(r.jid)
-            if r.jid == bare { continue }
-            if let anchor = keepers[bare] {
-                if r.lastTimestamp > anchor.lastTimestamp {
-                    anchor.lastTimestamp = r.lastTimestamp
-                    anchor.lastMessageText = r.lastMessageText ?? anchor.lastMessageText
-                    if !r.name.isEmpty { anchor.name = r.name }
-                }
-                anchor.unread += r.unread
-                toDelete.append(r)
-            } else {
-                // No canonical row yet — stage a rebind so this row's
-                // unique key flips to `bare` on the main context, then
-                // mutate the in-memory background copy so subsequent
-                // passes and the `Chat` materialisation below see the
-                // canonical jid. The background mutation is intentionally
-                // not saved (the apply phase owns persistence).
-                pendingRebinds.append(.init(id: r.persistentModelID, newJID: bare))
-                r.jid = bare
-                keepers[bare] = r
-            }
-        }
-
-        // Pass 3: secondary merges where a now-rebound row collides with
-        // another canonical row that appeared later in pass 1.
-        // (Defensive — should be rare since pass 1 ran first.)
-        var seen: [String: PersistedChat] = [:]
-        for (jid, row) in keepers {
-            if let existing = seen[jid], existing !== row {
-                if row.lastTimestamp > existing.lastTimestamp {
-                    existing.lastTimestamp = row.lastTimestamp
-                    existing.lastMessageText = row.lastMessageText ?? existing.lastMessageText
-                    if !row.name.isEmpty { existing.name = row.name }
-                }
-                existing.unread += row.unread
-                toDelete.append(row)
-            } else {
-                seen[jid] = row
-            }
-        }
-
-        // Intentionally NO `context.save()` on the background context:
-        // SwiftData refuses to persist unique-key mutations from a
-        // background context in our setup (verified for deletes; the
-        // same silent-failure risk applies to rebinds). All persistent
-        // mutations — rebinds AND deletes — are round-tripped to the
-        // main context in the apply phase.
-
-        // Collect persistent IDs for the rows to delete. Deletes are
-        // applied on the main context (see ChatListBootstrap doc).
-        let deleteIDs: [PersistentIdentifier] = toDelete.map { $0.persistentModelID }
-
-        keepers = seen
+        let keepers = Dictionary(rows.map { ($0.jid, $0) }, uniquingKeysWith: { first, _ in first })
 
         // Derive a fresh per-chat (lastTimestamp, lastMessageText) from
         // raw SQLite — going through SwiftData materialises every row
@@ -297,7 +142,7 @@ final class ChatListViewModel {
         // `latestMessagePerChat` opens its own read-only connection,
         // safe to call off MainActor.
         var latestByChat: [String: (ts: Date, text: String)] = [:]
-        for row in SQLiteDedupe.latestMessagePerChat() {
+        for row in SQLiteDedupe.latestMessagePerChat(at: container.configurations.first!.url) {
             // SwiftData stores Date as Apple-epoch seconds; convert.
             let date = Date(timeIntervalSinceReferenceDate: row.timestampAppleEpoch)
             // Mirror previewText(for:) for deletions — otherwise the raw text
@@ -329,7 +174,7 @@ final class ChatListViewModel {
         // (`session.displayName` is MainActor-isolated). The raw preview
         // is carried as-is in `Chat.lastMessage` here and resolved in
         // place before the snapshot is committed.
-        let messageBearing = SQLiteDedupe.chatJIDsWithAnyMessage()
+        let messageBearing = SQLiteDedupe.chatJIDsWithAnyMessage(at: container.configurations.first!.url)
         let chats: [Chat] = keepers.values
             .map { row -> Chat in
                 let derived = latestByChat[row.jid]
@@ -364,16 +209,11 @@ final class ChatListViewModel {
             .sorted(by: Self.chatOrder)
 
         return ChatListBootstrap(
-            chats: chats, deleteIDs: deleteIDs, rebinds: pendingRebinds)
+            chats: chats)
     }
 
-    /// MainActor cold-start driver. Dispatches the background bootstrap
-    /// builder, resolves mentions on the produced rows (uses MainActor-
-    /// isolated `session.displayName`), commits `chats` in one shot, and
-    /// finally rounds-trips the duplicate-row deletes to the main
-    /// `ModelContext`. Sets `bootstrapping = false` once `chats` is
-    /// published so the sidebar's ProgressView dismisses.
-    private func runBootstrap() async {
+    /// Build off-main, resolve names, and publish the cached sidebar.
+    func runBootstrap() async {
         guard let container = context?.container else {
             bootstrapping = false
             return
@@ -382,18 +222,10 @@ final class ChatListViewModel {
         // value-typed sendables only.
         let tombstones = Set(deletedChats.keys)
         let client = self.client
-        let lidResolver: @Sendable (String) -> String = { jid in
-            client?.resolveLIDToPN(jid) ?? jid
-        }
-        let canonicalize: @Sendable (String) -> String = { jid in
-            JIDNormalize.canonical(jid, client: client)
-        }
         let snap = await Task.detached(priority: .userInitiated) {
             ChatListViewModel.buildBootstrap(
                 container: container,
-                tombstones: tombstones,
-                lidResolver: lidResolver,
-                canonicalize: canonicalize)
+                tombstones: tombstones)
         }.value
 
         // Resolve mentions on MainActor — `session?.displayName(for:)` is
@@ -441,34 +273,6 @@ final class ChatListViewModel {
         }
         bootstrapping = false
 
-        // Round-trip the unique-key mutations (rebinds + deletes) to the
-        // main context. SwiftData's persistence of these mutations is
-        // unreliable from a background context in our setup (verified
-        // for deletes; same silent-failure risk applies to rebinds —
-        // that's why we no longer save the background context). Apply
-        // rebinds first so the delete branch doesn't race a row whose
-        // canonical sibling hasn't materialised yet.
-        if let context = self.context,
-           !(snap.rebinds.isEmpty && snap.deleteIDs.isEmpty) {
-            var rebound = 0
-            for rebind in snap.rebinds {
-                if let row = context.model(for: rebind.id) as? PersistedChat {
-                    row.jid = rebind.newJID
-                    rebound += 1
-                }
-            }
-            var deleted = 0
-            for id in snap.deleteIDs {
-                if let row = context.model(for: id) as? PersistedChat {
-                    context.delete(row)
-                    deleted += 1
-                }
-            }
-            var saveErr: String = "ok"
-            do { try context.save() } catch { saveErr = String(describing: error) }
-            NSLog("[yawac/runBootstrap] rebinds=%d toDelete=%d save=%@",
-                  rebound, deleted, saveErr)
-        }
     }
 
     /// Total ordering for the sidebar. Pinned chats float to the
@@ -486,14 +290,14 @@ final class ChatListViewModel {
         }
     }
 
-    func ingest(_ message: BridgeMessage) {
+    func accepts(_ message: BridgeMessage) -> Bool {
         // F35: drop protocol-only carriers, but allow synthetic
         // kind="system" rows with a body text through (the bridge now
         // emits these for encryption-key changes + disappearing-timer
         // changes so the user sees what's happening in the chat).
-        if message.kind == "protocol" { return }
+        if message.kind == "protocol" { return false }
         if message.kind == "system",
-           (message.text ?? "").isEmpty { return }
+           (message.text ?? "").isEmpty { return false }
         let chatJID = JIDNormalize.canonical(message.chatJID, client: client)
 
         // Deleted-chat handling: a message older-or-equal to the deletion is a
@@ -502,75 +306,32 @@ final class ChatListViewModel {
         // so lift the tombstone and ingest normally (WhatsApp behavior).
         // Tombstone semantics run synchronously here so a tombstone touched
         // mid-coalesce window still suppresses replays correctly.
-        if suppressedByTombstone(chatJID, messageTS: message.timestamp) { return }
+        if suppressedByTombstone(chatJID, messageTS: message.timestamp) { return false }
         untombstone(chatJID)
 
-        // Queue the message for batched background persistence. The 50ms
-        // coalesce window groups history-sync / offline-queue drains into
-        // a single SwiftData save + FTS upsert pass per batch.
-        pendingIngest.append(message)
-        guard pendingIngestFlush == nil else { return }
-        // F37: during an active full-sync, stretch the coalesce
-        // window from 50 ms → 500 ms. Sync bursts ship 1000+ messages
-        // / chunk and the 50 ms cadence (≈20 flushes/sec) was firing
-        // a full sidebar publish + a writer.enqueue per cycle on the
-        // main thread — the dominant remaining beachball source after
-        // the F37v2 shadow-array fix. The longer window lets a single
-        // flush absorb a whole chunk; user gets fewer-but-larger
-        // sidebar updates during sync. Reverts automatically when
-        // `fullSync.inFlight` clears.
-        let coalesceMs: UInt64 = (session?.fullSync.inFlight == true) ? 500 : 50
-        pendingIngestFlush = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .milliseconds(coalesceMs))
-            guard let self else { return }
-            let batch = self.pendingIngest
-            self.pendingIngest.removeAll(keepingCapacity: true)
-            self.pendingIngestFlush = nil
-            guard !batch.isEmpty, let writer = self.writer else { return }
-            let outcomes = await writer.enqueue(batch)
-            // F39: bump session.fullSync.fresh / .dupe so the
-            // AccountPanel sublabel shows the ratio of actually-new
-            // history vs. phone-side overlap. Replaces the F-instr
-            // NSLog from the systematic-debugging investigation that
-            // showed the "refetch" perception was 98% fresh.
-            if let session = self.session, session.fullSync.inFlight {
-                let dupes = outcomes.count(where: \.alreadySeen)
-                let fresh = outcomes.count - dupes
-                session.bumpFullSyncCounts(fresh: fresh, dupe: dupes)
-            }
-            // Re-pair outcomes with their originating BridgeMessage by id so
-            // the apply step has access to the full message payload (preview
-            // text, sender push name, fromMe, etc.).
-            // F30v4: deep backfill rounds can re-deliver the same
-            // message id multiple times across overlapping per-chat
-            // windows. Dictionary(uniqueKeysWithValues:) crashes on
-            // duplicates; uniquingKeysWith keeps the first and drops
-            // subsequent dupes.
-            let byID = Dictionary(batch.map { ($0.id, $0) },
-                                  uniquingKeysWith: { first, _ in first })
-            // F37: cache jid → index ONCE per flush + apply outcomes
-            // to a local shadow copy of `chats`, then publish the
-            // shadow back in ONE write. Mutating `chats[idx] = c` per
-            // outcome was firing an @Observable publish per outcome,
-            // re-rendering the sidebar 1000+ times during a single
-            // history-sync flush — the dominant beachball source.
-            // The shadow array's O(#chats) copy is paid once per
-            // flush; SwiftUI sees one mutation.
-            var workingChats = self.chats
-            var idxByJID: [String: Int] = [:]
-            idxByJID.reserveCapacity(workingChats.count)
-            for (i, c) in workingChats.enumerated() { idxByJID[c.jid] = i }
-            for outcome in outcomes {
-                guard let original = byID[outcome.id] else { continue }
-                self.applyChatRowUpdate(
-                    chats: &workingChats,
-                    idxByJID: &idxByJID,
-                    message: original,
-                    canonJID: outcome.canonicalChatJID,
-                    alreadySeen: outcome.alreadySeen)
-            }
-            self.chats = workingChats
+        return true
+    }
+
+    func applyCommittedMessages(_ batch: [BridgeMessage], outcomes: [MessageWriter.WriteOutcome], previews: [MessageWriter.ChatPreview] = []) {
+        if let session, session.fullSync.inFlight {
+            let dupes = outcomes.count(where: \.alreadySeen)
+            session.bumpFullSyncCounts(fresh: outcomes.count - dupes, dupe: dupes)
         }
+        var working = chats
+        var positions = Dictionary(working.enumerated().map { ($1.jid, $0) }, uniquingKeysWith: { first, _ in first })
+        for (message, outcome) in zip(batch, outcomes) {
+            applyChatRowUpdate(chats: &working, idxByJID: &positions, message: message,
+                               canonJID: outcome.canonicalChatJID, alreadySeen: outcome.alreadySeen)
+        }
+        for preview in previews {
+            guard let i = positions[preview.jid] else { continue }
+            working[i].lastMessage = resolveMentionsText(preview.text) { [weak session] jid in
+                session?.displayName(for: jid) ?? jid
+            }
+            working[i].lastTimestamp = preview.timestamp
+            markChatDirty(preview.jid)
+        }
+        chats = working
     }
 
     /// MainActor commit step after the background writer persists a
@@ -692,7 +453,7 @@ final class ChatListViewModel {
         }
         markChatDirty(chatJID)
 
-        if !alreadySeen, !message.fromMe, !NSApp.isActive, !preview.isEmpty {
+        if !AppPaths.isRunningTests, !alreadySeen, !message.fromMe, !NSApp.isActive, !preview.isEmpty {
             let title = chats.first(where: { $0.jid == chatJID })?.name ?? chatJID
             // Group chats: surface sender name as subtitle so recipients can
             // tell who said what without opening the chat. 1:1 chats: title
@@ -767,29 +528,10 @@ final class ChatListViewModel {
     /// the chip strip when it later opens (or re-opens) the chat. Live
     /// reactions arrive once via the global event stream — without this,
     /// closing/reopening a chat would drop all of them.
-    func persistReaction(_ r: BridgeReaction) {
-        // F20: SwiftData persistence is batched off-main via MessageWriter
-        // with a 50 ms coalesce window. The notification side below stays
-        // on MainActor and fires per-event because per-reaction policy
-        // (mute, NSApp.isActive, targetFromMe) is naturally per-event.
-        if writer != nil {
-            pendingReactions.append(r)
-            if pendingReactionsFlush == nil {
-                pendingReactionsFlush = Task { @MainActor [weak self] in
-                    try? await Task.sleep(for: .milliseconds(50))
-                    guard let self else { return }
-                    let batch = self.pendingReactions
-                    self.pendingReactions.removeAll(keepingCapacity: true)
-                    self.pendingReactionsFlush = nil
-                    guard !batch.isEmpty, let writer = self.writer else { return }
-                    await writer.enqueueReactions(batch)
-                }
-            }
-        }
-
+    func notifyReaction(_ r: BridgeReaction) {
         // Notify only when somebody reacts to OUR message (`targetFromMe`)
         // and the window isn't focused. Skip self-reactions and clears.
-        guard !r.emoji.isEmpty,
+        guard !AppPaths.isRunningTests, !r.emoji.isEmpty,
               r.targetFromMe,
               r.senderJID != "me",
               !NSApp.isActive else { return }
@@ -946,137 +688,6 @@ final class ChatListViewModel {
         sortChats()
     }
 
-    /// Persist a peer-device delete-for-me sync directly to the
-    /// PersistedMessage row, independent of whether the chat is
-    /// currently open. Called by the event loop on every inbound
-    /// `.messageLocallyDeleted` so the row stays hidden after restart.
-    ///
-    /// F21: SwiftData persistence is batched off-main via MessageWriter
-    /// with a 50 ms coalesce window. The post-batch flush calls
-    /// `refreshPreview` for every chat JID that got a row that affects
-    /// preview text (delete / revoke / edit) so the sidebar reflects
-    /// the new last-message state.
-    func applyIncomingLocalDelete(chatJID: String, messageID: String) {
-        enqueueMutation(.localDelete(id: messageID, chatJID: chatJID))
-    }
-
-    /// Persist a peer-device revoke directly to PersistedMessage row,
-    /// regardless of whether the chat is currently open.
-    func applyIncomingRevoke(chatJID: String, messageID: String, revokedBy: String, at: Date) {
-        enqueueMutation(.revoke(id: messageID, chatJID: chatJID, by: revokedBy, at: at))
-    }
-
-    /// Persist a peer-device or peer-participant in-chat pin/unpin
-    /// directly to PersistedMessage, regardless of whether the chat
-    /// is currently open.
-    func applyIncomingMessagePin(chatJID: String, targetMessageID: String,
-                                 pinned: Bool, at: Date) {
-        enqueueMutation(.messagePin(id: targetMessageID, chatJID: chatJID,
-                                    pinned: pinned, at: at))
-    }
-
-    /// Persist a peer-device (un)star directly to PersistedMessage,
-    /// regardless of whether the chat is currently open. No preview
-    /// refresh — starring doesn't change last-message state.
-    func applyIncomingStar(chatJID: String, messageID: String,
-                           starred: Bool, at: Date) {
-        enqueueMutation(.star(id: messageID, chatJID: chatJID,
-                              starred: starred, at: at))
-    }
-
-    /// Persist a peer-device edit directly to PersistedMessage row,
-    /// regardless of whether the chat is currently open.
-    func applyIncomingEdit(chatJID: String, messageID: String, newText: String, at: Date) {
-        enqueueMutation(.edit(id: messageID, chatJID: chatJID,
-                              newText: newText, at: at))
-    }
-
-    /// F21: queue a `MessageMutation` for the background writer and arm
-    /// a 50 ms flush task. When the batch persists, refresh the sidebar
-    /// preview for every chat JID that received a mutation that affects
-    /// last-message text (delete / revoke / edit).
-    private func enqueueMutation(_ m: MessageWriter.MessageMutation) {
-        pendingMutations.append(m)
-        guard pendingMutationsFlush == nil else { return }
-        pendingMutationsFlush = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .milliseconds(50))
-            guard let self else { return }
-            let batch = self.pendingMutations
-            self.pendingMutations.removeAll(keepingCapacity: true)
-            self.pendingMutationsFlush = nil
-            guard !batch.isEmpty, let writer = self.writer else { return }
-            await writer.enqueueMutations(batch)
-            // Preview refresh runs AFTER the writer commits so the
-            // MainActor fetch sees the new revoked / locally-deleted /
-            // text fields. star and message-pin don't affect preview
-            // text so they don't trigger a refresh.
-            var chatsNeedingRefresh: Set<String> = []
-            for m in batch {
-                switch m {
-                case .localDelete(_, let chatJID),
-                     .revoke(_, let chatJID, _, _),
-                     .edit(_, let chatJID, _, _):
-                    chatsNeedingRefresh.insert(chatJID)
-                case .messagePin, .star:
-                    break
-                }
-            }
-            for jid in chatsNeedingRefresh {
-                self.refreshPreview(chatJID: jid)
-            }
-        }
-    }
-
-    /// Re-derive `lastMessage` / `lastTimestamp` for `chatJID` from the
-    /// most-recent PersistedMessage row. Honors revoked / locally-deleted
-    /// state with a 🚫 prefix. Called by CVM after edit / revoke /
-    /// delete-for-me mutations so the sidebar stays in sync.
-    func refreshPreview(chatJID: String) {
-        guard let context else { return }
-        var descriptor = FetchDescriptor<PersistedMessage>(
-            // F122: latest *previewable* row — a trailing system/protocol
-            // row must not wipe the preview to "".
-            predicate: #Predicate {
-                $0.chatJID == chatJID
-                    && $0.kind != "system" && $0.kind != "protocol"
-            },
-            sortBy: [SortDescriptor(\.timestamp, order: .reverse)])
-        descriptor.fetchLimit = 1
-        guard let row = try? context.fetch(descriptor).first else { return }
-        let preview = Self.previewText(for: row)
-        let resolved = resolveMentionsText(preview) { [weak session] jid in
-            session?.displayName(for: jid) ?? jid
-        }
-        guard let idx = chats.firstIndex(where: { $0.jid == chatJID }) else { return }
-        var c = chats[idx]
-        c.lastMessage = resolved
-        c.lastTimestamp = Int64(row.timestamp.timeIntervalSince1970)
-        chats[idx] = c
-        upsertPersisted(c, preview: c.lastMessage)
-        sortChats()
-    }
-
-    private static func previewText(for m: PersistedMessage) -> String {
-        if m.revokedAt != nil   { return "🚫 message deleted" }
-        if m.locallyDeleted     { return "🚫 you deleted this" }
-        // Kind gate BEFORE text: system rows carry body text
-        // ("Encryption key with X changed.") that must never become
-        // the sidebar preview.
-        if m.kind == "system" || m.kind == "protocol" { return "" }
-        if let t = m.text, !t.isEmpty { return t }
-        switch m.kind {
-        case "image":    return "📷 Photo"
-        case "video":    return "🎥 Video"
-        case "audio":    return "🎤 Audio"
-        case "document": return "📄 Document"
-        case "sticker":  return "Sticker"
-        case "location": return "📍 Location"
-        case "poll":     return "📊 Poll"
-        case "protocol", "system": return ""
-        default:         return "[\(m.kind)]"
-        }
-    }
-
     private func sortChats() {
         chats.sort(by: Self.chatOrder)
     }
@@ -1206,28 +817,14 @@ final class ChatListViewModel {
             }
         }
         guard !pairs.isEmpty else { return }
-        for (lid, pn) in pairs {
-            guard let li = chats.firstIndex(where: { $0.jid == lid }),
-                  let pi = chats.firstIndex(where: { $0.jid == pn }) else { continue }
-            let lidChat = chats[li]
-            var pnChat = chats[pi]
-            pnChat.unread += lidChat.unread
-            if lidChat.lastTimestamp > pnChat.lastTimestamp {
-                pnChat.lastTimestamp = lidChat.lastTimestamp
-                pnChat.lastMessage = lidChat.lastMessage
-            }
-            // Adopt the LID row's name only if the phone row is still an
-            // unresolved placeholder (its jid as the name).
-            if pnChat.name == pn, lidChat.name != lid {
-                pnChat.name = lidChat.name
-            }
-            chats[pi] = pnChat
-            upsertPersisted(pnChat)
+        guard let writer = session?.messageWriter else { return }
+        Task {
+            do {
+                try await writer.mergeChats(pairs)
+                chats.removeAll { chat in pairs.contains { $0.lid == chat.jid || $0.pn == chat.jid } }
+                await runBootstrap()
+            } catch { session?.persistenceError = error.localizedDescription }
         }
-        let lids = Set(pairs.map(\.lid))
-        chats.removeAll { lids.contains($0.jid) }
-        _ = SQLiteDedupe.mergeLIDChats(pairs)
-        sortChats()
     }
 
     private func applyLocalPin(chatJID: String, pinnedAt: Date?) {
@@ -1694,25 +1291,17 @@ final class ChatListViewModel {
         session?.deletedChatJID = chatJID
     }
 
+    func hideDeletedChat(_ jid: String) {
+        tombstone(jid)
+        dirtyChatJIDs.remove(jid)
+        chats.removeAll { $0.jid == jid }
+        session?.deletedChatJID = jid
+    }
+
     private func removeChatLocally(_ chatJID: String) {
-        tombstone(chatJID)
-        chats.removeAll { $0.jid == chatJID }
-        if let context {
-            let msgs = FetchDescriptor<PersistedMessage>(
-                predicate: #Predicate { $0.chatJID == chatJID })
-            if let rows = try? context.fetch(msgs) {
-                for r in rows { context.delete(r) }
-            }
-            let chatDesc = FetchDescriptor<PersistedChat>(
-                predicate: #Predicate { $0.jid == chatJID })
-            if let row = try? context.fetch(chatDesc).first {
-                context.delete(row)
-            }
-            try? context.save()
-        }
-        // SwiftData delete of unique-key rows is unreliable here, so purge
-        // directly so the chat doesn't resurrect on next launch.
-        _ = SQLiteDedupe.purgeChat(jid: chatJID)
+        hideDeletedChat(chatJID)
+        guard let session else { return }
+        session.purgeChat(chatJID)
     }
 
     /// Save a contact name (synced to the phone). Updates the local name on

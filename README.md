@@ -72,6 +72,8 @@ Install hitting a snag? See [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md)
 
 Local build, project layout, troubleshooting, and release flow live in
 [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md).
+State ownership and storage constraints are described in
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## Caveats
 

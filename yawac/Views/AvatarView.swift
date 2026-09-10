@@ -5,6 +5,9 @@ struct AvatarView: View {
     let name: String
     let size: CGFloat
     @Environment(SessionViewModel.self) private var session
+    @State private var loadedKey: String?
+    @State private var loadedImage: NSImage?
+    @State private var invalidation = 0
 
     /// JIDs from group participants come back in `@lid` form while the
     /// same person's 1:1 chat may be opened under the canonical PN form
@@ -17,25 +20,12 @@ struct AvatarView: View {
     }
 
     var body: some View {
-        // Read `ThumbnailCache.avatarRevision` so the body re-runs
-        // when the per-type 50ms-coalesced bump fires — that's how
-        // cold avatars appear without a per-instance `@State` flip +
-        // `.task(id:)` (which flashed the placeholder on every disk
-        // hit). Per-type revision (was a single shared `revision`
-        // until F39+) keeps image/video decode bursts from waking
-        // every avatar body.
-        let cache = ThumbnailCache.shared
-        let _ = cache.avatarRevision
         let key = cacheKey
-        // Capture the MainActor-isolated client ONCE so the detached
-        // fetcher closure doesn't reach back into session state from a
-        // background thread.
         let client = session.client
+        let image = ThumbnailCache.shared.avatarImage(forCacheKey: key)
+            ?? (loadedKey == key ? loadedImage : nil)
         Group {
-            if let img = cache.avatarImage(forCacheKey: key, fetcher: {
-                guard let client else { return nil }
-                return await AvatarCache.shared.ensure(jid: key, using: client)
-            }) {
+            if let img = image {
                 Image(nsImage: img)
                     .resizable()
                     .scaledToFill()
@@ -49,14 +39,23 @@ struct AvatarView: View {
         }
         .frame(width: size, height: size)
         .clipShape(.circle)
+        .task(id: "\(key)|\(invalidation)|\(client != nil)") {
+            guard let client else { return }
+            let image = await ThumbnailCache.shared.loadAvatar(key: key) {
+                await AvatarCache.shared.ensure(jid: key, using: client)
+            }
+            guard !Task.isCancelled else { return }
+            loadedKey = key
+            loadedImage = image
+        }
         .onReceive(NotificationCenter.default.publisher(
             for: .avatarCacheInvalidated)) { note in
             guard let invalid = note.userInfo?["jid"] as? String,
                   JIDNormalize.same(invalid, jid, client: session.client)
             else { return }
-            // Drop the in-memory NSImage so the next body eval misses
-            // and the load path re-runs; revision bump wakes observers.
-            ThumbnailCache.shared.invalidateAvatar(forCacheKey: key)
+            loadedImage = nil
+            loadedKey = nil
+            invalidation += 1
         }
     }
 

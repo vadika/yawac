@@ -20,6 +20,11 @@ struct IndexingChip: View {
             .padding(.vertical, 3)
             .background(Theme.surfaceAlt, in: Capsule())
             .padding(.horizontal, 8)
+        case .failed:
+            Button("Repair search index") {
+                Task { await index.bootstrapIfNeeded() }
+            }
+            .help("Messages are saved, but search needs to be rebuilt.")
         case .idle, .done:
             EmptyView()
         }

@@ -1131,34 +1131,21 @@ struct MessageRow: View {
 
     @ViewBuilder
     private func imageBubble(path: String?) -> some View {
-        let cache = ThumbnailCache.shared
-        let _ = cache.imageRevision  // subscribe to image cache invalidations
-        // F38: size the bubble from the sender-provided pixel dims so
-        // the placeholder reserves the same rectangle the decoded
-        // image will occupy. Eliminates the placeholder → image
-        // layout reflow the user saw as "I see how the images are
-        // drawn" during scroll.
-        let bubbleSize = Self.mediaBubbleSize(
-            width: message.mediaWidth, height: message.mediaHeight,
-            maxW: 320, maxH: 240, defaultW: 240, defaultH: 180)
-        if let p = path, let img = cache.image(forPath: p) {
-            Image(nsImage: img)
-                .resizable()
-                .scaledToFit()
-                .frame(width: bubbleSize.width, height: bubbleSize.height)
-                .clipShape(.rect(cornerRadius: 8))
-                .onTapGesture {
-                    NSWorkspace.shared.open(URL(fileURLWithPath: p))
+        let size = Self.mediaBubbleSize(width: message.mediaWidth, height: message.mediaHeight,
+                                        maxW: 320, maxH: 240, defaultW: 240, defaultH: 180)
+        if let path {
+            ResourceThumbnail(source: .image(path)) { image in
+                if let image {
+                    Image(nsImage: image).resizable().scaledToFit()
+                        .frame(width: size.width, height: size.height)
+                        .clipShape(.rect(cornerRadius: 8))
+                        .onTapGesture { NSWorkspace.shared.open(URL(fileURLWithPath: path)) }
+                } else {
+                    RoundedRectangle(cornerRadius: 8).fill(Theme.textMuted.opacity(0.15))
+                        .frame(width: size.width, height: size.height)
                 }
-        } else if path != nil {
-            // Path known, decoding in flight — reserve the same
-            // rectangle the decoded image will land in.
-            RoundedRectangle(cornerRadius: 8)
-                .fill(Theme.textMuted.opacity(0.15))
-                .frame(width: bubbleSize.width, height: bubbleSize.height)
-        } else {
-            downloadingPlaceholder("photo")
-        }
+            }
+        } else { downloadingPlaceholder("photo") }
     }
 
     /// F38: pin a sender-supplied (width × height) into a bubble's
@@ -1180,20 +1167,16 @@ struct MessageRow: View {
 
     @ViewBuilder
     private func stickerBubble(path: String?) -> some View {
-        let cache = ThumbnailCache.shared
-        let _ = cache.imageRevision
-        if let p = path, let img = cache.image(forPath: p) {
-            Image(nsImage: img)
-                .resizable()
-                .scaledToFit()
-                .frame(maxWidth: 160, maxHeight: 160)
-        } else if path != nil {
-            RoundedRectangle(cornerRadius: 8)
-                .fill(Theme.textMuted.opacity(0.1))
-                .frame(width: 140, height: 140)
-        } else {
-            downloadingPlaceholder("face.smiling")
-        }
+        if let path {
+            ResourceThumbnail(source: .image(path)) { image in
+                if let image {
+                    Image(nsImage: image).resizable().scaledToFit().frame(maxWidth: 160, maxHeight: 160)
+                } else {
+                    RoundedRectangle(cornerRadius: 8).fill(Theme.textMuted.opacity(0.1))
+                        .frame(width: 140, height: 140)
+                }
+            }
+        } else { downloadingPlaceholder("face.smiling") }
     }
 
     @ViewBuilder
@@ -1329,16 +1312,9 @@ private struct MapSnapshotImage: View {
     let lng: Double
 
     var body: some View {
-        // Shared in-memory cache + coalesced revision bump avoids the
-        // per-instance @State flip + .task(id:) flicker on every
-        // location bubble on scroll (F12). Underlying snapshot source
-        // is still `MapSnapshotCache`. Map landings piggyback on
-        // imageRevision (no dedicated map observer needed).
-        let cache = ThumbnailCache.shared
-        let _ = cache.imageRevision
-        Group {
-            if let img = cache.mapImage(lat: lat, lng: lng) {
-                Image(nsImage: img).resizable().aspectRatio(contentMode: .fill)
+        ResourceThumbnail(source: .map(lat, lng)) { image in
+            if let image {
+                Image(nsImage: image).resizable().aspectRatio(contentMode: .fill)
             } else {
                 ZStack {
                     Rectangle().fill(Theme.surface)

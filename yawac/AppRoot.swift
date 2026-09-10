@@ -27,7 +27,7 @@ struct AppRoot: View {
         // floating SyncBanner overlay — no top strip pushing content.
         .task {
             NotificationRouter.shared.session = session
-            await session.boot()
+            if !AppPaths.isRunningTests { await session.boot() }
         }
     }
 }

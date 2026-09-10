@@ -37,36 +37,19 @@ struct VideoThumbnailView: View {
     let path: String
 
     var body: some View {
-        // Read `revision` so SwiftUI subscribes to ThumbnailCache via
-        // its @Observable conformance. When a miss completes (either
-        // disk-cache fetch or AVAsset generate), the cache bumps
-        // `revision` and this body re-evals, picking up the now-cached
-        // NSImage. No per-instance @State + .task — that pattern
-        // forced every bubble through a placeholder frame even on
-        // disk-cache HIT (one frame of gray per bubble, landing on
-        // different frames = flicker). The cache call itself kicks the
-        // background load on miss; preheat in applyHistorySnapshot
-        // fills the cache for the visible window before first paint.
-        let cache = ThumbnailCache.shared
-        let _ = cache.videoRevision
-        ZStack {
-            if let img = cache.videoImage(forPath: path) {
-                Image(nsImage: img)
-                    .resizable()
-                    .scaledToFit()
-            } else {
-                Color.gray.opacity(0.2)
+        ResourceThumbnail(source: .video(path)) { image in
+            ZStack {
+                if let image { Image(nsImage: image).resizable().scaledToFit() }
+                else { Color.gray.opacity(0.2) }
+                Image(systemName: "play.circle.fill").font(.largeTitle)
+                    .foregroundStyle(.white).shadow(radius: 2)
             }
-            Image(systemName: "play.circle.fill")
-                .font(.largeTitle)
-                .foregroundStyle(.white)
-                .shadow(radius: 2)
         }
     }
 
     // MARK: - Cache
 
-    private static let cacheDir: URL = {
+    nonisolated private static let cacheDir: URL = {
         let support = (try? FileManager.default.url(
             for: .cachesDirectory, in: .userDomainMask,
             appropriateFor: nil, create: true))
@@ -82,7 +65,7 @@ struct VideoThumbnailView: View {
     /// `internal static` so `ConversationViewModel.buildHistorySnapshot`
     /// can probe / read the pre-existing PNG bytes off-MainActor for the
     /// in-memory `ThumbnailCache.preheatVideo` warm-up.
-    static func cachePath(for path: String) -> URL {
+    nonisolated static func cachePath(for path: String) -> URL {
         let digest = SHA256.hash(data: Data(path.utf8))
         let name = digest.map { String(format: "%02x", $0) }.joined() + ".png"
         return cacheDir.appendingPathComponent(name)

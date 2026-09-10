@@ -20,13 +20,10 @@ struct SendWhatsAppMessage: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult & ReturnsValue<String> {
-        guard let client = session.client else { throw ChatResolveError.notPaired }
+        guard session.client != nil else { throw ChatResolveError.notPaired }
         let chats = session.chatList?.chats ?? []
         let target = try ChatResolver.resolveChat(chat, in: chats)
-        let result = try await Task.detached(priority: .userInitiated) {
-            [client, jid = target.jid, body = self.body] in
-            try client.sendText(jid, body)
-        }.value
+        let result = try await session.sendText(chatJID: target.jid, body: body)
         return .result(value: "Sent message \(result.messageID)")
     }
 }

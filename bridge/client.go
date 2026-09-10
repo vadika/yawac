@@ -73,7 +73,9 @@ func applyYawacBrand() {
 // suffix that the Go toolchain produces.
 func init() {
 	if strings.HasSuffix(os.Args[0], ".test") ||
-		strings.Contains(os.Args[0], "/_test/") {
+		strings.Contains(os.Args[0], "/_test/") ||
+		strings.HasSuffix(os.Args[0], "/xctest") ||
+		os.Getenv("XCTestConfigurationFilePath") != "" {
 		return
 	}
 	const logPath = "/tmp/yawac.log"
@@ -116,8 +118,8 @@ type Client struct {
 	// trip WhatsApp's 429 rate limiter. lastForceRefresh records the most
 	// recent successful force refresh; calls within mediaConnCooldown are
 	// no-ops that simply succeed.
-	mediaConnMu       sync.Mutex
-	lastForceRefresh  time.Time
+	mediaConnMu      sync.Mutex
+	lastForceRefresh time.Time
 }
 
 const mediaConnCooldown = 30 * time.Second

@@ -21,19 +21,8 @@ struct SharedMediaCell: View {
     var body: some View {
         Button(action: open) {
             GeometryReader { geo in
-                // Shared cache + coalesced revision: media-grid cells
-                // populate without a per-cell @State flip (F12).
-                // Subscribe to the per-type revision matching this
-                // cell's media kind.
-                let cache = ThumbnailCache.shared
-                let _ = (item.kind == "video") ? cache.videoRevision : cache.imageRevision
-                let img: NSImage? = {
-                    guard let p = item.path, !p.isEmpty,
-                          FileManager.default.fileExists(atPath: p) else { return nil }
-                    return item.kind == "video"
-                        ? cache.videoImage(forPath: p)
-                        : cache.image(forPath: p)
-                }()
+                ResourceThumbnail(source: item.kind == "video"
+                                  ? .video(item.path ?? "") : .image(item.path ?? "")) { img in
                 ZStack {
                     Theme.surfaceAlt
                     if let img {
@@ -73,6 +62,7 @@ struct SharedMediaCell: View {
                 }
                 .frame(width: geo.size.width, height: geo.size.width)
                 .clipShape(RoundedRectangle(cornerRadius: 6))
+                }
             }
             .aspectRatio(1, contentMode: .fit)
             .contentShape(Rectangle())

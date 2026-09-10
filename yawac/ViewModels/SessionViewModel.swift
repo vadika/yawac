@@ -13,16 +13,14 @@ final class SessionViewModel {
     }
 
     var state: State = .loading
+    var persistenceError: String?
     var qrCode: String?
     var client: WAClient?
     /// Pending join-request counts per group, surfaced in the chat list
     /// badge and admin panel header. Recreated when the WAClient is built
     /// in `boot()` so the store can fan out queue refreshes via the bridge.
     private(set) var joinRequestStore: JoinRequestStore = JoinRequestStore()
-    /// SwiftData context injected from `ContentView.task` once the
-    /// environment is in scope. Read by `requestHistoryBackfillIfNeeded`
-    /// to find the globally-oldest persisted message before issuing a
-    /// one-shot HistorySyncFromOldest IQ on first v0.8.1 boot.
+    /// Container context supplied at application composition time.
     @ObservationIgnored
     var modelContext: ModelContext?
     /// One-shot gate for the v0.8.1 history backfill — flipped to true on
@@ -63,10 +61,41 @@ final class SessionViewModel {
         /// instead of guessing from the raw `chunks` count.
         var fresh: Int = 0
         var dupe: Int = 0
+        var completion: String?
+        var failure: String?
     }
 
     /// Observable so the Settings row redraws on each chunk.
-    private(set) var fullSync: FullSyncState = .init()
+    private var fullSyncState: FullSyncState = .init()
+    var fullSync: FullSyncState {
+        var state = fullSyncState
+        state.inFlight = fullSyncRun != nil
+        return state
+    }
+
+    private final class HistoryRun {
+        let id = UUID()
+        var task: Task<Void, Never>?
+        var timeout: Task<Void, Never>?
+        var cancellationReason = "Cancelled"
+    }
+    private var fullSyncRun: HistoryRun?
+    @ObservationIgnored private var gapSweepTask: Task<Void, Never>?
+    @ObservationIgnored private var initialHistoryTask: Task<Void, Never>?
+
+    struct HistoryAnchor: Sendable {
+        let jid: String
+        let msgID: String
+        let senderJID: String
+        let fromMe: Bool
+        let tsUnix: Int64
+    }
+    // Concrete scheduler seams keep tests independent of a phone and real minutes.
+    @ObservationIgnored var historySleep: (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
+    @ObservationIgnored var historyTimeoutSleep: () async throws -> Void = { try await Task.sleep(for: .seconds(300)) }
+    @ObservationIgnored var historyAnchorLoader: (() async throws -> [HistoryAnchor])?
+    @ObservationIgnored var historyRequest: ((HistoryAnchor, Int) async throws -> Void)?
+    @ObservationIgnored var fullHistoryRequest: (() async throws -> Void)?
 
     /// F67: process-lifetime dedupe set for media-retry IQ requests.
     /// Previously `ConversationViewModel.retriesRequested` lived per-CVM
@@ -79,8 +108,6 @@ final class SessionViewModel {
     /// require SwiftData and isn't worth the complexity yet.
     @ObservationIgnored var mediaRetryAttempted: Set<String> = []
 
-    /// Watchdog cleared 60s after the last chunk arrives.
-    @ObservationIgnored private var fullSyncTimeoutTask: Task<Void, Never>?
     /// A recent-history request wakes the primary phone. Keep automatic
     /// recovery scoped to chats the user actually opens (plus newly joined
     /// groups), and send at most one request per chat for this app session.
@@ -92,7 +119,7 @@ final class SessionViewModel {
     /// Back-ref to the chat list VM so views (e.g. ConversationView) can
     /// invoke side-effects like `markRead` without threading it through
     /// every constructor. Set once from ContentView's boot path.
-    weak var chatList: ChatListViewModel?
+    var chatList: ChatListViewModel?
     weak var currentConversation: ConversationViewModel?
     var syncing: Bool = false
     var syncedConversations: Int = 0
@@ -442,15 +469,16 @@ final class SessionViewModel {
         // a handful of times instead of dozens.
         let debounceMs: UInt64 = fullSync.inFlight ? 5000 : 250
         historySyncFlush = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .milliseconds(debounceMs))
-            guard let self else { return }
-            self.historySyncFlush = nil
+            do { try await Task.sleep(for: .milliseconds(debounceMs)) } catch { return }
+            guard let self, !Task.isCancelled, self.client === client else { return }
+            defer { if self.client === client { self.historySyncFlush = nil } }
             // CGo bridge call off MainActor — listContacts marshals a
             // potentially large array.
             let contacts = await Task.detached(priority: .userInitiated) {
                 () -> [BridgeContact] in
                 (try? client.listContacts()) ?? []
             }.value
+            guard !Task.isCancelled, self.client === client else { return }
             // Groups list lands incomplete on initial app-state sync; re-fetch
             // during the coalesced reconcile so JID-stubbed chats get their
             // real names + community flags.
@@ -458,6 +486,7 @@ final class SessionViewModel {
                 () -> [BridgeGroupModel] in
                 (try? client.listGroups()) ?? []
             }.value
+            guard !Task.isCancelled, self.client === client else { return }
             vm.resolveNames(contacts)
             vm.mergeContacts(contacts)
             self.ingestContacts(contacts)
@@ -542,7 +571,8 @@ final class SessionViewModel {
         }
     }
 
-    init() {
+    init(container: ModelContainer? = nil) {
+        self.modelContext = container?.mainContext
         // App foreground → opportunistic refresh of admin approval queues,
         // throttled to one fan-out per 30s so a rapid window-cycle doesn't
         // hammer the bridge.
@@ -567,11 +597,23 @@ final class SessionViewModel {
         }
     }
 
+    @ObservationIgnored private var booting = false
+    @ObservationIgnored private var pushNameTask: Task<Void, Never>?
+    @ObservationIgnored private var directoryTask: Task<Void, Never>?
+    private(set) var messageWriter: MessageWriter?
+    @ObservationIgnored private var admittingEvents = false
+
     func boot() async {
+        guard !booting, client == nil else { return }
+        booting = true
+        defer { booting = false }
         do {
             let url = try AppPaths.databaseURL()
             let c = try WAClient(dbPath: url.path)
-            self.client = c
+            guard let container = modelContext?.container else {
+                throw WAClient.WAError.bridgeFailure("Message store is not configured")
+            }
+            await prepare(client: c, container: container)
             // Rebind the join-request store now that the bridge client exists.
             // The fetch closure is immutable on the store, so we swap the instance.
             self.joinRequestStore = JoinRequestStore { chatJID in
@@ -579,9 +621,21 @@ final class SessionViewModel {
             }
             // Websocket connect can stall on slow networks; keep it off MainActor.
             try await Task.detached(priority: .userInitiated) { try c.connect() }.value
+            guard client === c, admittingEvents else { return }
             self.state = c.isLoggedIn ? .ready : .needsPair
             hydratePushNamesFromStore()
-            consumeEvents()
+            directoryTask = Task { [weak self] in
+                guard let self, let vm = self.chatList else { return }
+                let groups = await Task.detached { (try? c.listGroups()) ?? [] }.value
+                guard !Task.isCancelled, self.client === c else { return }
+                vm.mergeGroups(groups)
+                self.ingestGroups(groups)
+                let contacts = await Task.detached { (try? c.listContacts()) ?? [] }.value
+                guard !Task.isCancelled, self.client === c else { return }
+                vm.resolveNames(contacts)
+                vm.mergeContacts(contacts)
+                self.ingestContacts(contacts)
+            }
             let monitor = ConnectivityMonitor(
                 isReady: { [weak self] in self?.state == .ready },
                 isConnected: { [weak self] in self?.client?.connected ?? false },
@@ -602,19 +656,39 @@ final class SessionViewModel {
     /// captured on prior sessions so cold-start renders names instead of
     /// raw user ids — even for chats the user never opens this session.
     private func hydratePushNamesFromStore() {
-        // Full-table SQLite scan — keep it off MainActor during boot.
-        Task.detached(priority: .utility) { [weak self] in
-            var fresh: [String: String] = [:]
-            for (jid, name) in SQLiteDedupe.sendersWithPushNames() {
-                fresh[JIDNormalize.bare(jid)] = name
-            }
-            await MainActor.run { [weak self] in
-                guard let self else { return }
-                for (key, name) in fresh where self.contactNames[key] == nil {
-                    self.contactNames[key] = name
-                }
-            }
+        guard let storeURL = modelContext?.container.configurations.first?.url, let source = client else { return }
+        pushNameTask?.cancel()
+        pushNameTask = Task { [weak self] in
+            let fresh = await Task.detached(priority: .utility) {
+                Dictionary(SQLiteDedupe.sendersWithPushNames(at: storeURL).map {
+                    (JIDNormalize.bare($0.jid), $0.name)
+                }, uniquingKeysWith: { _, latest in latest })
+            }.value
+            guard let self, !Task.isCancelled, client === source, admittingEvents else { return }
+            for (key, name) in fresh where contactNames[key] == nil { contactNames[key] = name }
         }
+    }
+
+    /// Register before connecting: the stream buffers while local bootstrap runs.
+    func prepare(client: WAClient, container: ModelContainer) async {
+        await stopSessionWork()
+        self.client = client
+        modelContext = container.mainContext
+        didRebootstrapMessageIndex = false
+        let storeURL = container.configurations.first!.url
+        let index = storeURL == AppPaths.messageStoreURL ? MessageIndex.shared : MessageIndex(storeURL: storeURL)
+        let writer = MessageWriter(container: container, index: index,
+                                   canonicalize: { JIDNormalize.canonical($0, client: client) })
+        messageWriter = writer
+        if !AppPaths.isRunningTests { await writer.maintainStore() }
+        do { try await writer.prepareChats() } catch { persistenceError = error.localizedDescription }
+        await writer.configureIndex(ownJID: client.ownJID, ownPushName: client.ownPushName)
+        let list = ChatListViewModel(client: client, context: container.mainContext, bootstrap: false)
+        list.session = self
+        chatList = list
+        await list.runBootstrap()
+        admittingEvents = true
+        consumeEvents()
     }
 
     private func consumeEvents() {
@@ -623,12 +697,17 @@ final class SessionViewModel {
         let stream = client.eventStream()
         eventTask = Task { @MainActor [weak self] in
             for await event in stream {
-                self?.handle(event)
+                guard !Task.isCancelled, self?.client === client else { return }
+                self?.receive(event)
             }
         }
     }
 
     func logout() async {
+        await stopSessionWork()
+        messageWriter = nil
+        chatList = nil
+        currentConversation = nil
         // Re-arm the v0.8.1 one-shot history backfill so the next pairing
         // session re-runs it against whatever state the new account has.
         historyBackfillCompleted = false
@@ -654,7 +733,7 @@ final class SessionViewModel {
         await boot()
     }
 
-    private func handle(_ event: WAClient.Event) {
+    private func handleSessionState(_ event: WAClient.Event) {
         switch event {
         case .qr(let code):
             qrCode = code
@@ -668,36 +747,9 @@ final class SessionViewModel {
             markConnected()
             syncing = true
             armSyncWatchdog()
-            // Cache the paired account's own push name + bare JID on
-            // the FTS index. Push name fills `sender` for own-outbound
-            // rows (whatsmeow never sets senderPushName on fromMe =
-            // true); bare JID fills `sender_jid` so the Sender filter
-            // is stable across push-name changes. Canonicalizer
-            // collapses LID / PN siblings of the same contact into one
-            // chip entry.
-            if let client {
-                MessageIndex.shared.setOwnPushName(client.ownPushName)
-                MessageIndex.shared.setCanonicalizer { jid in
-                    JIDNormalize.canonical(jid, client: client)
-                }
-                MessageIndex.shared.setOwnBareJID(client.ownJID)
-                // The app-init bootstrap walked before any of the
-                // setters above existed — own outbound rows ended up
-                // with empty / device-suffixed sender_jid and LID /
-                // PN siblings of the same contact got separate ids.
-                // Rebuild once per session now that the setters are
-                // primed, but only when the inputs that feed the FTS
-                // row contents (ownJID, ownPushName, canonicalizer
-                // version) have actually changed since the last
-                // bootstrap — otherwise every reconnect would drop +
-                // repopulate the whole table for no reason.
-                if !didRebootstrapMessageIndex {
-                    didRebootstrapMessageIndex = true
-                    Task.detached(priority: .utility) {
-                        await MessageIndex.shared
-                            .rebootstrapIfFingerprintChanged()
-                    }
-                }
+            if !didRebootstrapMessageIndex, let client, let writer = messageWriter {
+                didRebootstrapMessageIndex = true
+                Task { await writer.configureIndex(ownJID: client.ownJID, ownPushName: client.ownPushName) }
             }
             // Publish our own presence as available so whatsmeow honors
             // SubscribePresence(jid) calls — peers don't share presence
@@ -712,12 +764,12 @@ final class SessionViewModel {
             // group so the chat-list badge is correct as soon as the
             // sidebar renders post-connect.
             Task { await self.refreshAllAdminApprovalGroups() }
-            // v0.8.1 one-shot history backfill against the globally-oldest
-            // persisted message. No-op once the flag is set; see T12 for
-            // where the flag flips on first HistorySync arrival.
-            Task { await self.requestHistoryBackfillIfNeeded() }
+            // Initial account backfill stays gated by the first contentful chunk.
+            initialHistoryTask?.cancel()
+            initialHistoryTask = Task { await self.requestHistoryBackfillIfNeeded() }
             // F119: recover quoted-but-missing originals from the phone.
-            Task { await self.runGapSweepIfNeeded() }
+            gapSweepTask?.cancel()
+            gapSweepTask = Task { await self.runGapSweepIfNeeded() }
         case .joinApprovalModeChanged(let chatJID, let on, _, _):
             if on {
                 Task { await self.joinRequestStore.refresh(chatJID: chatJID) }
@@ -745,9 +797,9 @@ final class SessionViewModel {
                     "INITIAL_BOOTSTRAP", "RECENT", "FULL", "ON_DEMAND",
                 ]
                 if contentful.contains(syncType) {
-                    fullSync.progress = max(fullSync.progress, progress)
-                    fullSync.chunks += 1
-                    fullSync.messages += chunkMessages
+                    fullSyncState.progress = max(fullSync.progress, progress)
+                    fullSyncState.chunks += 1
+                    fullSyncState.messages += chunkMessages
                     armFullSyncTimeout()  // re-arm silence window
                     // F29: removed the `progress >= 100` auto-clear.
                     // Phone reports progress=100 on every ON_DEMAND chunk
@@ -773,342 +825,474 @@ final class SessionViewModel {
         case .groupJoined(let group, _, _):
             ingestGroups([group])
             Task { await self.requestRecentHistoryIfNeeded(for: group.jid) }
-        case .receipt(let r):
-            persistReceipt(r)
-        case .pollVote(let chat, let pmid, let voter, let hashes):
-            persistPollVote(chatJID: chat, pollMessageID: pmid,
-                            voterJID: voter, optionHashes: hashes)
         default:
             break
         }
     }
 
-    /// Off-actor raw SQLite update so the open ConversationView still
-    /// gets the live event for in-memory state, while the persisted
-    /// column is updated in the background for cold-start hydration.
-    private nonisolated func persistReceipt(_ r: BridgeReceipt) {
-        Task.detached(priority: .utility) {
-            _ = SQLiteDedupe.applyReceiptStatus(
-                messageIDs: r.messageIDs, status: r.status)
+
+    @ObservationIgnored private var pendingWrites: [(WAClient.Event, MessageWriter.Operation)] = []
+    @ObservationIgnored private var writeFlushTask: Task<Void, Never>?
+    @ObservationIgnored private var writing = false
+
+    func receive(_ event: WAClient.Event) {
+        guard admittingEvents else { return }
+        switch event {
+        case .message(let message):
+            guard chatList?.accepts(message) == true else { return }
+            enqueue(event, operation: .message(message))
+        case .chatDeleted(let jid, _):
+            let canonical = JIDNormalize.canonical(jid, client: client)
+            chatList?.hideDeletedChat(canonical)
+            enqueue(event, operation: .purgeChat(canonical))
+        case .reaction(let reaction):
+            enqueue(event, operation: .reaction(reaction))
+        case .receipt(let receipt):
+            enqueue(event, operation: .receipt(receipt))
+        case .pollVote(let chat, let message, let voter, let hashes):
+            enqueue(event, operation: .vote(chat: chat, message: message, voter: voter, hashes: hashes, at: .now))
+        case .mediaRetry(let id, let ok, let path, _):
+            if ok, let path, !path.isEmpty {
+                enqueue(event, operation: .mutation(.mediaRetry(id: id, directPath: path)))
+            } else {
+                enqueue(event, operation: .mutation(.mediaExpired(id: id, expired: true)))
+            }
+        default:
+            if let mutation = Self.mutation(for: event) {
+                enqueue(event, operation: .mutation(mutation))
+            } else {
+                handleSessionState(event)
+                applyPresentation(event)
+            }
         }
     }
 
-    private nonisolated func persistPollVote(chatJID: String,
-                                             pollMessageID: String,
-                                             voterJID: String,
-                                             optionHashes: [String]) {
-        let json = (try? JSONEncoder().encode(optionHashes))
-            .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
-        Task.detached(priority: .utility) {
-            SQLiteDedupe.upsertPollVote(
-                chatJID: chatJID,
-                pollMessageID: pollMessageID,
-                voterJID: voterJID,
-                optionHashesJSON: json,
-                timestamp: Date())
+    private static func mutation(for event: WAClient.Event) -> MessageWriter.MessageMutation? {
+        switch event {
+        case .messageEdited(let chat, let id, let text, let ts):
+            return .edit(id: id, chatJID: chat, newText: text, at: Date(timeIntervalSince1970: Double(ts)))
+        case .messageRevoked(let chat, let id, let by, let ts):
+            return .revoke(id: id, chatJID: chat, by: by, at: Date(timeIntervalSince1970: Double(ts)))
+        case .messageLocallyDeleted(let chat, let id, _):
+            return .localDelete(id: id, chatJID: chat)
+        case .messageStarred(let chat, let id, _, _, let starred, let ts):
+            return .star(id: id, chatJID: chat, starred: starred, at: Date(timeIntervalSince1970: Double(ts)))
+        case .messagePinned(let chat, let id, _, let pinned, let ts):
+            return .messagePin(id: id, chatJID: chat, pinned: pinned, at: Date(timeIntervalSince1970: Double(ts)))
+        default: return nil
         }
     }
 
-    /// User-triggered full history sync. Belt-and-suspenders:
-    /// 1. Fire the account-wide FULL_HISTORY_SYNC_ON_DEMAND (type 6,
-    ///    F27 path) — works only on first pair / first session;
-    ///    phone silently drops repeats.
-    /// 2. Run a multi-round per-chat fan-out: each round snapshots the
-    ///    current oldest persisted message per chat, fires type-5
-    ///    HISTORY_SYNC_ON_DEMAND (count=200) for every chat with a
-    ///    100 ms throttle, waits ~30 s for chunks to land + the
-    ///    F3 batched writer to commit them, then samples again. If
-    ///    any chat got deeper, loop. Caps at 10 rounds so a stuck
-    ///    sync never spins forever.
-    /// F28, F29 (idle-sublabel + diagnostics), F30 (fan-out),
-    /// F30v2 (multi-round recursion).
-    /// F39: bumps fresh / dupe per-message counts on `fullSync`.
-    /// Public so `ChatListViewModel.ingest`'s flush can drive it.
+    func purgeChat(_ jid: String) {
+        enqueue(.unknown(kind: "local chat deletion", payload: ""), operation: .purgeChat(jid))
+    }
+
+    private func enqueue(_ event: WAClient.Event, operation: MessageWriter.Operation) {
+        pendingWrites.append((event, operation))
+        guard writeFlushTask == nil else { return }
+        let delay: Duration = fullSync.inFlight ? .milliseconds(500) : .milliseconds(50)
+        writeFlushTask = Task { [weak self] in
+            do { try await Task.sleep(for: delay) } catch { return }
+            await self?.flushWrites()
+        }
+    }
+
+    func flushWrites() async {
+        // Awaiting the existing task is handled by flushPendingWrites below;
+        // only one drain may enter the writer at a time.
+        guard !writing else { return }
+        writing = true
+        defer { writing = false; writeFlushTask = nil }
+        while !pendingWrites.isEmpty, let writer = messageWriter {
+            let batch = pendingWrites
+            pendingWrites.removeAll(keepingCapacity: true)
+            do {
+                let commit = try await writer.write(batch.map { $0.1 })
+                guard messageWriter === writer else { return }
+                let messages = batch.compactMap { event, _ -> BridgeMessage? in
+                    if case .message(let message) = event { return message }; return nil
+                }
+                publish(commit, incoming: messages)
+                for (event, _) in batch {
+                    handleSessionState(event)
+                    applyPresentation(event)
+                }
+            } catch {
+                persistenceError = error.localizedDescription
+            }
+        }
+    }
+
+    func flushPendingWrites() async {
+        if let task = writeFlushTask { await task.value }
+        if !pendingWrites.isEmpty { await flushWrites() }
+    }
+
+    private func publish(_ commit: MessageWriter.Commit, incoming: [BridgeMessage]) {
+        let changedIDs = Set(commit.changed.map(\.id))
+        let surviving = zip(incoming, commit.received).filter { changedIDs.contains($0.0.id) }
+        chatList?.applyCommittedMessages(surviving.map { $0.0 }, outcomes: surviving.map { $0.1 }, previews: commit.previews)
+        for jid in commit.deletedChats { chatList?.hideDeletedChat(jid) }
+        currentConversation?.applyCommitted(commit.changed, incoming: incoming)
+    }
+
+    func commit(_ operation: MessageWriter.Operation, from source: WAClient) async throws -> MessageWriter.Commit {
+        guard admittingEvents, client === source, let writer = messageWriter else {
+            throw WAClient.WAError.bridgeFailure("The session has ended")
+        }
+        await flushPendingWrites()
+        guard admittingEvents, client === source, messageWriter === writer else { throw WAClient.WAError.bridgeFailure("The session has ended") }
+        let result = try await writer.write([operation])
+        if client === source, messageWriter === writer { publish(result, incoming: []) }
+        return result
+    }
+
+    /// Used by all local send surfaces after the server returns a real ID.
+    func recordOutgoing(_ message: BridgeMessage, from source: WAClient) async throws {
+        guard admittingEvents, client === source else { throw WAClient.WAError.bridgeFailure("The sending session has ended") }
+        guard let writer = messageWriter else { throw WAClient.WAError.bridgeFailure("Message store is not ready") }
+        await flushPendingWrites()
+        guard admittingEvents, client === source else { throw WAClient.WAError.bridgeFailure("The sending session has ended") }
+        do {
+            let commit = try await writer.write([.message(message)])
+            guard messageWriter === writer else { return }
+            _ = chatList?.accepts(message)
+            publish(commit, incoming: [message])
+        } catch {
+            if client === source { persistenceError = "Sent message \(message.id), but could not save it locally: \(error.localizedDescription)" }
+            throw error
+        }
+    }
+
+    func sendText(chatJID: String, body: String) async throws -> BridgeSendResult {
+        guard let client else { throw WAClient.WAError.bridgeFailure("Not paired") }
+        let result = try await Task.detached { try client.sendText(chatJID, body) }.value
+        let message = UIMessage(id: result.messageID, chatJID: chatJID, senderJID: client.ownJID,
+                                fromMe: true, timestamp: Date(timeIntervalSince1970: Double(result.timestamp)),
+                                body: .text(body))
+        do { try await recordOutgoing(BridgeMessage(outgoing: message, ownJID: client.ownJID), from: client) }
+        catch { throw SentMessageSaveError(messageID: result.messageID, reason: error.localizedDescription) }
+        return result
+    }
+
+    private func applyPresentation(_ event: WAClient.Event) {
+        guard let vm = chatList else { return }
+        let session = self
+        let client = self.client
+        switch event {
+        case .message(let m):
+            session.ingestPushName(jid: m.senderJID, name: m.senderPushName)
+            // Incoming peer message → peer is online right now.
+            // Compensates for whatsmeow not delivering initial
+            // presence state to companion devices.
+            if !m.fromMe, !m.chatJID.hasSuffix("@g.us") {
+                session.markOnline(jid: m.chatJID)
+            }
+        case .reaction(let r):
+            vm.notifyReaction(r)
+            session.currentConversation?.applyReaction(r)
+            if r.senderJID != "me", !r.chatJID.hasSuffix("@g.us") {
+                session.markOnline(jid: r.chatJID)
+            }
+        case .chatPresence(let chat, _, let typing):
+            // Typing in a direct chat is a strong online signal.
+            if let conversation = currentConversation,
+               JIDNormalize.same(chat, conversation.chatJID, client: client) {
+                conversation.setPeerTyping(typing)
+            }
+            if typing, !chat.hasSuffix("@g.us") {
+                session.markOnline(jid: chat)
+            }
+        case .presence(let jid, let online, let lastSeen):
+            session.ingestPresence(jid: jid, online: online, lastSeen: lastSeen)
+        case .connected:
+            // Reconnect (initial or auto/forced) — re-reconcile
+            // appstate-backed UI that may have changed while we
+            // were dark. The offline message queue is redelivered
+            // by the server as normal .message events.
+            vm.reconcilePinsWithStore()
+            vm.reconcileMutedWithStore()
+            vm.reconcileLIDDuplicates()
+            session.loadBlocklist()
+        case .historySync(let syncType, _, _, _, _):
+            // F26: only flip the one-shot backfill gate on chunks
+            // that actually carry conversation messages. Without
+            // this guard, a PUSH_NAME / INITIAL_STATUS_V3 chunk
+            // arriving FIRST locks requestHistoryBackfillIfNeeded
+            // off permanently even though the deep history we
+            // actually wanted never landed. Confirmed via the
+            // F-instr trace 2026-06-09: PUSH_NAME chunk reported
+            // 1000 pushnames + 0 conversations.
+            let contentful: Set<String> = [
+                "INITIAL_BOOTSTRAP", "RECENT", "FULL", "ON_DEMAND",
+            ]
+            if contentful.contains(syncType),
+               !UserDefaults.standard.bool(forKey: "historyBackfillCompleted") {
+                UserDefaults.standard.set(true, forKey: "historyBackfillCompleted")
+            }
+            // F19: initial sync delivers a burst of HistorySync
+            // events; coalesce into one 250 ms-debounced flush so
+            // we don't run listContacts (CGo bridge) + four
+            // reconcile passes per event on the MainActor.
+            if let client { session.scheduleHistorySyncReconcile(client: client, vm: vm) }
+        case .chatPinned(let chatJID, let pinned, let ts):
+            let when = Date(timeIntervalSince1970: TimeInterval(ts))
+            let canonical = JIDNormalize.canonical(chatJID, client: client)
+            vm.applyIncomingChatPin(chatJID: canonical,
+                                    pinned: pinned, at: when)
+        case .chatMuted(let chatJID, let mutedUntilMs, let ts):
+            let canonical = JIDNormalize.canonical(chatJID, client: client)
+            let mutedUntil: Date? = mutedUntilMs == 0
+                ? nil
+                : Date(timeIntervalSince1970: TimeInterval(mutedUntilMs) / 1000)
+            let when = Date(timeIntervalSince1970: TimeInterval(ts))
+            vm.applyIncomingMute(chatJID: canonical,
+                                 mutedUntil: mutedUntil,
+                                 at: when)
+        case .groupInfoChanged(let chatJID, let name, let description, let ts):
+            let canonical = JIDNormalize.canonical(chatJID, client: client)
+            let when = Date(timeIntervalSince1970: TimeInterval(ts))
+            vm.applyIncomingGroupInfo(
+                chatJID: canonical,
+                name:        name.isEmpty        ? nil : name,
+                description: description.isEmpty ? nil : description,
+                at: when)
+        case .groupJoined(let group, _, let ts):
+            vm.mergeJoinedGroup(
+                group,
+                at: Date(timeIntervalSince1970: TimeInterval(ts)))
+            session.ingestGroups([group])
+        case .historyConversation(let chatJID, let name, let ts):
+            vm.applyHistoryConversation(
+                chatJID: JIDNormalize.canonical(chatJID, client: client),
+                name: name,
+                at: Date(timeIntervalSince1970: TimeInterval(ts)))
+        case .fullHistorySyncResponse(let requestID, let responseCode):
+            NSLog("[yawac/catchup] decoded primary response request=%@ code=%@",
+                  requestID, responseCode)
+        case .chatArchived(let chatJID, let archived, _):
+            let canonical = JIDNormalize.canonical(chatJID, client: client)
+            vm.applyIncomingArchive(chatJID: canonical, archived: archived)
+        case .chatDeleted(let chatJID, _):
+            let canonical = JIDNormalize.canonical(chatJID, client: client)
+            vm.hideDeletedChat(canonical)
+        case .contactUpdated(let jid, let fullName, _):
+            let canonical = JIDNormalize.canonical(jid, client: client)
+            vm.applyIncomingContact(jid: canonical, fullName: fullName)
+        case .blocklistChanged(let action, let changes):
+            session.applyBlocklistChange(action: action, changes: changes)
+        case .groupParticipantsChanged(let chatJID, let action, _, let jids, let ts):
+            let when = Date(timeIntervalSince1970: TimeInterval(ts))
+            let canonical = JIDNormalize.canonical(chatJID, client: client)
+            vm.applyGroupParticipantsChange(
+                chatJID: canonical, action: action, jids: jids, at: when)
+        case .joinApprovalModeChanged(let chatJID, let on, _, _):
+            // SessionViewModel already routes this event to refresh /
+            // clear `JoinRequestStore`. Mirror the flag into `Chat`
+            // so the sidebar chip gate flips in lockstep with the
+            // store update.
+            let canonical = JIDNormalize.canonical(chatJID, client: client)
+            vm.applyIncomingJoinApprovalMode(chatJID: canonical, on: on)
+        case .groupAnnounceChanged(let chatJID, let on, _, _):
+            let canonical = JIDNormalize.canonical(chatJID, client: client)
+            vm.applyGroupAnnounce(chatJID: canonical, on: on)
+        case .groupLockedChanged(let chatJID, let on, _, _):
+            let canonical = JIDNormalize.canonical(chatJID, client: client)
+            vm.applyGroupLocked(chatJID: canonical, on: on)
+        case .groupMemberAddModeChanged(let chatJID, let allMembersCanAdd, _, _):
+            let canonical = JIDNormalize.canonical(chatJID, client: client)
+            vm.applyGroupMemberAddMode(chatJID: canonical,
+                                       allMembersCanAdd: allMembersCanAdd)
+        case .pushNames(let names):
+            // HistorySync PUSH_NAME chunk — key contactNames at
+            // the JID form whatsmeow received (typically `@lid`
+            // for group senders whose LID→PN mapping is missing),
+            // so MessageRow's displayName lookup hits without
+            // needing the local LID map. Complements the chat-
+            // list reconcile path that runs off `.historySync`.
+            for (jid, name) in names {
+                session.ingestPushName(jid: jid, name: name)
+            }
+        case .ephemeralTimerChanged(let chatJID, let seconds, _, _):
+            // Server-side timer change (either side of a 1:1 or a
+            // group admin). Refresh the in-memory Chat row so the
+            // inspector picker and any composer banner reflect it.
+            // 1:1 chats hydrate their timer only on the first
+            // EphemeralSetting event — whatsmeow doesn't expose
+            // a cold-read API for 1:1 ephemeral state.
+            let canonical = JIDNormalize.canonical(chatJID, client: client)
+            vm.applyEphemeralTimer(chatJID: canonical, seconds: seconds)
+        case .receipt(let receipt):
+            if let conversation = currentConversation,
+               JIDNormalize.same(receipt.chatJID, conversation.chatJID, client: client) {
+                conversation.applyReceipt(receipt)
+            }
+        case .pollVote(let chat, let message, let voter, let hashes):
+            if let conversation = currentConversation,
+               JIDNormalize.same(chat, conversation.chatJID, client: client) {
+                conversation.applyPollVote(pollMessageID: message, voterJID: voter, optionHashes: hashes)
+            }
+        case .mediaRetry(let id, let ok, let path, let error):
+            currentConversation?.applyMediaRetry(messageID: id, ok: ok, newDirectPath: path, error: error)
+        default:
+            break
+        }
+    }
+
+    /// Count only committed source rows during an active history run.
     @MainActor
     func bumpFullSyncCounts(fresh: Int, dupe: Int) {
         guard fullSync.inFlight else { return }
-        fullSync.fresh += fresh
-        fullSync.dupe += dupe
+        fullSyncState.fresh += fresh
+        fullSyncState.dupe += dupe
     }
 
     @MainActor
     func startFullHistorySync() {
-        guard !fullSync.inFlight else { return }
-        NSLog("[yawac/backfill] startFullHistorySync — user tap")
+        guard fullSyncRun == nil, client != nil || fullHistoryRequest != nil else { return }
         historyBackfillCompleted = false
-        fullSync = FullSyncState(inFlight: true, attempted: true)
+        fullSyncState = FullSyncState(attempted: true)
+        let run = HistoryRun()
+        let source = client
+        fullSyncRun = run
         armFullSyncTimeout()
-        // Type-6 first. Cheap, sometimes works.
-        Task { await self.requestHistoryBackfillIfNeeded() }
-        // Then run the recursive deep backfill.
-        Task { await self.runDeepBackfill() }
-    }
-
-    /// Recursive per-chat fan-out: repeatedly snapshot oldest message
-    /// per chat, fan out type-5 backfills, wait, sample again. Exit
-    /// when no chat got deeper or when the max round count is hit.
-    /// F30v2.
-    @MainActor
-    private func runDeepBackfill() async {
-        // F39: bumped 10 → 30. The exit gate is "round produced no
-        // deeper messages anywhere", and the at-floor pruning below
-        // shrinks the per-round work as chats reach their floor, so
-        // the higher cap costs almost nothing on healthy syncs and
-        // lets one tap dig further into deep histories. Worst-case
-        // wall clock: 30 × 60 s = 30 min if phone keeps shipping.
-        let maxRounds = 30
-        // F30v5: 60s. The previous 30s wasn't long enough for the F3
-        // batched MessageWriter to commit all incoming HistorySync
-        // messages before we re-sampled oldestTimestampPerChat. Late
-        // arrivals landed AFTER the sample and the round-over-round
-        // comparison declared `deeper=0` prematurely. SQLITE_BUSY
-        // contention with whatsmeow's secret-key store amplifies this.
-        let perRoundWaitSec: UInt64 = 60
-        // F39: per-chat consecutive "did not deepen" counter. After
-        // `atFloorThreshold` consecutive rounds with no deeper rows
-        // for a chat, we mark it at-floor and skip it in subsequent
-        // rounds. The systematic-debugging investigation showed
-        // that 150/152 chats returned no-deeper in round 1 but we
-        // kept hammering all 152 every round, wasting peer-message
-        // sends and looking like "refetch" to the user.
-        let atFloorThreshold = 2
-        var stableRoundsByJID: [String: Int] = [:]
-        var atFloor: Set<String> = []
-        for round in 1...maxRounds {
-            let before = await oldestTimestampPerChat()
-            // F39: bump per-request count when the residual deepening
-            // set is small. Once at-floor pruning has narrowed
-            // fan-out to ≤5 chats, 200 msgs/request bottlenecks the
-            // long tail — those stragglers (typically one big
-            // group) need more history per round-trip to converge
-            // within maxRounds. Phone may silently truncate above
-            // some server-side ceiling; honoring it ≈2.5× depth /
-            // round on the remaining chat(s).
-            let remaining = before.count - atFloor.count
-            let countPerChat = remaining <= 5 ? 500 : 200
-            NSLog("[yawac/backfill] deep-backfill round=%d chats=%d at_floor=%d count_per_chat=%d",
-                  round, before.count, atFloor.count, countPerChat)
-            await fanOutPerChatBackfill(countPerChat: countPerChat,
-                                        throttleMs: 100,
-                                        excludeJIDs: atFloor)
-            try? await Task.sleep(for: .seconds(perRoundWaitSec))
-            let after = await oldestTimestampPerChat()
-            var deeperCount = 0
-            for (jid, beforeTS) in before {
-                if atFloor.contains(jid) { continue }
-                if let afterTS = after[jid], afterTS < beforeTS {
-                    deeperCount += 1
-                    stableRoundsByJID[jid] = 0
-                } else {
-                    let next = (stableRoundsByJID[jid] ?? 0) + 1
-                    stableRoundsByJID[jid] = next
-                    if next >= atFloorThreshold {
-                        atFloor.insert(jid)
-                    }
-                }
-            }
-            NSLog("[yawac/backfill] deep-backfill round=%d deeper=%d/%d new_at_floor=%d",
-                  round, deeperCount, before.count, atFloor.count)
-            if deeperCount == 0 {
-                NSLog("[yawac/backfill] deep-backfill exit — phone has no more history")
-                break
-            }
-        }
-        NSLog("[yawac/backfill] deep-backfill complete")
-        fullSync.inFlight = false
-        fullSyncTimeoutTask?.cancel()
-    }
-
-    /// Sample current oldest-message timestamp per chat. Returns
-    /// `[chatJID: epochSeconds]`. Used by `runDeepBackfill` to detect
-    /// whether a fan-out round actually added deeper history.
-    /// F37: was @MainActor and ran 1033 SwiftData fetches on the main
-    /// thread (a 30-s sample during full-history sync showed this and
-    /// fanOutPerChatBackfill at ~60% of main-thread time, the
-    /// dominant beachball source). Now runs detached with its own
-    /// background ModelContext.
-    private func oldestTimestampPerChat() async -> [String: Int64] {
-        guard let container = modelContext?.container else { return [:] }
-        return await Task.detached(priority: .userInitiated) {
-            () -> [String: Int64] in
-            let ctx = ModelContext(container)
-            let chatDescriptor = FetchDescriptor<PersistedChat>()
-            guard let chats = try? ctx.fetch(chatDescriptor) else { return [:] }
-            var out: [String: Int64] = [:]
-            out.reserveCapacity(chats.count)
-            for chat in chats {
-                let jid = chat.jid
-                var d = FetchDescriptor<PersistedMessage>(
-                    predicate: #Predicate { $0.chatJID == jid },
-                    sortBy: [SortDescriptor(\.timestamp, order: .forward)])
-                d.fetchLimit = 1
-                if let oldest = (try? ctx.fetch(d))?.first {
-                    out[jid] = Int64(oldest.timestamp.timeIntervalSince1970)
-                }
-            }
-            return out
-        }.value
-    }
-
-    /// F30: iterates every PersistedChat that has at least one
-    /// persisted message and asks the phone for `countPerChat` older
-    /// messages anchored at that chat's oldest known message. Sequential
-    /// with a 100 ms throttle to avoid tripping WhatsApp's peer-message
-    /// rate limiter. Each response arrives asynchronously as a
-    /// HistorySync of SyncType=ON_DEMAND; the existing handler bumps
-    /// fullSync.chunks + .messages.
-    /// F37: was @MainActor and ran 1033 SwiftData fetches inline,
-    /// pinning the main thread for the full duration of the fan-out.
-    /// Now resolves per-chat anchors in a detached Task with its own
-    /// background ModelContext, then walks the result list back on
-    /// MainActor only to fire the (already fire-and-forget) peer
-    /// sends + the throttle sleep.
-    /// F39: `excludeJIDs` skips chats marked at-floor by the
-    /// `runDeepBackfill` heuristic so we stop hammering them.
-    private func fanOutPerChatBackfill(countPerChat: Int,
-                                       throttleMs: UInt64,
-                                       excludeJIDs: Set<String> = []) async {
-        guard let client else { return }
-        guard let container = modelContext?.container else { return }
-        struct Anchor: Sendable {
-            let jid: String
-            let msgID: String
-            let senderJID: String
-            let fromMe: Bool
-            let tsUnix: Int64
-        }
-        let anchors: [Anchor] = await Task.detached(priority: .userInitiated) {
-            () -> [Anchor] in
-            let ctx = ModelContext(container)
-            let chatDescriptor = FetchDescriptor<PersistedChat>(
-                sortBy: [SortDescriptor(\.lastTimestamp, order: .reverse)])
-            guard let chats = try? ctx.fetch(chatDescriptor) else { return [] }
-            var out: [Anchor] = []
-            out.reserveCapacity(chats.count)
-            for chat in chats {
-                let jid = chat.jid
-                if excludeJIDs.contains(jid) { continue }
-                var msgDescriptor = FetchDescriptor<PersistedMessage>(
-                    predicate: #Predicate { $0.chatJID == jid },
-                    sortBy: [SortDescriptor(\.timestamp, order: .forward)])
-                msgDescriptor.fetchLimit = 1
-                guard let oldest = (try? ctx.fetch(msgDescriptor))?.first
-                else { continue }
-                out.append(Anchor(
-                    jid: jid,
-                    msgID: oldest.id,
-                    senderJID: oldest.senderJID,
-                    fromMe: oldest.fromMe,
-                    tsUnix: Int64(oldest.timestamp.timeIntervalSince1970)))
-            }
-            return out
-        }.value
-        NSLog("[yawac/backfill] fan-out across %d chats count_per_chat=%d throttle_ms=%llu",
-              anchors.count, countPerChat, throttleMs)
-        var sent = 0
-        for a in anchors {
-            let jid = a.msgID  // unused; preserve `sent += 1` flow below.
-            _ = jid
-            // F30v3 fire-and-forget; F37 hoisted anchor fetch off main.
-            Task.detached { [client] in
-                try? client.requestOlderHistory(
-                    chatJID: a.jid,
-                    oldestMsgID: a.msgID,
-                    oldestSenderJID: a.senderJID,
-                    oldestFromMe: a.fromMe,
-                    oldestTimestampSec: a.tsUnix,
-                    count: countPerChat)
-            }
-            sent += 1
-            try? await Task.sleep(for: .milliseconds(throttleMs))
-        }
-        NSLog("[yawac/backfill] fan-out complete — sent=%d", sent)
-    }
-
-    @MainActor
-    private func armFullSyncTimeout() {
-        fullSyncTimeoutTask?.cancel()
-        fullSyncTimeoutTask = Task { @MainActor [weak self] in
-            // F30 timeout: 5 minutes. The fan-out dispatches ~1000+
-            // peer messages with a 100 ms throttle (~100 s sequential
-            // dispatch alone). Phone batches the replies behind that
-            // flood and first-chunk arrival can land near tap+2 min.
-            //
-            // The Task.isCancelled re-check after the sleep matters:
-            // `try?` swallows the CancellationError so cancellation
-            // would otherwise fall through and clear inFlight on the
-            // very next chunk's armFullSyncTimeout re-arm — racing
-            // every fresh chunk back to inFlight=false. Observed live
-            // 2026-06-09: second chunk landed 2.5s after first and
-            // immediately reported inFlight=false because the
-            // first-tap task resumed post-cancel and clobbered the
-            // flag.
-            try? await Task.sleep(for: .seconds(300))
+        run.task = Task { [weak self] in
             guard let self else { return }
-            guard !Task.isCancelled else { return }
-            // If a chunk arrived during the window it would have
-            // cancelled this task and re-armed a fresh one. Reaching
-            // here means a full 5 minutes of silence; clear inFlight.
-            self.fullSync.inFlight = false
+            defer {
+                run.timeout?.cancel()
+                if fullSyncRun === run { fullSyncRun = nil }
+            }
+            do {
+                if let fullHistoryRequest { try await fullHistoryRequest() }
+                else if let source {
+                    do { try await Task.detached { try source.requestFullHistorySync(durationDays: 3650) }.value }
+                    catch { fullSyncState.failure = error.localizedDescription }
+                }
+                try Task.checkCancellation()
+                let result = try await runDeepBackfill(source: source)
+                guard fullSyncRun === run else { return }
+                fullSyncState.completion = result
+            } catch is CancellationError {
+                if fullSyncRun === run { fullSyncState.completion = run.cancellationReason }
+            } catch {
+                if fullSyncRun === run {
+                    fullSyncState.completion = "History request failed"
+                    fullSyncState.failure = error.localizedDescription
+                }
+            }
         }
     }
 
-    /// v0.8.1 one-shot history backfill. On the first `.connected` after
-    /// upgrade we issue a single HistorySyncFromOldest IQ anchored at the
-    /// globally-oldest persisted message, so disappearing messages that
-    /// expired off the phone before the user paired this device can still
-    /// be replayed via the server-side ephemeral window. The
-    /// `historyBackfillCompleted` flag is flipped to true on the first
-    /// HistorySync arrival (see ContentView, T12) and reset by `logout()`.
+    func cancelFullHistorySync(reason: String = "Cancelled") {
+        guard let run = fullSyncRun else { return }
+        run.cancellationReason = reason
+        run.timeout?.cancel()
+        run.task?.cancel()
+    }
+
+    func waitForFullHistorySync() async { await fullSyncRun?.task?.value }
+
+    private func runDeepBackfill(source: WAClient?) async throws -> String {
+        var stableRounds: [String: Int] = [:]
+        var inactiveChats: Set<String> = []
+        for _ in 1...30 {
+            try Task.checkCancellation()
+            await flushPendingWrites()
+            let before = try await historyAnchors()
+            let active = before.filter { !inactiveChats.contains($0.jid) }
+            if active.isEmpty { return "No stored anchors available" }
+            let count = active.count <= 5 ? 500 : 200
+            for anchor in active {
+                try Task.checkCancellation()
+                if let historyRequest { try await historyRequest(anchor, count) }
+                else if let source {
+                    try await Task.detached {
+                        try source.requestOlderHistory(chatJID: anchor.jid, oldestMsgID: anchor.msgID,
+                            oldestSenderJID: anchor.senderJID, oldestFromMe: anchor.fromMe,
+                            oldestTimestampSec: anchor.tsUnix, count: count)
+                    }.value
+                }
+                try Task.checkCancellation()
+                try await historySleep(.milliseconds(100))
+            }
+            // A flush cannot establish that the phone has finished responding.
+            try await historySleep(.seconds(60))
+            try Task.checkCancellation()
+            await flushPendingWrites()
+            let after = Dictionary((try await historyAnchors()).map { ($0.jid, $0.tsUnix) }, uniquingKeysWith: min)
+            var deeper = 0
+            for anchor in active {
+                if let timestamp = after[anchor.jid], timestamp < anchor.tsUnix {
+                    deeper += 1
+                    stableRounds[anchor.jid] = 0
+                } else {
+                    stableRounds[anchor.jid, default: 0] += 1
+                    if stableRounds[anchor.jid, default: 0] >= 2 { inactiveChats.insert(anchor.jid) }
+                }
+            }
+            if deeper == 0 { return "No older messages observed in the last round" }
+        }
+        return "Reached the 30-round limit"
+    }
+
+    private func historyAnchors() async throws -> [HistoryAnchor] {
+        if let historyAnchorLoader { return try await historyAnchorLoader() }
+        guard let container = modelContext?.container else { return [] }
+        return try await Task.detached(priority: .userInitiated) {
+            let context = ModelContext(container)
+            let chats = try context.fetch(FetchDescriptor<PersistedChat>(
+                sortBy: [SortDescriptor(\.lastTimestamp, order: .reverse)]))
+            return try chats.compactMap { chat in
+                let jid = chat.jid
+                var descriptor = FetchDescriptor<PersistedMessage>(predicate: #Predicate { $0.chatJID == jid },
+                    sortBy: [SortDescriptor(\.timestamp), SortDescriptor(\.id)])
+                descriptor.fetchLimit = 1
+                guard let row = try context.fetch(descriptor).first else { return nil }
+                return HistoryAnchor(jid: jid, msgID: row.id, senderJID: row.senderJID,
+                                     fromMe: row.fromMe, tsUnix: Int64(row.timestamp.timeIntervalSince1970))
+            }
+        }.value
+    }
+
+    private func armFullSyncTimeout() {
+        guard let run = fullSyncRun else { return }
+        run.timeout?.cancel()
+        run.timeout = Task { [weak self] in
+            guard let self else { return }
+            do { try await historyTimeoutSleep() } catch { return }
+            guard !Task.isCancelled, fullSyncRun === run else { return }
+            cancelFullHistorySync(reason: "Timed out waiting for history")
+        }
+    }
+
+    /// Called before replacing the client or disposing its store owner.
+    func stopSessionWork() async {
+        admittingEvents = false
+        eventTask?.cancel()
+        directoryTask?.cancel()
+        gapSweepTask?.cancel()
+        initialHistoryTask?.cancel()
+        historySyncFlush?.cancel()
+        historySyncFlush = nil
+        pushNameTask?.cancel()
+        cancelFullHistorySync(reason: "Session ended")
+        await waitForFullHistorySync()
+        await flushPendingWrites()
+    }
+
+    /// Request initial account history even when the local store is empty.
+    /// The completion gate is set when a contentful history chunk arrives.
     @MainActor
     func requestHistoryBackfillIfNeeded() async {
-        guard !historyBackfillCompleted else { return }
-        guard let client else { return }
-        // F56: previously this guarded on an existing oldest persisted
-        // message and early-returned (flipping the one-shot flag) when
-        // no anchor row existed yet — i.e. on every fresh-install
-        // pair. The type-6 FULL_HISTORY_SYNC_ON_DEMAND request doesn't
-        // use an anchor (bridge sets HistoryFromTimestamp = now +
-        // HistoryDurationDays = count), so the anchor fields exist
-        // only for source compatibility. Sending the request with
-        // empty anchors is harmless and is the ONLY way to pull deep
-        // history into a fresh install after the initial bootstrap
-        // chunk lands. The previous behavior left fresh users with
-        // only whatever messages the INITIAL_BOOTSTRAP shipped.
-        let context = modelContext
-        var oldestChatJID = ""
-        var oldestMsgID = ""
-        var oldestFromMe = false
-        var oldestTSUnix: Int64 = 0
-        if let context {
-            var d = FetchDescriptor<PersistedMessage>(
-                sortBy: [SortDescriptor(\.timestamp, order: .forward)])
-            d.fetchLimit = 1
-            if let oldest = (try? context.fetch(d))?.first {
-                oldestChatJID = oldest.chatJID
-                oldestMsgID = oldest.id
-                oldestFromMe = oldest.fromMe
-                oldestTSUnix = Int64(oldest.timestamp.timeIntervalSince1970)
-            }
-        }
+        guard !historyBackfillCompleted, let client else { return }
         do {
-            NSLog("[yawac/backfill] sending FULL_HISTORY_SYNC_ON_DEMAND chat=%@ msg=%@ ts=%lld count=100000",
-                  oldestChatJID, oldestMsgID, oldestTSUnix)
             try await Task.detached { [client] in
-                try client.requestFullHistorySync(
-                    beforeChatJID: oldestChatJID,
-                    beforeMsgID: oldestMsgID,
-                    beforeFromMe: oldestFromMe,
-                    beforeTSUnix: oldestTSUnix,
-                    count: 100_000)
+                try client.requestFullHistorySync(durationDays: 3650)
             }.value
-            NSLog("[yawac/backfill] SendPeerMessage returned ok — waiting for HistorySync chunks")
         } catch {
             NSLog("[yawac/backfill] history backfill request failed: %@",
                   String(describing: error))
-            return
         }
-        // Flag flipped on first HistorySync arrival — see T12 (ContentView).
     }
 
     /// Reconcile one chat when it becomes relevant to the user. The v0.10.56
@@ -1154,15 +1338,18 @@ final class SessionViewModel {
         guard now - last > 24 * 3600 else { return }
         UserDefaults.standard.set(now, forKey: Self.lastGapSweepKey)
         // Let the connection's initial message drain settle first.
-        try? await Task.sleep(for: .seconds(45))
         guard let client else { return }
+        do { try await Task.sleep(for: .seconds(45)) } catch { return }
+        guard self.client === client, !Task.isCancelled else { return }
+        guard let storeURL = modelContext?.container.configurations.first?.url else { return }
         let refs = await Task.detached {
-            SQLiteDedupe.orphanQuotedRefs(sinceDays: 30)
+            SQLiteDedupe.orphanQuotedRefs(at: storeURL, sinceDays: 30)
         }.value
         guard !refs.isEmpty else { return }
         NSLog("[yawac/gap-sweep] orphan quoted targets=%d", refs.count)
         var requested = 0
         for r in refs.prefix(15) {
+            guard self.client === client, !Task.isCancelled else { return }
             let sender = r.targetFromMe ? client.ownJID : r.targetSenderJID
             guard !sender.isEmpty else { continue }
             do {
@@ -1174,7 +1361,7 @@ final class SessionViewModel {
                 NSLog("[yawac/gap-sweep] request failed %@: %@",
                       r.targetMessageID, String(describing: error))
             }
-            try? await Task.sleep(for: .seconds(4))
+            do { try await Task.sleep(for: .seconds(4)) } catch { return }
         }
         NSLog("[yawac/gap-sweep] requested=%d", requested)
     }
@@ -1199,4 +1386,11 @@ final class SessionViewModel {
         guard !candidates.isEmpty else { return }
         await joinRequestStore.refreshAllAdmin(chatJIDs: candidates)
     }
+}
+
+/// Delivery has succeeded: keep the real ID and never offer an automatic resend.
+struct SentMessageSaveError: LocalizedError {
+    let messageID: String
+    let reason: String
+    var errorDescription: String? { "Sent message \(messageID), but could not save it locally: \(reason)" }
 }

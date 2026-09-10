@@ -8,38 +8,6 @@ import UniformTypeIdentifiers
 private let perfLog = Logger(subsystem: "dev.vadikas.yawac.yawac",
                              category: "perf")
 
-/// Tiny insertion-ordered dictionary with an LRU-by-insertion cap.
-/// Setting a new key appends; setting an existing key keeps its slot.
-/// Used by `ConversationViewModel` to stash out-of-order edits / revokes
-/// for messages we haven't loaded yet. Folded in from `OrderedDict` in
-/// F108 — only two callers, both in CVM.
-fileprivate struct PendingMap<Value> {
-    private var map: [String: Value] = [:]
-    private var order: [String] = []
-    let cap: Int
-    init(cap: Int) { self.cap = cap }
-    var count: Int { map.count }
-    subscript(key: String) -> Value? {
-        get { map[key] }
-        set {
-            if let v = newValue {
-                if map[key] == nil { order.append(key) }
-                map[key] = v
-                if order.count > cap {
-                    map.removeValue(forKey: order.removeFirst())
-                }
-            } else {
-                map.removeValue(forKey: key)
-                if let idx = order.firstIndex(of: key) { order.remove(at: idx) }
-            }
-        }
-    }
-    mutating func removeValue(forKey k: String) {
-        if let idx = order.firstIndex(of: k) { order.remove(at: idx) }
-        map.removeValue(forKey: k)
-    }
-}
-
 /// A file the user picked but hasn't sent yet — staged in the composer so a
 /// caption can be added and the set edited before sending.
 struct PendingAttachment: Identifiable, Equatable {
@@ -59,16 +27,6 @@ final class ConversationViewModel {
     /// duplicates without walking the array. `@ObservationIgnored` —
     /// it's a lookup index, not visible state.
     @ObservationIgnored private var messageIDs: Set<String> = []
-    /// F8: 50ms ingest coalescer. Bursts of inbound BridgeMessage events
-    /// (history-sync, reconnect drain) used to trigger one
-    /// `messages.append` + `invalidateTimeline` per event — a full
-    /// SwiftUI re-render and timeline rebuild per row. We now queue
-    /// arrivals here and flush once per 50ms window: single batch
-    /// append, single `invalidateTimeline`. Mirrors the F3 pattern in
-    /// ChatListViewModel.
-    @ObservationIgnored private var pendingIngest: [BridgeMessage] = []
-    @ObservationIgnored private var pendingIngestIDs: Set<String> = []
-    @ObservationIgnored private var pendingIngestFlush: Task<Void, Never>?
     var draft: String = "" {
         didSet { scheduleDraftSave() }
     }
@@ -119,7 +77,8 @@ final class ConversationViewModel {
     var pollVotes: [String: [String: Set<String>]] = [:]
     var downloadErrors: [String: String] = [:]
     let client: WAClient
-    private let context: ModelContext?
+    private var context: ModelContext?
+    private let writer: MessageWriter?
     @ObservationIgnored private var downloadTasks: [String: Task<Void, Never>] = [:]
     // One retry-request per message id per session — avoids hammering the
     // phone with redundant SendMediaRetryReceipt calls if download retries
@@ -434,78 +393,8 @@ final class ConversationViewModel {
     /// MainActor — it only reads PersistedMessage stored properties
     /// (which are safe on the bg ModelContext that fetched them) and
     /// constructs a value-type UIMessage.
-    nonisolated private static func uiMessage(from p: PersistedMessage) -> UIMessage {
-        let body: UIMessage.Body
-        switch p.kind {
-        case "text":
-            body = .text(p.text ?? "")
-        case "image", "video", "audio", "document", "sticker":
-            body = .media(kind: p.kind, caption: p.mediaCaption,
-                          fileName: p.mediaFileName, localPath: p.mediaPath,
-                          waveform: p.audioWaveform, isPTT: p.isPTT)
-        case "poll":
-            if let json = p.pollJSON,
-               let data = json.data(using: .utf8),
-               let poll = try? JSONDecoder().decode(BridgePoll.self, from: data) {
-                body = .poll(question: poll.question,
-                             options: poll.options,
-                             selectableCount: poll.selectableCount)
-            } else {
-                body = .system(p.kind)
-            }
-        case "contact":
-            // Single ContactMessage row written by persistOutgoingContact /
-            // the receive path. Rebuild the ContactPayload directly from
-            // the persisted vCard so the bubble survives a cold reopen.
-            if let vcard = p.contactVCard {
-                body = .contact(ContactPayload.fromVCard(
-                    vcard, displayName: p.contactDisplayName ?? ""))
-            } else {
-                body = .system("(contact)")
-            }
-        case "contacts":
-            // F104: ContactsArrayMessage row — decode the JSON-encoded
-            // [BridgeContactPayload] back into `[ContactPayload]` so the
-            // stacked bubble renders without a round-trip through the
-            // bridge.
-            if let json = p.contactsJSON,
-               let data = json.data(using: .utf8),
-               let arr = try? JSONDecoder().decode([BridgeContactPayload].self,
-                                                    from: data) {
-                let cards = arr.map {
-                    ContactPayload.fromVCard($0.vcard, displayName: $0.displayName)
-                }
-                body = .contacts(cards)
-            } else {
-                body = .system("(contacts)")
-            }
-        default:
-            if let t = p.text, !t.isEmpty {
-                body = .system(t)
-            } else {
-                body = .system(p.kind)
-            }
-        }
-        var m = UIMessage(
-            id: p.id, chatJID: p.chatJID, senderJID: p.senderJID,
-            fromMe: p.fromMe, timestamp: p.timestamp, body: body)
-        m.editedAt = p.editedAt
-        m.revokedAt = p.revokedAt
-        m.revokedBy = p.revokedBy
-        m.locallyDeleted = p.locallyDeleted
-        m.starredAt = p.starredAt
-        m.pinnedAt = p.pinnedAt
-        m.isForwarded = p.isForwarded
-        m.isViewOnce = p.isViewOnce
-        m.viewOnceLocked = p.viewOnceLocked
-        m.quotedMessageID = p.quotedMessageID
-        m.quotedSenderJID = p.quotedSenderJID
-        m.quotedFromMe = p.quotedFromMe
-        m.quotedTextSnippet = p.quotedTextSnippet
-        m.quotedKind = p.quotedKind
-        m.mediaWidth = p.mediaWidth
-        m.mediaHeight = p.mediaHeight
-        return m
+    nonisolated private static func uiMessage(from message: PersistedMessage) -> UIMessage {
+        message.uiMessage
     }
 
     func didFinishScroll(to id: String) {
@@ -681,7 +570,7 @@ final class ConversationViewModel {
                 case .poll, .location, .contact, .contacts, .system:
                     continue
                 }
-                persistForwarded(messageID: result.messageID, chatJID: chatJID,
+                await persistForwarded(messageID: result.messageID, chatJID: chatJID,
                                  timestamp: result.timestamp, kind: outKind, text: outText,
                                  caption: outCaption, fileName: outFileName, refJSON: outRef)
                 // Forwarding into the chat we're viewing: append optimistically
@@ -716,7 +605,6 @@ final class ConversationViewModel {
         // Refresh the destination's sidebar preview/timestamp from the
         // freshly-persisted forwarded rows (it's a different chat than the
         // one we're viewing, so no echo updates it otherwise).
-        chatList?.refreshPreview(chatJID: chatJID)
         cancelForward()
     }
 
@@ -725,17 +613,13 @@ final class ConversationViewModel {
     /// exact text/caption we sent (incl. the author header).
     private func persistForwarded(messageID: String, chatJID: String, timestamp: Int64,
                                   kind: String, text: String?, caption: String?,
-                                  fileName: String?, refJSON: String?) {
-        guard let context else { return }
-        let when = Date(timeIntervalSince1970: TimeInterval(timestamp))
-        let row = PersistedMessage(id: messageID, chatJID: chatJID,
-                                   senderJID: client.ownJID, fromMe: true,
-                                   timestamp: when, kind: kind, text: text,
-                                   mediaCaption: caption, mediaFileName: fileName,
-                                   mediaRefJSON: refJSON, isForwarded: true)
-        context.insert(row)
-        try? context.save()
-        MessageIndex.shared.upsert(row.indexFields)
+                                  fileName: String?, refJSON: String?) async {
+        var message = UIMessage(id: messageID, chatJID: chatJID, senderJID: client.ownJID,
+                                fromMe: true, timestamp: Date(timeIntervalSince1970: Double(timestamp)),
+                                body: kind == "text" ? .text(text ?? "") :
+                                    .media(kind: kind, caption: caption, fileName: fileName, localPath: nil))
+        message.isForwarded = true
+        await persistOutgoing(message, mediaRefJSON: refJSON)
     }
 
     /// Reads the persisted media ref JSON for a message id, if any.
@@ -745,16 +629,16 @@ final class ConversationViewModel {
         return (try? context.fetch(d).first)?.mediaRefJSON
     }
 
-    init(chatJID: String, client: WAClient, context: ModelContext? = nil) {
+    init(chatJID: String, client: WAClient, context: ModelContext? = nil, writer: MessageWriter? = nil) {
         self.chatJID = chatJID
         self.client = client
         self.context = context
+        self.writer = writer
     }
 
     deinit {
         // Cancel the coalescing flush task so it doesn't sleep 50ms holding
         // a stale [weak self] reference after the CVM is gone.
-        pendingIngestFlush?.cancel()
         peerTypingClearTask?.cancel()
     }
 
@@ -774,6 +658,24 @@ final class ConversationViewModel {
     /// otherwise to the latest (bottom).
     private(set) var initialAnchorID: String?
 
+    @ObservationIgnored private var historyTask: Task<Void, Never>?
+    @ObservationIgnored private var historyLoadID: UUID?
+    @ObservationIgnored private var changesDuringHistory: [String: UIMessage] = [:]
+    @ObservationIgnored private var reactionsDuringHistory: [BridgeReaction] = []
+    @ObservationIgnored private var votesDuringHistory: [(id: String, voter: String, hashes: [String])] = []
+    @ObservationIgnored var beforeHistoryPresentation: @Sendable () async -> Void = {}
+
+    private func reportPersistenceError(_ error: Error) { transientError = error.localizedDescription }
+
+    func cancelHistoryLoad() {
+        historyTask?.cancel()
+        historyLoadID = nil
+        changesDuringHistory.removeAll()
+        reactionsDuringHistory.removeAll()
+        votesDuringHistory.removeAll()
+    }
+    func waitForHistoryLoad() async { await historyTask?.value }
+
     func loadHistory() {
         guard let container = context?.container else { return }
         let jid = chatJID
@@ -789,21 +691,31 @@ final class ConversationViewModel {
             client.prewarmJIDMappings(jids)
         }
         restoreDraftIfNeeded()
-        Task.detached(priority: .userInitiated) { [weak self] in
+        cancelHistoryLoad()
+        let loadID = UUID()
+        historyLoadID = loadID
+        let beforePresentation = beforeHistoryPresentation
+        let writer = self.writer
+        historyTask = Task.detached(priority: .userInitiated) { [weak self] in
+            do { try await writer?.prepareHistory(chatJID: jid) }
+            catch { await self?.reportPersistenceError(error); return }
+            guard !Task.isCancelled else { return }
             let snapshot = Self.buildHistorySnapshot(
                 chatJID: jid,
                 container: container,
                 canonicalize: canonicalize,
                 prewarmJIDs: prewarmJIDs,
                 limit: limit)
-            await self?.applyHistorySnapshot(snapshot)
+            guard !Task.isCancelled else { return }
+            await beforePresentation()
+            await self?.applyHistorySnapshot(snapshot, loadID: loadID)
         }
     }
 
     /// MainActor commit of a snapshot produced by
     /// `buildHistorySnapshot`. One assignment per published collection.
     ///
-    /// Race guard: messages that arrived via `ingest()` / the event pump
+    /// Race guard: messages committed by the session
     /// while the background snapshot was building (~100ms+ on large
     /// chats) get appended to `self.messages` first; an unconditional
     /// replace would wipe them. Preserve any rows whose id is not in
@@ -811,7 +723,14 @@ final class ConversationViewModel {
     /// they are newer than the snapshot's fetch time, so they sort
     /// after the snapshot's newest row.
     @MainActor
-    private func applyHistorySnapshot(_ snap: ConversationHistorySnapshot) {
+    private func applyHistorySnapshot(_ snap: ConversationHistorySnapshot, loadID: UUID) {
+        guard !Task.isCancelled, historyLoadID == loadID else { return }
+        defer {
+            historyLoadID = nil
+            changesDuringHistory.removeAll()
+            reactionsDuringHistory.removeAll()
+            votesDuringHistory.removeAll()
+        }
         // Warm the thumbnail cache for the visible bottom window BEFORE
         // assigning `self.messages` — once messages publish, the
         // LazyVStack starts laying out and the first body eval of each
@@ -843,27 +762,34 @@ final class ConversationViewModel {
                 session.ingestPushName(jid: jid, name: name)
             }
         }
-        let snapIDs = Set(snap.messages.map { $0.id })
-        let lateArrivals = self.messages.filter { !snapIDs.contains($0.id) }
-        if lateArrivals.isEmpty {
-            self.messages = snap.messages
-        } else {
-            self.messages = snap.messages + lateArrivals.sorted { $0.timestamp < $1.timestamp }
-        }
+        guard !Task.isCancelled else { return }
+        let liveByID = Dictionary(messages.map { ($0.id, $0) }, uniquingKeysWith: { _, last in last })
+            .merging(changesDuringHistory) { _, committed in committed }
+        let snapIDs = Set(snap.messages.map(\.id))
+        self.messages = (snap.messages.map { liveByID[$0.id] ?? $0 }
+            + messages.filter { !snapIDs.contains($0.id) })
+            .sorted { ($0.timestamp, $0.id) < ($1.timestamp, $1.id) }
         // Rebuild the dedupe Set after the wholesale assignment.
         self.messageIDs = Set(self.messages.map(\.id))
         self.olderHistoryCursor = snap.olderCursor
         self.hasMoreStoredHistory = snap.hasMoreStoredHistory
         self.olderUnavailable = false
-        self.receiptStatus.merge(snap.receiptStatus) { _, new in new }
-        self.reactionsBySender.merge(snap.reactionsBySender) { _, new in new }
-        self.pollVotes.merge(snap.pollVotes) { _, new in new }
-        self.localPaths.merge(snap.localPaths) { _, new in new }
+        self.receiptStatus.merge(snap.receiptStatus) { old, new in old.sortOrder >= new.sortOrder ? old : new }
+        self.reactionsBySender.merge(snap.reactionsBySender) { _, snapshot in snapshot }
+        self.pollVotes.merge(snap.pollVotes) { _, snapshot in snapshot }
+        // Replay updates against the loaded base so one new voter/reaction
+        // cannot discard unrelated participants from the snapshot.
+        historyLoadID = nil
+        for reaction in reactionsDuringHistory { applyReaction(reaction) }
+        for vote in votesDuringHistory { applyPollVote(pollMessageID: vote.id, voterJID: vote.voter, optionHashes: vote.hashes) }
+        self.localPaths.merge(snap.localPaths) { old, _ in old }
+        for message in messages where message.viewOnceLocked { localPaths.removeValue(forKey: message.id) }
         self.downloadErrors.merge(snap.downloadErrors) { _, new in new }
         self.initialAnchorID = snap.initialAnchorID
         self.unreadInboundIDs.formUnion(snap.unreadInboundIDs)
         // Kick downloads now that we're on MainActor (downloadTasks lives here).
         for target in snap.downloadTargets {
+            if messages.first(where: { $0.id == target.id })?.viewOnceLocked == true { continue }
             if self.downloadTasks[target.id] != nil { continue }
             if self.localPaths[target.id] != nil { continue }
             ensureDownloadFromHistory(
@@ -907,7 +833,7 @@ final class ConversationViewModel {
 
     /// Builds the chat-history snapshot off MainActor against a fresh
     /// background `ModelContext` bound to the shared container. All
-    /// SwiftData reads, scrubs, sweeps, reaction + poll hydration, and
+    /// SwiftData reads, reaction + poll hydration, and
     /// per-row `fileExists` probes happen here; the produced value-type
     /// snapshot is then committed in one shot by
     /// `applyHistorySnapshot`.
@@ -920,35 +846,6 @@ final class ConversationViewModel {
     ) -> ConversationHistorySnapshot {
         let context = ModelContext(container)
         let t0 = CFAbsoluteTimeGetCurrent()
-        // One-shot migration: earlier builds persisted some rows with raw
-        // (device-suffixed / @lid) chatJID via CVM.persist. Scrub anything
-        // whose canonical form matches this chat back to canonical so the
-        // primary fetch finds it. Gated per-chat via UserDefaults so we
-        // pay the substring-scan cost only once per chat ever, not every
-        // open. The whole-account scrub is a v0.6 era cleanup; new
-        // installs and chats already scrubbed effectively bypass.
-        let scrubKey = "yawac.cvm.scrubbedChat.\(jid)"
-        if !UserDefaults.standard.bool(forKey: scrubKey),
-           let at = jid.firstIndex(of: "@") {
-            let userPart = String(jid[..<at])
-            let scrubDescriptor = FetchDescriptor<PersistedMessage>(
-                predicate: #Predicate { $0.chatJID != jid && $0.chatJID.contains(userPart) })
-            if let scrubRows = try? context.fetch(scrubDescriptor) {
-                var changed = 0
-                for r in scrubRows {
-                    if canonicalize(r.chatJID) == jid {
-                        r.chatJID = jid
-                        changed += 1
-                    }
-                }
-                if changed > 0 {
-                    try? context.save()
-                    NSLog("[yawac/cvm] migrated %d rows to canonical chatJID for %@",
-                          changed, jid)
-                }
-            }
-            UserDefaults.standard.set(true, forKey: scrubKey)
-        }
         let t1 = CFAbsoluteTimeGetCurrent()
         var descriptor = FetchDescriptor<PersistedMessage>(
             predicate: #Predicate { $0.chatJID == jid },
@@ -966,24 +863,6 @@ final class ConversationViewModel {
         }
         let t2 = CFAbsoluteTimeGetCurrent()
         let rows = recentRows.reversed().map { $0 }
-        // Sweep legacy rows of non-displayable kinds. Gated per-chat
-        // via UserDefaults — only the first open of each chat after
-        // upgrading runs the loop + save. New chats never trip this.
-        let sweepKey = "yawac.cvm.sweptChat.\(jid)"
-        if !UserDefaults.standard.bool(forKey: sweepKey) {
-            var swept = 0
-            // F35: dropped "system" from the sweep list — we now emit
-            // synthetic system rows (encryption-key-changed,
-            // disappearing-timer-changed) that the user wants to see in
-            // the chat. "reaction" + "protocol" still sweep because
-            // those carry no human-visible body.
-            for p in rows where p.kind == "reaction" || p.kind == "protocol" {
-                context.delete(p)
-                swept += 1
-            }
-            if swept > 0 { try? context.save() }
-            UserDefaults.standard.set(true, forKey: sweepKey)
-        }
         // F122: system rows with a body (encryption-key change,
         // disappearing-timer change) stay visible in the chat; only
         // body-less carriers are dropped.
@@ -1655,12 +1534,7 @@ final class ConversationViewModel {
     }
 
     private func clearMediaExpiredFlag(_ id: String) {
-        guard let context else { return }
-        let descriptor = FetchDescriptor<PersistedMessage>(predicate: #Predicate { $0.id == id })
-        if let row = try? context.fetch(descriptor).first, row.mediaExpired {
-            row.mediaExpired = false
-            try? context.save()
-        }
+        Task { await commit(.mutation(.mediaExpired(id: id, expired: false))) }
     }
 
     func retryHandler(for message: UIMessage) -> (() -> Void)? {
@@ -1685,6 +1559,7 @@ final class ConversationViewModel {
     }
 
     private func ensureDownload(for message: BridgeMessage) {
+        guard messages.first(where: { $0.id == message.id })?.viewOnceLocked != true else { return }
         guard let media = message.media, let ref = media.ref else { return }
         let kind = message.kind
         let allowedKinds: Set<String> = ["image", "sticker", "video", "audio", "document"]
@@ -1774,6 +1649,8 @@ final class ConversationViewModel {
             if let self {
                 switch result {
                 case .file(let url):
+                    guard await self.commit(.mutation(.mediaPath(id: id, path: url.path))) else { return }
+                    if self.messages.first(where: { $0.id == id })?.viewOnceLocked == true { return }
                     self.localPaths[id] = url.path
                     self.invalidateTimeline()
                     self.downloadErrors[id] = nil
@@ -1816,12 +1693,7 @@ final class ConversationViewModel {
 
     private func markMediaExpired(_ id: String, reason: String) {
         downloadErrors[id] = "media expired"
-        guard let context else { return }
-        let descriptor = FetchDescriptor<PersistedMessage>(predicate: #Predicate { $0.id == id })
-        if let row = try? context.fetch(descriptor).first {
-            row.mediaExpired = true
-            try? context.save()
-        }
+        Task { await commit(.mutation(.mediaExpired(id: id, expired: true))) }
     }
 
     private func tryRequestMediaRetry(messageID: String, reason: String) {
@@ -1860,54 +1732,23 @@ final class ConversationViewModel {
     }
 
     func applyMediaRetry(messageID: String, ok: Bool, newDirectPath: String?, error: String?) {
-        guard let container = context?.container else { return }
-        if !ok {
-            let reason = "phone retry failed: \(error ?? "?")"
-            // F68: always mark expired on retry failure. Previously only
-            // specific error strings ("phone retry returned no path",
-            // "403/404/410", "sha mismatch") flipped `mediaExpired`;
-            // other failures left the flag unset, so the next chat-open
-            // re-issued `requestMediaRetry` for the same id. Phone has
-            // already said no — there's nothing useful to re-ask for.
-            // Manual refetch via the Refetch-expired path (anchored
-            // history-sync IQ) is still available if the user wants to
-            // force-try later.
-            markMediaExpired(messageID, reason: reason)
+        guard ok, let container = context?.container else {
+            downloadErrors[messageID] = "media expired"
             return
         }
-        guard let newPath = newDirectPath, !newPath.isEmpty else {
-            downloadErrors[messageID] = "phone retry returned no path"
-            return
-        }
-        // F22: move the SwiftData fetch + JSON patch + save off MainActor.
-        // Background context with the same ModelContainer is per-thread
-        // safe and matches the F2 / F3 pattern. MainActor only handles
-        // the VM state update (downloadErrors / downloadTasks /
-        // ensureDownloadFromHistory) after the persistence is committed.
-        Task.detached(priority: .userInitiated) { [weak self] in
-            let ctx = ModelContext(container)
-            let descriptor = FetchDescriptor<PersistedMessage>(
-                predicate: #Predicate { $0.id == messageID })
-            guard let row = try? ctx.fetch(descriptor).first,
-                  let oldRefJSON = row.mediaRefJSON
-            else { return }
-            // Patch direct_path inside the stored MediaRef JSON so future
-            // retries (and the immediate re-download below) use the fresh
-            // path.
-            var refDict = (try? JSONSerialization.jsonObject(with: Data(oldRefJSON.utf8))) as? [String: Any] ?? [:]
-            refDict["direct_path"] = newPath
-            guard let newJSON = try? JSONSerialization.data(withJSONObject: refDict),
-                  let s = String(data: newJSON, encoding: .utf8)
-            else { return }
-            row.mediaRefJSON = s
-            try? ctx.save()
-            let kind = row.kind
-            await MainActor.run {
-                self?.downloadErrors[messageID] = nil
-                self?.downloadTasks[messageID]?.cancel()
-                self?.downloadTasks[messageID] = nil
-                self?.ensureDownloadFromHistory(id: messageID, kind: kind, refJSON: s)
-            }
+        // The session committed the new reference before publishing this event.
+        Task { [weak self] in
+            let snapshot: (String, String)? = await Task.detached {
+                let context = ModelContext(container)
+                guard let row = try? context.fetch(FetchDescriptor<PersistedMessage>(
+                    predicate: #Predicate { $0.id == messageID })).first,
+                      !row.viewOnceLocked, let ref = row.mediaRefJSON else { return nil }
+                return (row.kind, ref)
+            }.value
+            guard let self, let (kind, ref) = snapshot else { return }
+            downloadErrors[messageID] = nil
+            downloadTasks[messageID]?.cancel()
+            ensureDownloadFromHistory(id: messageID, kind: kind, refJSON: ref)
         }
     }
 
@@ -2006,7 +1847,7 @@ final class ConversationViewModel {
             receiptStatus[tempID] = nil
             receiptStatus[real.id] = .sent
             invalidateTimeline()
-            persistOutgoing(real, kind: "text", text: body)
+            await persistOutgoing(real)
         } catch {
             // Roll back optimistic append; restore composer state.
             messages.removeAll { $0.id == tempID }
@@ -2020,85 +1861,29 @@ final class ConversationViewModel {
         }
     }
 
-    func ingest(_ b: BridgeMessage) {
-        // Bridge emits raw (possibly `@lid` / device-suffixed) JIDs; our
-        // stored `chatJID` is canonical. Match in canonical space so
-        // events for this chat aren't dropped on the floor.
-        guard JIDNormalize.canonical(b.chatJID, client: client) == chatJID else { return }
-        if b.kind == "protocol" { return }
-        // F35: allow synthetic system rows with body text through —
-        // the bridge emits these for encryption-key changes +
-        // disappearing-timer changes so the user sees them inline.
-        if b.kind == "system", (b.text ?? "").isEmpty { return }
-        // O(1) dedupe via the Set mirror — both for rows already on
-        // screen and for rows queued earlier in this flush window.
-        if messageIDs.contains(b.id) { return }
-        if pendingIngestIDs.contains(b.id) { return }
-        pendingIngestIDs.insert(b.id)
-        pendingIngest.append(b)
-        guard pendingIngestFlush == nil else { return }
-        // F47 / F57: ingest coalesce.
-        // Normal traffic — 250ms, near-real-time. During an active
-        // full-history sync (chatList → session → fullSync.inFlight)
-        // the row-render cost (1000+ TimelineItem id-getter calls per
-        // body re-eval + RightClickCatcher.updateNSView per visible
-        // bubble + receipt-dict observation cascades) saturated
-        // MainActor under the original 50ms / 250ms windows; the user
-        // beachballed when browsing the open conversation mid-sync.
-        // Bump to 2s during sync so the open conversation gets ONE
-        // big batch update per 2-second window instead of constant
-        // dribble.
-        let inSync = chatList?.session?.fullSync.inFlight ?? false
-        let debounceMs: UInt64 = inSync ? 2000 : 250
-        pendingIngestFlush = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .milliseconds(debounceMs))
-            guard let self else { return }
-            self.flushIngest()
+    func applyCommitted(_ rows: [UIMessage], incoming: [BridgeMessage]) {
+        guard rows.contains(where: { $0.chatJID == chatJID }) else { return }
+        if historyLoadID != nil {
+            for row in rows where row.chatJID == chatJID { changesDuringHistory[row.id] = row }
         }
-    }
-
-    /// Drains `pendingIngest` into `messages` in one batch. Bumps the
-    /// timeline generation once for the whole batch (vs. once per
-    /// event), then runs per-message side effects: SwiftData persist,
-    /// auto-download, unread-receipt bookkeeping.
-    @MainActor
-    private func flushIngest() {
-        let batch = pendingIngest
-        pendingIngest.removeAll(keepingCapacity: true)
-        pendingIngestIDs.removeAll(keepingCapacity: true)
-        pendingIngestFlush = nil
-        if batch.isEmpty { return }
-        // Filter against the current Set — a path other than `ingest`
-        // (e.g. an optimistic send, a forwarded-into-self append) may
-        // have inserted one of these ids since the burst started.
-        var newRows: [UIMessage] = []
-        newRows.reserveCapacity(batch.count)
-        var ingested: [BridgeMessage] = []
-        ingested.reserveCapacity(batch.count)
-        for b in batch {
-            if messageIDs.contains(b.id) { continue }
-            let m = UIMessage(b)
-            newRows.append(m)
-            messageIDs.insert(m.id)
-            ingested.append(b)
-        }
-        if newRows.isEmpty { return }
-        messages.append(contentsOf: newRows)
-        invalidateTimeline()
-        for b in ingested {
-            // The global ChatListViewModel subscriber persists every inbound
-            // event through MessageWriter's background ModelContext. Avoid a
-            // second fetch + save on MainActor in the normal app path. Keep
-            // the fallback for isolated/test CVMs that have no chat-list sink.
-            if chatList == nil { persist(b) }
-            ensureDownload(for: b)
-            if !b.fromMe {
-                // Don't fire the receipt yet — wait until the row has
-                // been on screen long enough that the user actually
-                // saw it. ViewportReadModifier drives
-                // `markVisibleAsRead`.
-                unreadInboundIDs.insert(b.id)
+        if let container = context?.container { context = ModelContext(container) }
+        let incomingIDs = Set(incoming.map(\.id))
+        var positions = Dictionary(messages.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { first, _ in first })
+        var working = messages
+        for row in rows where row.chatJID == chatJID {
+            if let position = positions[row.id] { working[position] = row }
+            else if incomingIDs.contains(row.id) {
+                positions[row.id] = working.count
+                working.append(row)
+                if !row.fromMe { unreadInboundIDs.insert(row.id) }
             }
+            if row.viewOnceLocked { localPaths.removeValue(forKey: row.id) }
+        }
+        messages = working.sorted { ($0.timestamp, $0.id) < ($1.timestamp, $1.id) }
+        messageIDs = Set(messages.map(\.id))
+        invalidateTimeline()
+        for message in incoming where JIDNormalize.canonical(message.chatJID, client: client) == chatJID {
+            ensureDownload(for: message)
         }
     }
 
@@ -2206,7 +1991,7 @@ final class ConversationViewModel {
             messageIDs.insert(m.id)
             invalidateTimeline()
             receiptStatus[m.id] = .sent
-            persistOutgoingMedia(m, kind: "audio", localPath: persistent.path)
+            await persistOutgoing(m)
         } catch {
             let sys = UIMessage(
                 id: UUID().uuidString,
@@ -2376,7 +2161,7 @@ final class ConversationViewModel {
             localPaths[res.messageID] = cached
             invalidateTimeline()
             receiptStatus[res.messageID] = .sent
-            persistOutgoingMedia(m, kind: kind, localPath: cached)
+            await persistOutgoing(m)
         } catch {
             let sys = UIMessage(
                 id: UUID().uuidString,
@@ -2419,7 +2204,7 @@ final class ConversationViewModel {
             messageIDs.insert(m.id)
             invalidateTimeline()
             receiptStatus[res.messageID] = .sent
-            persistOutgoingLocation(m, location: loc)
+            await persistOutgoing(m)
         } catch {
             let sys = UIMessage(
                 id: UUID().uuidString,
@@ -2459,7 +2244,7 @@ final class ConversationViewModel {
             messageIDs.insert(m.id)
             invalidateTimeline()
             receiptStatus[res.messageID] = .sent
-            persistOutgoingContact(m, contact: card)
+            await persistOutgoing(m)
         } catch {
             let sys = UIMessage(
                 id: UUID().uuidString,
@@ -2510,7 +2295,7 @@ final class ConversationViewModel {
             messageIDs.insert(m.id)
             invalidateTimeline()
             receiptStatus[res.messageID] = .sent
-            persistOutgoingContacts(m, contacts: cards)
+            await persistOutgoing(m)
         } catch {
             let sys = UIMessage(
                 id: UUID().uuidString,
@@ -2543,111 +2328,27 @@ final class ConversationViewModel {
         }
     }
 
-    private func persist(_ m: BridgeMessage) {
-        guard let context else { return }
-        // Always store the canonical chatJID so it matches loadHistory's
-        // predicate (and ChatListViewModel.persistMessage, which is the
-        // other write path). Without this, when CVM's event loop wins
-        // the race against the sidebar's loop, the row lands with a raw
-        // (device-suffixed / @lid) chatJID and is invisible to future
-        // chat-open queries — the symptom is "sidebar shows new preview
-        // but conversation view stays stale".
-        let canonChat = JIDNormalize.canonical(m.chatJID, client: client)
-        let id = m.id
-
-        // Upsert: history-sync replays sometimes deliver fresher media
-        // refs (mediaKey, directPath, hashes) than what we first
-        // persisted — the original ingest may have happened before the
-        // primary device's session was warm. With @Attribute(.unique)
-        // a blind insert silently fails and the stale ref stays, so
-        // re-attempts keep using the broken bytes. If the row already
-        // exists, refresh the media fields in place instead.
-        let descriptor = FetchDescriptor<PersistedMessage>(predicate: #Predicate { $0.id == id })
-        if let existing = try? context.fetch(descriptor).first {
-            if let ref = m.media?.ref?.json, ref != existing.mediaRefJSON {
-                existing.mediaRefJSON = ref
-                // Fresh ref means we should try downloading again, even
-                // if we'd previously latched it as expired.
-                existing.mediaExpired = false
-            }
-            if let p = m.media?.filePath, !p.isEmpty { existing.mediaPath = p }
-            if let c = m.media?.caption, !c.isEmpty { existing.mediaCaption = c }
-            if let f = m.media?.fileName, !f.isEmpty { existing.mediaFileName = f }
-            if let push = m.senderPushName, !push.isEmpty {
-                existing.senderPushName = push
-            }
-            // T12 fields: re-merge view-once / location / contact metadata so
-            // history-sync replays (or live-location sequence bumps) don't
-            // erase what the initial insert captured.
-            if let v = m.isViewOnce { existing.isViewOnce = v }
-            if let loc = m.location {
-                existing.locationLat = loc.lat
-                existing.locationLng = loc.lng
-                if !loc.name.isEmpty { existing.locationName = loc.name }
-                if !loc.address.isEmpty { existing.locationAddress = loc.address }
-            }
-            if m.kind == "location_live" {
-                existing.locationIsLive = true
-                if let seq = m.locationSequence { existing.locationSequence = seq }
-            }
-            if let card = m.contact {
-                existing.contactVCard = card.vcard
-                existing.contactDisplayName = card.displayName
-            }
-            try? context.save()
-            return
+    private func persistOutgoing(_ message: UIMessage, mediaRefJSON: String? = nil) async {
+        let payload = BridgeMessage(outgoing: message, ownJID: client.ownJID, mediaRefJSON: mediaRefJSON)
+        do {
+            guard let session = chatList?.session else { throw WAClient.WAError.bridgeFailure("The sending session has ended") }
+            try await session.recordOutgoing(payload, from: client)
+        } catch {
+            transientError = "Sent message \(message.id), but couldn't save it locally: \(error.localizedDescription)"
         }
-
-        let row = PersistedMessage(
-            id: id,
-            chatJID: canonChat,
-            senderJID: m.senderJID,
-            fromMe: m.fromMe,
-            timestamp: Date(timeIntervalSince1970: TimeInterval(m.timestamp)),
-            kind: m.kind,
-            text: m.text,
-            mediaPath: m.media?.filePath,
-            mediaCaption: m.media?.caption,
-            mediaFileName: m.media?.fileName,
-            mediaRefJSON: m.media?.ref?.json,
-            pollJSON: m.poll?.json,
-            isViewOnce: m.isViewOnce ?? false,
-            viewOnceLocked: false,
-            locationLat: m.location?.lat,
-            locationLng: m.location?.lng,
-            locationName: m.location?.name,
-            locationAddress: m.location?.address,
-            locationIsLive: m.kind == "location_live",
-            locationSequence: m.locationSequence,
-            contactVCard: m.contact?.vcard,
-            contactDisplayName: m.contact?.displayName,
-            senderPushName: m.senderPushName,
-            quotedMessageID: m.quoted?.messageID,
-            quotedSenderJID: m.quoted?.senderJID,
-            quotedFromMe: m.quoted?.fromMe ?? false,
-            quotedTextSnippet: m.quoted?.snippet,
-            quotedKind: m.quoted?.kind,
-            isForwarded: m.isForwarded ?? false,
-            audioWaveform: m.media?.waveform.flatMap { Data(base64Encoded: $0) },
-            isPTT: m.media?.isPTT ?? false)
-        context.insert(row)
-        try? context.save()
-        MessageIndex.shared.upsert(row.indexFields)
     }
 
-    private func persistOutgoing(_ m: UIMessage, kind: String, text: String?) {
-        guard let context else { return }
-        let row = PersistedMessage(
-            id: m.id, chatJID: m.chatJID, senderJID: m.senderJID,
-            fromMe: m.fromMe, timestamp: m.timestamp, kind: kind, text: text,
-            quotedMessageID: m.quotedMessageID,
-            quotedSenderJID: m.quotedSenderJID,
-            quotedFromMe: m.quotedFromMe,
-            quotedTextSnippet: m.quotedTextSnippet,
-            quotedKind: m.quotedKind)
-        context.insert(row)
-        try? context.save()
-        MessageIndex.shared.upsert(row.indexFields)
+    @discardableResult
+    private func commit(_ operation: MessageWriter.Operation) async -> Bool {
+        do {
+            guard let session = chatList?.session else { throw WAClient.WAError.bridgeFailure("The session has ended") }
+            let result = try await session.commit(operation, from: client)
+            if session.currentConversation !== self { applyCommitted(result.changed, incoming: []) }
+            return true
+        } catch {
+            transientError = "Couldn't save message change: \(error.localizedDescription)"
+            return false
+        }
     }
 
     func sendPoll(question: String,
@@ -2688,112 +2389,11 @@ final class ConversationViewModel {
             messageIDs.insert(m.id)
             invalidateTimeline()
             receiptStatus[m.id] = .sent
-            persistOutgoingPoll(m, pollJSON: res.poll.json ?? "")
+            await persistOutgoing(m)
         } catch {
             transientError =
                 "Couldn't create poll: \(error.localizedDescription)"
         }
-    }
-
-    private func persistOutgoingPoll(_ m: UIMessage, pollJSON: String) {
-        guard let context else { return }
-        let row = PersistedMessage(
-            id: m.id,
-            chatJID: m.chatJID,
-            senderJID: m.senderJID,
-            fromMe: m.fromMe,
-            timestamp: m.timestamp,
-            kind: "poll",
-            text: nil,
-            pollJSON: pollJSON)
-        context.insert(row)
-        try? context.save()
-        MessageIndex.shared.upsert(row.indexFields)
-    }
-
-    /// Outbound-location persistence. Stores lat/lng + name/address so
-    /// the bubble survives chat switches / app restarts.
-    private func persistOutgoingLocation(_ m: UIMessage, location: LocationPayload) {
-        guard let context else { return }
-        let row = PersistedMessage(
-            id: m.id, chatJID: m.chatJID, senderJID: m.senderJID,
-            fromMe: m.fromMe, timestamp: m.timestamp, kind: "location",
-            text: nil,
-            locationLat: location.lat,
-            locationLng: location.lng,
-            locationName: location.name,
-            locationAddress: location.address,
-            locationIsLive: false)
-        context.insert(row)
-        try? context.save()
-        MessageIndex.shared.upsert(row.indexFields)
-    }
-
-    /// Outbound-contact persistence. Stores the vCard payload + parsed
-    /// display name.
-    private func persistOutgoingContact(_ m: UIMessage, contact: ContactPayload) {
-        guard let context else { return }
-        let row = PersistedMessage(
-            id: m.id, chatJID: m.chatJID, senderJID: m.senderJID,
-            fromMe: m.fromMe, timestamp: m.timestamp, kind: "contact",
-            text: nil,
-            contactVCard: contact.vcard,
-            contactDisplayName: contact.displayName)
-        context.insert(row)
-        try? context.save()
-        MessageIndex.shared.upsert(row.indexFields)
-    }
-
-    /// Outbound multi-contact persistence. Stores the array of vCard
-    /// payloads as a single JSON column so a cold reopen can re-hydrate
-    /// the same `UIMessage.Body.contacts(...)` bubble. Schema-wise this
-    /// is a new optional column with a `nil` default — lightweight
-    /// migration handles it (no VersionedSchema bump, no #Index — both
-    /// would burn the store per `project_swiftdata_index_migration.md`).
-    private func persistOutgoingContacts(_ m: UIMessage, contacts: [ContactPayload]) {
-        guard let context else { return }
-        let payloads = contacts.map { c -> BridgeContactPayload in
-            BridgeContactPayload(vcard: c.vcard, displayName: c.displayName)
-        }
-        let data = (try? JSONEncoder().encode(payloads)) ?? Data()
-        let row = PersistedMessage(
-            id: m.id, chatJID: m.chatJID, senderJID: m.senderJID,
-            fromMe: m.fromMe, timestamp: m.timestamp, kind: "contacts",
-            text: nil,
-            contactsJSON: String(data: data, encoding: .utf8))
-        context.insert(row)
-        try? context.save()
-        MessageIndex.shared.upsert(row.indexFields)
-    }
-
-    /// Outbound-media persistence. Carries the local file path so the
-    /// bubble survives chat switches / app restarts and the audio /
-    /// image / video keeps rendering from disk without re-download.
-    private func persistOutgoingMedia(_ m: UIMessage, kind: String, localPath: String) {
-        guard let context else { return }
-        // Mine caption + filename out of the UIMessage so the persisted
-        // row keeps them across reload. Earlier builds dropped both,
-        // surfacing a "Document" placeholder on reload.
-        var caption: String? = nil
-        var fileName: String? = nil
-        if case .media(_, let cap, let name, _, _, _) = m.body {
-            caption = cap
-            fileName = name
-        }
-        let row = PersistedMessage(
-            id: m.id, chatJID: m.chatJID, senderJID: m.senderJID,
-            fromMe: m.fromMe, timestamp: m.timestamp, kind: kind, text: nil,
-            mediaPath: localPath,
-            mediaCaption: caption,
-            mediaFileName: fileName,
-            quotedMessageID: m.quotedMessageID,
-            quotedSenderJID: m.quotedSenderJID,
-            quotedFromMe: m.quotedFromMe,
-            quotedTextSnippet: m.quotedTextSnippet,
-            quotedKind: m.quotedKind)
-        context.insert(row)
-        try? context.save()
-        MessageIndex.shared.upsert(row.indexFields)
     }
 
     func saveEdit(_ newBody: String) async {
@@ -2849,130 +2449,15 @@ final class ConversationViewModel {
             messages[idx].locallyDeleted = true
             invalidateTimeline()
         }
-        persistLocallyDeleted(messageID: msg.id, value: true)
-        chatList?.refreshPreview(chatJID: chatJID)
-    }
-
-    @ObservationIgnored private var pendingEdits:   PendingMap<(text: String, ts: Date)> = .init(cap: 256)
-    @ObservationIgnored private var pendingRevokes: PendingMap<(by: String, ts: Date)>   = .init(cap: 256)
-
-    var pendingEditsCount: Int { pendingEdits.count }
-    var pendingRevokesCount: Int { pendingRevokes.count }
-
-    func applyIncomingEdit(chatJID: String, messageID: String, newText: String, at: Date) {
-        guard JIDNormalize.canonical(chatJID, client: client) == self.chatJID else { return }
-        if messages.contains(where: { $0.id == messageID }) {
-            applyLocalEdit(messageID: messageID, newText: newText, at: at)
-        } else {
-            pendingEdits[messageID] = (newText, at)
-        }
-    }
-
-    func applyIncomingRevoke(chatJID: String, messageID: String, revokedBy: String, at: Date) {
-        guard JIDNormalize.canonical(chatJID, client: client) == self.chatJID else { return }
-        if messages.contains(where: { $0.id == messageID }) {
-            applyLocalRevoke(messageID: messageID, by: revokedBy, at: at)
-        } else {
-            pendingRevokes[messageID] = (revokedBy, at)
-        }
-    }
-
-    /// Apply a peer-device delete-for-me sync. Hides the row locally
-    /// without sending anything back; matches the in-app
-    /// `deleteForMe(_:)` semantics.
-    func applyIncomingLocalDelete(chatJID: String, messageID: String) {
-        guard JIDNormalize.canonical(chatJID, client: client) == self.chatJID else { return }
-        if let idx = messages.firstIndex(where: { $0.id == messageID }) {
-            messages[idx].locallyDeleted = true
-            invalidateTimeline()
-        }
-        persistLocallyDeleted(messageID: messageID, value: true)
-        chatList?.refreshPreview(chatJID: self.chatJID)
-    }
-
-    func replayPendingForLoadedRows() {
-        let edits = pendingEdits
-        let revokes = pendingRevokes
-        for m in messages {
-            if let p = edits[m.id] {
-                applyLocalEdit(messageID: m.id, newText: p.text, at: p.ts)
-                pendingEdits.removeValue(forKey: m.id)
-            }
-            if let r = revokes[m.id] {
-                applyLocalRevoke(messageID: m.id, by: r.by, at: r.ts)
-                pendingRevokes.removeValue(forKey: m.id)
-            }
-        }
+        Task { await commit(.mutation(.localDelete(id: msg.id, chatJID: chatJID))) }
     }
 
     private func applyLocalEdit(messageID: String, newText: String, at: Date) {
-        if let idx = messages.firstIndex(where: { $0.id == messageID }) {
-            let old = messages[idx]
-            // UIMessage.body is a let; reconstruct with the new body.
-            var r = UIMessage(
-                id: old.id, chatJID: old.chatJID,
-                senderJID: old.senderJID, fromMe: old.fromMe,
-                timestamp: old.timestamp, body: .text(newText))
-            // Preserve mutable metadata.
-            r.quotedMessageID = old.quotedMessageID
-            r.quotedSenderJID = old.quotedSenderJID
-            r.quotedFromMe = old.quotedFromMe
-            r.quotedTextSnippet = old.quotedTextSnippet
-            r.quotedKind = old.quotedKind
-            r.revokedAt = old.revokedAt
-            r.revokedBy = old.revokedBy
-            r.locallyDeleted = old.locallyDeleted
-            r.editedAt = at
-            messages[idx] = r
-            invalidateTimeline()
-        }
-        persistEdit(messageID: messageID, newText: newText, editedAt: at)
-        chatList?.refreshPreview(chatJID: chatJID)
+        Task { await commit(.mutation(.edit(id: messageID, chatJID: chatJID, newText: newText, at: at))) }
     }
 
     private func applyLocalRevoke(messageID: String, by jid: String, at: Date) {
-        if let idx = messages.firstIndex(where: { $0.id == messageID }) {
-            messages[idx].revokedAt = at
-            messages[idx].revokedBy = jid
-            // Bubble rendering uses revokedAt as the gate; body stays as-is.
-            invalidateTimeline()
-        }
-        persistRevoke(messageID: messageID, revokedBy: jid, revokedAt: at)
-        chatList?.refreshPreview(chatJID: chatJID)
-    }
-
-    private func persistEdit(messageID: String, newText: String, editedAt: Date) {
-        guard let context else { return }
-        let descriptor = FetchDescriptor<PersistedMessage>(
-            predicate: #Predicate { $0.id == messageID })
-        if let row = try? context.fetch(descriptor).first {
-            row.text = newText
-            row.editedAt = editedAt
-            try? context.save()
-        }
-    }
-
-    private func persistRevoke(messageID: String, revokedBy: String, revokedAt: Date) {
-        guard let context else { return }
-        let descriptor = FetchDescriptor<PersistedMessage>(
-            predicate: #Predicate { $0.id == messageID })
-        if let row = try? context.fetch(descriptor).first {
-            row.revokedAt = revokedAt
-            row.revokedBy = revokedBy
-            try? context.save()
-            MessageIndex.shared.upsert(row.indexFields)
-        }
-    }
-
-    private func persistLocallyDeleted(messageID: String, value: Bool) {
-        guard let context else { return }
-        let descriptor = FetchDescriptor<PersistedMessage>(
-            predicate: #Predicate { $0.id == messageID })
-        if let row = try? context.fetch(descriptor).first {
-            row.locallyDeleted = value
-            try? context.save()
-            MessageIndex.shared.upsert(row.indexFields)
-        }
+        Task { await commit(.mutation(.revoke(id: messageID, chatJID: chatJID, by: jid, at: at))) }
     }
 
     /// Emoji aggregated for a message (one per unique sender, latest emoji wins).
@@ -3015,6 +2500,7 @@ final class ConversationViewModel {
     }
 
     func applyPollVote(pollMessageID: String, voterJID: String, optionHashes: [String]) {
+        if historyLoadID != nil { votesDuringHistory.append((pollMessageID, voterJID, optionHashes)) }
         var byHash = pollVotes[pollMessageID] ?? [:]
         // A new vote from this voter replaces any prior selections — matches
         // WhatsApp semantics for both single- and multi-select polls.
@@ -3075,22 +2561,8 @@ final class ConversationViewModel {
                     self.applyPollVote(pollMessageID: messageID,
                                        voterJID: me,
                                        optionHashes: hashes)
-                    // Persist our own optimistic vote — SessionViewModel's
-                    // global PollVote sink only sees inbound events, and
-                    // whatsmeow doesn't echo our own sent messages back as
-                    // events. Without this the radio "forgets" itself on
-                    // restart.
-                    let json = (try? JSONEncoder().encode(hashes))
-                        .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
-                    let chat = self.chatJID
-                    Task.detached(priority: .utility) {
-                        SQLiteDedupe.upsertPollVote(
-                            chatJID: chat,
-                            pollMessageID: messageID,
-                            voterJID: me,
-                            optionHashesJSON: json,
-                            timestamp: Date())
-                    }
+                    _ = await commit(.vote(chat: chatJID, message: messageID, voter: me,
+                                           hashes: hashes, at: .now))
                 }
             } catch {
                 let sys = UIMessage(
@@ -3109,33 +2581,7 @@ final class ConversationViewModel {
 
     /// Post or clear our reaction on a target message. emoji="" clears it.
     /// Tallies optimistically under voter id "me" — matches castVote.
-    private func persistReactionLocal(_ r: BridgeReaction) {
-        guard let context else { return }
-        let id = r.targetMessageID
-        let sender = r.senderJID
-        let descriptor = FetchDescriptor<PersistedReaction>(
-            predicate: #Predicate {
-                $0.targetMessageID == id && $0.senderJID == sender
-            })
-        let ts = Date(timeIntervalSince1970: TimeInterval(r.timestamp))
-        if r.emoji.isEmpty {
-            if let row = try? context.fetch(descriptor).first {
-                context.delete(row)
-            }
-        } else if let existing = try? context.fetch(descriptor).first {
-            existing.emoji = r.emoji
-            existing.timestamp = ts
-        } else {
-            let row = PersistedReaction(
-                chatJID: JIDNormalize.bare(r.chatJID),
-                targetMessageID: r.targetMessageID,
-                senderJID: r.senderJID,
-                emoji: r.emoji,
-                timestamp: ts)
-            context.insert(row)
-        }
-        try? context.save()
-    }
+
 
     func sendReaction(messageID: String,
                       targetSenderJID: String,
@@ -3164,7 +2610,7 @@ final class ConversationViewModel {
                     emoji: emoji,
                     timestamp: Int64(Date().timeIntervalSince1970))
                 self.applyReaction(rx)
-                self.persistReactionLocal(rx)
+                _ = await self.commit(.reaction(rx))
             } catch {
                 let sys = UIMessage(
                     id: UUID().uuidString,
@@ -3190,7 +2636,7 @@ final class ConversationViewModel {
     /// to WhatsApp (which fans out to the user's other devices) and
     /// mutates the row optimistically — peer-device echoes arrive as
     /// `messageStarred` events and converge on the same row via
-    /// `applyIncomingStar`.
+    /// the shared writer.
     func starMessage(_ msg: UIMessage, starred: Bool) {
         Task { @MainActor [weak self] in
             guard let self else { return }
@@ -3223,50 +2669,19 @@ final class ConversationViewModel {
         }
     }
 
-    func applyIncomingStar(chatJID: String, messageID: String,
-                           starred: Bool, at: Date) {
-        guard JIDNormalize.canonical(chatJID, client: client) == self.chatJID else { return }
-        applyLocalStar(messageID: messageID,
-                       starredAt: starred ? at : nil)
-    }
-
     private func applyLocalStar(messageID: String, starredAt: Date?) {
-        if let idx = messages.firstIndex(where: { $0.id == messageID }) {
-            messages[idx].starredAt = starredAt
-            invalidateTimeline()
-        }
-        persistStar(messageID: messageID, starredAt: starredAt)
+        Task { await commit(.mutation(.star(id: messageID, chatJID: chatJID,
+                                           starred: starredAt != nil, at: starredAt ?? .now))) }
     }
 
-    private func persistStar(messageID: String, starredAt: Date?) {
-        guard let context else { return }
-        let descriptor = FetchDescriptor<PersistedMessage>(
-            predicate: #Predicate { $0.id == messageID })
-        if let row = try? context.fetch(descriptor).first {
-            row.starredAt = starredAt
-            try? context.save()
-        }
-    }
-
-    /// View-once reveal: flip the persisted row's `viewOnceLocked` +
-    /// delete the on-disk media via `ViewOnceReveal.reveal(_:)`, then
-    /// mirror the lock onto the in-memory UIMessage so the row flips
-    /// to its locked terminal state without waiting for a reload.
+    /// Report consumption only after the writer commits the permanent lock.
     @MainActor
     func revealViewOnce(messageID: String) {
-        guard let context else { return }
-        let descriptor = FetchDescriptor<PersistedMessage>(
-            predicate: #Predicate { $0.id == messageID })
-        guard let row = try? context.fetch(descriptor).first else { return }
-        ViewOnceReveal.reveal(row)
-        try? context.save()
-        // Drop any cached local path so re-renders don't try to load
-        // the file we just deleted.
-        localPaths.removeValue(forKey: messageID)
-        if let idx = messages.firstIndex(where: { $0.id == messageID }) {
-            messages[idx].viewOnceLocked = true
+        Task {
+            guard await commit(.mutation(.viewOnce(id: messageID))) else { return }
+            localPaths.removeValue(forKey: messageID)
+            invalidateTimeline()
         }
-        invalidateTimeline()
     }
 
     /// The newest currently-pinned message in this chat, or nil. The
@@ -3283,7 +2698,7 @@ final class ConversationViewModel {
 
     /// Toggle in-chat pin. Sends a PinInChatMessage stanza — every
     /// participant receives it as a regular message event and the
-    /// bridge routes it to `applyIncomingMessagePin`, which converges
+    /// shared writer persists it, which converges
     /// with our optimistic mutation here.
     func pinMessage(_ msg: UIMessage, pinned: Bool) {
         Task { @MainActor [weak self] in
@@ -3317,33 +2732,14 @@ final class ConversationViewModel {
         }
     }
 
-    func applyIncomingMessagePin(chatJID: String, targetMessageID: String,
-                                 pinned: Bool, at: Date) {
-        guard JIDNormalize.canonical(chatJID, client: client) == self.chatJID else { return }
-        applyLocalMessagePin(messageID: targetMessageID,
-                             pinnedAt: pinned ? at : nil)
-    }
-
     private func applyLocalMessagePin(messageID: String, pinnedAt: Date?) {
-        if let idx = messages.firstIndex(where: { $0.id == messageID }) {
-            messages[idx].pinnedAt = pinnedAt
-            invalidateTimeline()
-        }
-        persistMessagePin(messageID: messageID, pinnedAt: pinnedAt)
-    }
-
-    private func persistMessagePin(messageID: String, pinnedAt: Date?) {
-        guard let context else { return }
-        let descriptor = FetchDescriptor<PersistedMessage>(
-            predicate: #Predicate { $0.id == messageID })
-        if let row = try? context.fetch(descriptor).first {
-            row.pinnedAt = pinnedAt
-            try? context.save()
-        }
+        Task { await commit(.mutation(.messagePin(id: messageID, chatJID: chatJID,
+                                                 pinned: pinnedAt != nil, at: pinnedAt ?? .now))) }
     }
 
     func applyReaction(_ r: BridgeReaction) {
         guard JIDNormalize.canonical(r.chatJID, client: client) == chatJID else { return }
+        if historyLoadID != nil { reactionsDuringHistory.append(r) }
         var byMsg = reactionsBySender[r.targetMessageID] ?? [:]
         if r.emoji.isEmpty {
             byMsg.removeValue(forKey: r.senderJID)

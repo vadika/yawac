@@ -51,6 +51,7 @@ final class TranslationViewModelTests: XCTestCase {
                 to: dir.appendingPathComponent("tokenizer_config.json"))
             try? Data([0]).write(
                 to: dir.appendingPathComponent("model.safetensors"))
+            try? Data("template".utf8).write(to: dir.appendingPathComponent("chat_template.jinja"))
             mgr.refreshState()
         }
         UserDefaults.standard.set(target, forKey: "yawac.translate.targetLang")
@@ -174,6 +175,7 @@ final class TranslationViewModelTests: XCTestCase {
             to: dir.appendingPathComponent("tokenizer_config.json"))
         try? Data([0]).write(
             to: dir.appendingPathComponent("model.safetensors"))
+        try? Data("template".utf8).write(to: dir.appendingPathComponent("chat_template.jinja"))
         mgr.refreshState()
         UserDefaults.standard.set("en", forKey: "yawac.translate.targetLang")
         UserDefaults.standard.set("[]", forKey: "yawac.translate.denyJSON")

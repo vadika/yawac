@@ -56,7 +56,7 @@ struct UIMessage: Identifiable, Hashable, Sendable {
     /// revealed the view-once envelope so we permanently render the
     /// "You viewed this once" lock instead of the reveal CTA. Default
     /// false; populated from the persisted row in loadHistory + after
-    /// ViewOnceReveal.reveal(_:) flips it.
+    /// the writer commits consumption.
     var viewOnceLocked: Bool = false
     /// F38: image / video pixel dimensions captured from the sender's
     /// upload metadata. Lets MessageRow size the bubble's reserved

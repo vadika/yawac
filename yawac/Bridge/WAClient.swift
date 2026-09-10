@@ -153,46 +153,10 @@ class WAClient: PhoneValidating, LIDResolving {
         callCountsLock.unlock()
     }
 
-    // MARK: - Event pump (off-main)
-    //
-    // Subscribers are read+written from the detached pump Task as well as
-    // from `eventStream()` / continuation termination callbacks (which may
-    // be on any actor). Protected by `subscribersQueue`;
-    // AsyncStream.Continuation.yield is safe to call from any thread.
-    private let subscribersQueue = DispatchQueue(
-        label: "yawac.WAClient.subscribers")
-    nonisolated(unsafe) private var _subscribers: [UUID: AsyncStream<Event>.Continuation] = [:]
-    // F100: replay buffer for events that arrive at the pump BEFORE any
-    // Swift subscriber registers. Bridge starts dispatching as soon as
-    // websocket auth completes (~0.5s after WAClient.init), but
-    // ContentView.task subscribes only AFTER ChatListViewModel cold-start
-    // bootstrap + groups/contacts refresh (~1-2s). The race silently
-    // dropped every offline-drain message announced before the first
-    // subscriber. Protected by subscribersQueue.
-    nonisolated(unsafe) private var _pendingEvents: [Event] = []
-    // pump Task is write-once in startPump (from MainActor init) and never
-    // read back — nothing observes it for cancellation or deinit cleanup.
-    // nonisolated(unsafe) is justified by that invariant.
+    // One raw stream, consumed by SessionViewModel for the client lifetime.
+    nonisolated private let events: AsyncStream<Event>
+    nonisolated private let eventContinuation: AsyncStream<Event>.Continuation
     nonisolated(unsafe) private var pump: Task<Void, Never>?
-
-    nonisolated private func withSubscribers<R>(_ body: ([UUID: AsyncStream<Event>.Continuation]) -> R) -> R {
-        subscribersQueue.sync { body(_subscribers) }
-    }
-
-    nonisolated private func mutateSubscribers<R>(_ body: (inout [UUID: AsyncStream<Event>.Continuation]) -> R) -> R {
-        subscribersQueue.sync { body(&_subscribers) }
-    }
-
-    nonisolated func dispatchSynthetic(_ event: Event) {
-        // F87: yawac-side synthesized events (e.g. own outbound sends that
-        // whatsmeow does not echo). Routed through the same subscriber fan-
-        // out as real bridge events so ChatListViewModel + ConversationView
-        // observers update via their existing .onChange paths.
-        let snapshot: [AsyncStream<Event>.Continuation] = self.withSubscribers { subs in
-            Array(subs.values)
-        }
-        for cont in snapshot { cont.yield(event) }
-    }
 
     init(dbPath: String) throws {
         var err: NSError?
@@ -200,36 +164,19 @@ class WAClient: PhoneValidating, LIDResolving {
             throw err ?? NSError(domain: "yawac", code: -1)
         }
         self.go = client
+        (events, eventContinuation) = AsyncStream<Event>.makeStream()
         client.setEventSink(bus)
         startPump()
     }
 
-    nonisolated func eventStream() -> AsyncStream<Event> {
-        let id = UUID()
-        return AsyncStream { continuation in
-            // F100: register under lock + drain replay buffer atomically.
-            // Buffered events were captured by the pump while no subscriber
-            // existed. Yield them OUTSIDE the lock to avoid the
-            // onTermination reentrancy deadlock the pump comment calls out.
-            let backlog: [Event] = self.mutateSubscribers { subs in
-                subs[id] = continuation
-                let p = self._pendingEvents
-                self._pendingEvents.removeAll(keepingCapacity: false)
-                return p
-            }
-            for e in backlog { continuation.yield(e) }
-            continuation.onTermination = { [weak self] _ in
-                self?.mutateSubscribers { subs in
-                    subs.removeValue(forKey: id)
-                }
-            }
-        }
-    }
+    nonisolated func eventStream() -> AsyncStream<Event> { events }
 
     deinit {
         // Cannot touch @MainActor-isolated state from deinit. Close the Go
         // client directly; the pump task will end when the event stream
         // closes (or when the process exits).
+        pump?.cancel()
+        eventContinuation.finish()
         go.close()
     }
 
@@ -820,17 +767,9 @@ class WAClient: PhoneValidating, LIDResolving {
         try go.requestRecentHistory(chatJID, count: count)
     }
 
-    nonisolated func requestFullHistorySync(beforeChatJID: String,
-                                            beforeMsgID: String,
-                                            beforeFromMe: Bool,
-                                            beforeTSUnix: Int64,
-                                            count: Int32) throws {
+    nonisolated func requestFullHistorySync(durationDays: Int32) throws {
         bump("requestFullHistorySync")
-        try go.requestFullHistorySync(beforeChatJID,
-                                      beforeMsgID: beforeMsgID,
-                                      beforeFromMe: beforeFromMe,
-                                      beforeTSUnix: beforeTSUnix,
-                                      count: count)
+        try go.requestFullHistorySync(durationDays)
     }
 
     nonisolated func requestMessageResend(chatJID: String,
@@ -1113,37 +1052,9 @@ class WAClient: PhoneValidating, LIDResolving {
                     windowStart = now
                 }
                 let evt = WAClient.decode(kind: tuple.kind, payload: tuple.payload)
-                // Snapshot continuations under the lock; yield outside it.
-                // `cont.yield` itself is non-blocking, but a previously
-                // finished continuation's `onTermination` callback fires
-                // synchronously and re-enters `subscribersQueue.sync` via
-                // `mutateSubscribers` — yielding while holding the lock
-                // would deadlock that path.
-                // F100: always buffer (cap 1000) so any LATE subscriber
-                // (e.g. ChatListViewModel registers ~1s after SessionViewModel
-                // — events that fired in the gap would otherwise be missed)
-                // can drain the backlog on registration. Existing subs get
-                // the live yield as before; no dupes. Closes issue #6 for the
-                // late-subscriber-missed-offline-drain failure mode.
-                let snapshot: [AsyncStream<Event>.Continuation] = self.mutateSubscribers { subs in
-                    self._pendingEvents.append(evt)
-                    if self._pendingEvents.count > 1000 {
-                        self._pendingEvents.removeFirst(self._pendingEvents.count - 1000)
-                    }
-                    return Array(subs.values)
-                }
-                for cont in snapshot { cont.yield(evt) }
+                self.eventContinuation.yield(evt)
             }
-            // stream ended (deinit case). Drain + clear under the lock,
-            // finish the continuations outside it for the same reentrancy
-            // reason as the per-event fan-out above.
-            guard let self else { return }
-            let toFinish: [AsyncStream<Event>.Continuation] = self.mutateSubscribers { subs in
-                let conts = Array(subs.values)
-                subs.removeAll()
-                return conts
-            }
-            for cont in toFinish { cont.finish() }
+            self?.eventContinuation.finish()
         }
     }
 

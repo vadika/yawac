@@ -737,14 +737,13 @@ struct ConversationView: View {
             if let anchor = lastVisibleMessageID {
                 session.nav.captureAnchor(jid: chatJID, messageID: anchor)
             }
-            session.currentConversation = nil
+            vm?.cancelHistoryLoad()
+            if session.currentConversation === vm { session.currentConversation = nil }
         }
         .task(id: chatJID) {
             guard let client = session.client else { return }
-            // Subscribe before asking the phone for targeted history so an
-            // unusually fast response cannot arrive between the request and
-            // this conversation's event-stream registration.
-            let stream = client.eventStream()
+            // Register presentation before loading history; the session already
+            // owns the bridge stream and durable ingestion.
             // Reset scroll bookkeeping for the new chat. atBottom starts
             // false — the BottomVisibilityTracker on the last row flips it
             // true via .onAppear once that row enters the viewport. If
@@ -754,14 +753,19 @@ struct ConversationView: View {
             didInitialScroll = false
             atBottom = false
             lastSeenCount = 0
+            self.vm?.cancelHistoryLoad()
             self.vm?.cancelForward()
-            let vm = ConversationViewModel(chatJID: chatJID, client: client, context: modelContext)
+            let vm = ConversationViewModel(chatJID: chatJID, client: client, context: modelContext, writer: session.messageWriter)
+            self.vm = vm
+            session.currentConversation = vm
+            vm.chatList = session.chatList
             vm.loadHistory()
             // Recover messages the phone consumed while yawac was offline only
             // for the chat the user is viewing. A reconnect-wide fan-out woke
             // the phone once per stored chat and caused false alerts/battery
             // drain. Session-level dedupe keeps this to one request per chat.
             await session.requestRecentHistoryIfNeeded(for: chatJID)
+            guard !Task.isCancelled, session.currentConversation === vm else { return }
             // Don't bulk-clear unread on chat open — let
             // ViewportReadModifier dwell-mark each visible row instead
             // (WhatsApp semantics: receipts fire only after the user
@@ -776,9 +780,6 @@ struct ConversationView: View {
             }) {
                 vm.refreshPollTallies()
             }
-            self.vm = vm
-            session.currentConversation = vm
-            vm.chatList = session.chatList
             // Consume a reply target stashed by the "Reply privately"
             // affordance in a prior CVM (see MessageRow's
             // onReplyPrivately wiring above). Clear after read so the
@@ -787,29 +788,10 @@ struct ConversationView: View {
                 vm.replyTarget = pending
                 session.pendingReplyTarget = nil
             }
-            vm.replayPendingForLoadedRows()
             await Task.detached(priority: .utility) {
                 try? client.subscribePresence(chatJID)
             }.value
-            for await event in stream {
-                switch event {
-                case .message(let m):
-                    session.ingestPushName(jid: m.senderJID, name: m.senderPushName)
-                    vm.ingest(m)
-                case .chatPresence(let chat, _, let typing) where JIDNormalize.canonical(chat, client: client) == chatJID:
-                    vm.setPeerTyping(typing)
-                case .receipt(let r) where Self.receiptMatches(r.chatJID, chat: chatJID, client: client):
-                    vm.applyReceipt(r)
-                case .reaction(let r) where JIDNormalize.canonical(r.chatJID, client: client) == chatJID:
-                    vm.applyReaction(r)
-                case .pollVote(let chat, let pmid, let voter, let hashes) where JIDNormalize.canonical(chat, client: client) == chatJID:
-                    vm.applyPollVote(pollMessageID: pmid, voterJID: voter, optionHashes: hashes)
-                case .mediaRetry(let mid, let ok, let newPath, let err):
-                    vm.applyMediaRetry(messageID: mid, ok: ok, newDirectPath: newPath, error: err)
-                default:
-                    break
-                }
-            }
+
         }
     }
 

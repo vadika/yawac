@@ -36,16 +36,6 @@ enum SwiftDataIndexes {
         "CREATE INDEX IF NOT EXISTS yawac_idx_poll_ts ON ZPERSISTEDPOLLVOTE(ZTIMESTAMP);",
     ]
 
-    /// Default SwiftData store path. Mirrors the path SwiftData picks
-    /// when `ModelConfiguration` is constructed without an explicit
-    /// URL (Application Support / default.store).
-    static var defaultStoreURL: URL? {
-        guard let appSupport = FileManager.default.urls(
-            for: .applicationSupportDirectory, in: .userDomainMask
-        ).first else { return nil }
-        return appSupport.appendingPathComponent("default.store")
-    }
-
     /// Open the store at `url` and run every `CREATE INDEX IF NOT
     /// EXISTS` statement. Returns count of statements executed (for
     /// logging). Errors are swallowed — index creation is best-effort,

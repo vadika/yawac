@@ -26,6 +26,7 @@ struct QuickSendComposer: View {
     enum SendOutcome: Equatable {
         case success
         case failure(String)
+        case sentButNotSaved(String)
     }
 
     /// Pure-async send driver. Calls `sender(chatJID, draft)`; on
@@ -42,6 +43,8 @@ struct QuickSendComposer: View {
             try await sender(chatJID, draft)
             onClose()
             return .success
+        } catch let error as SentMessageSaveError {
+            return .sentButNotSaved(error.localizedDescription)
         } catch {
             let msg = (error as? LocalizedError)?.errorDescription
                 ?? String(describing: error)
@@ -122,6 +125,10 @@ struct QuickSendComposer: View {
             case .success:
                 draft = ""
                 sending = false
+            case .sentButNotSaved(let msg):
+                draft = ""
+                sending = false
+                error = msg
             case .failure(let msg):
                 sending = false
                 error = msg

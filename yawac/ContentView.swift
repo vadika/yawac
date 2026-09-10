@@ -4,7 +4,7 @@ import SwiftData
 struct ContentView: View {
     @Environment(SessionViewModel.self) private var session
     @Environment(\.modelContext) private var modelContext
-    @State private var chatList: ChatListViewModel?
+    private var chatList: ChatListViewModel? { session.chatList }
     @State private var chatSearch: ChatSearchViewModel?
     /// Last selected chat JID, persisted across launches.
     @AppStorage("yawac.lastSelectedChatJID") private var lastSelectedChatJID: String = ""
@@ -73,6 +73,11 @@ struct ContentView: View {
                     .background(Theme.bg)
             }
         }
+        .alert("Couldn’t save messages", isPresented: Binding(
+            get: { session.persistenceError != nil },
+            set: { if !$0 { session.persistenceError = nil } })) {
+                Button("OK") { session.persistenceError = nil }
+            } message: { Text(session.persistenceError ?? "") }
         .navigationSplitViewStyle(.balanced)
         // Drop NavigationSplitView's auto-injected sidebar-toggle icon
         // (the lone "split-pane" button). The title bar itself stays so
@@ -134,221 +139,11 @@ struct ContentView: View {
             session.pendingShortcutQuery = nil
         }
         .task {
-            guard let client = session.client else { return }
-            let vm = ChatListViewModel(client: client, context: modelContext)
-            vm.session = session
-            session.chatList = vm
-            session.modelContext = modelContext
-            self.chatList = vm
+            guard let client = session.client, let vm = session.chatList else { return }
             self.chatSearch = ChatSearchViewModel(listVM: vm, validator: client)
-            // Restore last-opened chat if it's in our chats list. F5:
-            // wait for the off-MainActor bootstrap to land first —
-            // `vm.chats` is empty during init now, so a naive
-            // `contains` check would always miss on cold start.
-            // The `bootstrapping` flag flips inside `runBootstrap`'s
-            // MainActor commit step, so by the time we observe `false`
-            // here `vm.chats` is already populated.
-            if !lastSelectedChatJID.isEmpty {
-                // Sleep, don't spin — Task.yield() here busy-looped MainActor.
-                while vm.bootstrapping { try? await Task.sleep(for: .milliseconds(50)) }
-                if vm.chats.contains(where: { $0.jid == lastSelectedChatJID }) {
-                    // Goes through openRoot so the trail starts at depth
-                    // 0 (no stale BackBar from whatever the previous
-                    // session was looking at).
-                    session.openRootChat(lastSelectedChatJID)
-                }
-            }
-            let groups = await Task.detached(priority: .utility) {
-                (try? client.listGroups()) ?? []
-            }.value
-            vm.mergeGroups(groups)
-            session.ingestGroups(groups)
-            let contacts = await Task.detached(priority: .utility) {
-                (try? client.listContacts()) ?? []
-            }.value
-            vm.resolveNames(contacts)
-            vm.mergeContacts(contacts)
-            session.ingestContacts(contacts)
-            let stream = client.eventStream()
-            for await event in stream {
-                switch event {
-                case .message(let m):
-                    session.ingestPushName(jid: m.senderJID, name: m.senderPushName)
-                    // Incoming peer message → peer is online right now.
-                    // Compensates for whatsmeow not delivering initial
-                    // presence state to companion devices.
-                    if !m.fromMe, !m.chatJID.hasSuffix("@g.us") {
-                        session.markOnline(jid: m.chatJID)
-                    }
-                    vm.ingest(m)
-                case .reaction(let r):
-                    vm.persistReaction(r)
-                    if r.senderJID != "me", !r.chatJID.hasSuffix("@g.us") {
-                        session.markOnline(jid: r.chatJID)
-                    }
-                case .chatPresence(let chat, _, let typing):
-                    // Typing in a direct chat is a strong online signal.
-                    if typing, !chat.hasSuffix("@g.us") {
-                        session.markOnline(jid: chat)
-                    }
-                case .presence(let jid, let online, let lastSeen):
-                    session.ingestPresence(jid: jid, online: online, lastSeen: lastSeen)
-                case .connected:
-                    // Reconnect (initial or auto/forced) — re-reconcile
-                    // appstate-backed UI that may have changed while we
-                    // were dark. The offline message queue is redelivered
-                    // by the server as normal .message events.
-                    vm.reconcilePinsWithStore()
-                    vm.reconcileMutedWithStore()
-                    vm.reconcileLIDDuplicates()
-                    session.loadBlocklist()
-                case .historySync(let syncType, _, _, _, _):
-                    // F26: only flip the one-shot backfill gate on chunks
-                    // that actually carry conversation messages. Without
-                    // this guard, a PUSH_NAME / INITIAL_STATUS_V3 chunk
-                    // arriving FIRST locks requestHistoryBackfillIfNeeded
-                    // off permanently even though the deep history we
-                    // actually wanted never landed. Confirmed via the
-                    // F-instr trace 2026-06-09: PUSH_NAME chunk reported
-                    // 1000 pushnames + 0 conversations.
-                    let contentful: Set<String> = [
-                        "INITIAL_BOOTSTRAP", "RECENT", "FULL", "ON_DEMAND",
-                    ]
-                    if contentful.contains(syncType),
-                       !UserDefaults.standard.bool(forKey: "historyBackfillCompleted") {
-                        UserDefaults.standard.set(true, forKey: "historyBackfillCompleted")
-                    }
-                    // F19: initial sync delivers a burst of HistorySync
-                    // events; coalesce into one 250 ms-debounced flush so
-                    // we don't run listContacts (CGo bridge) + four
-                    // reconcile passes per event on the MainActor.
-                    session.scheduleHistorySyncReconcile(client: client, vm: vm)
-                case .messageEdited(let chatJID, let messageID, let newText, let ts):
-                    let when = Date(timeIntervalSince1970: TimeInterval(ts))
-                    let canonical = JIDNormalize.canonical(chatJID, client: client)
-                    vm.applyIncomingEdit(chatJID: canonical, messageID: messageID,
-                                         newText: newText, at: when)
-                    session.currentConversation?.applyIncomingEdit(
-                        chatJID: chatJID, messageID: messageID, newText: newText, at: when)
-                case .messageRevoked(let chatJID, let messageID, let revokedBy, let ts):
-                    let when = Date(timeIntervalSince1970: TimeInterval(ts))
-                    let canonical = JIDNormalize.canonical(chatJID, client: client)
-                    vm.applyIncomingRevoke(chatJID: canonical, messageID: messageID,
-                                           revokedBy: revokedBy, at: when)
-                    session.currentConversation?.applyIncomingRevoke(
-                        chatJID: chatJID, messageID: messageID, revokedBy: revokedBy, at: when)
-                case .messageLocallyDeleted(let chatJID, let messageID, _):
-                    let canonical = JIDNormalize.canonical(chatJID, client: client)
-                    vm.applyIncomingLocalDelete(chatJID: canonical, messageID: messageID)
-                    session.currentConversation?.applyIncomingLocalDelete(
-                        chatJID: chatJID, messageID: messageID)
-                case .messageStarred(let chatJID, let messageID, _, _, let starred, let ts):
-                    let when = Date(timeIntervalSince1970: TimeInterval(ts))
-                    let canonical = JIDNormalize.canonical(chatJID, client: client)
-                    vm.applyIncomingStar(chatJID: canonical, messageID: messageID,
-                                         starred: starred, at: when)
-                    session.currentConversation?.applyIncomingStar(
-                        chatJID: chatJID, messageID: messageID,
-                        starred: starred, at: when)
-                case .chatPinned(let chatJID, let pinned, let ts):
-                    let when = Date(timeIntervalSince1970: TimeInterval(ts))
-                    let canonical = JIDNormalize.canonical(chatJID, client: client)
-                    vm.applyIncomingChatPin(chatJID: canonical,
-                                            pinned: pinned, at: when)
-                case .chatMuted(let chatJID, let mutedUntilMs, let ts):
-                    let canonical = JIDNormalize.canonical(chatJID, client: client)
-                    let mutedUntil: Date? = mutedUntilMs == 0
-                        ? nil
-                        : Date(timeIntervalSince1970: TimeInterval(mutedUntilMs) / 1000)
-                    let when = Date(timeIntervalSince1970: TimeInterval(ts))
-                    vm.applyIncomingMute(chatJID: canonical,
-                                         mutedUntil: mutedUntil,
-                                         at: when)
-                case .groupInfoChanged(let chatJID, let name, let description, let ts):
-                    let canonical = JIDNormalize.canonical(chatJID, client: client)
-                    let when = Date(timeIntervalSince1970: TimeInterval(ts))
-                    vm.applyIncomingGroupInfo(
-                        chatJID: canonical,
-                        name:        name.isEmpty        ? nil : name,
-                        description: description.isEmpty ? nil : description,
-                        at: when)
-                case .groupJoined(let group, _, let ts):
-                    vm.mergeJoinedGroup(
-                        group,
-                        at: Date(timeIntervalSince1970: TimeInterval(ts)))
-                    session.ingestGroups([group])
-                case .historyConversation(let chatJID, let name, let ts):
-                    vm.applyHistoryConversation(
-                        chatJID: JIDNormalize.canonical(chatJID, client: client),
-                        name: name,
-                        at: Date(timeIntervalSince1970: TimeInterval(ts)))
-                case .fullHistorySyncResponse(let requestID, let responseCode):
-                    NSLog("[yawac/catchup] decoded primary response request=%@ code=%@",
-                          requestID, responseCode)
-                case .messagePinned(let chatJID, let targetID, _, let pinned, let ts):
-                    let when = Date(timeIntervalSince1970: TimeInterval(ts))
-                    let canonical = JIDNormalize.canonical(chatJID, client: client)
-                    vm.applyIncomingMessagePin(chatJID: canonical,
-                                               targetMessageID: targetID,
-                                               pinned: pinned, at: when)
-                    session.currentConversation?.applyIncomingMessagePin(
-                        chatJID: chatJID, targetMessageID: targetID,
-                        pinned: pinned, at: when)
-                case .chatArchived(let chatJID, let archived, _):
-                    let canonical = JIDNormalize.canonical(chatJID, client: client)
-                    vm.applyIncomingArchive(chatJID: canonical, archived: archived)
-                case .chatDeleted(let chatJID, _):
-                    let canonical = JIDNormalize.canonical(chatJID, client: client)
-                    vm.applyIncomingDelete(chatJID: canonical)
-                case .contactUpdated(let jid, let fullName, _):
-                    let canonical = JIDNormalize.canonical(jid, client: client)
-                    vm.applyIncomingContact(jid: canonical, fullName: fullName)
-                case .blocklistChanged(let action, let changes):
-                    session.applyBlocklistChange(action: action, changes: changes)
-                case .groupParticipantsChanged(let chatJID, let action, _, let jids, let ts):
-                    let when = Date(timeIntervalSince1970: TimeInterval(ts))
-                    let canonical = JIDNormalize.canonical(chatJID, client: client)
-                    vm.applyGroupParticipantsChange(
-                        chatJID: canonical, action: action, jids: jids, at: when)
-                case .joinApprovalModeChanged(let chatJID, let on, _, _):
-                    // SessionViewModel already routes this event to refresh /
-                    // clear `JoinRequestStore`. Mirror the flag into `Chat`
-                    // so the sidebar chip gate flips in lockstep with the
-                    // store update.
-                    let canonical = JIDNormalize.canonical(chatJID, client: client)
-                    vm.applyIncomingJoinApprovalMode(chatJID: canonical, on: on)
-                case .groupAnnounceChanged(let chatJID, let on, _, _):
-                    let canonical = JIDNormalize.canonical(chatJID, client: client)
-                    vm.applyGroupAnnounce(chatJID: canonical, on: on)
-                case .groupLockedChanged(let chatJID, let on, _, _):
-                    let canonical = JIDNormalize.canonical(chatJID, client: client)
-                    vm.applyGroupLocked(chatJID: canonical, on: on)
-                case .groupMemberAddModeChanged(let chatJID, let allMembersCanAdd, _, _):
-                    let canonical = JIDNormalize.canonical(chatJID, client: client)
-                    vm.applyGroupMemberAddMode(chatJID: canonical,
-                                               allMembersCanAdd: allMembersCanAdd)
-                case .pushNames(let names):
-                    // HistorySync PUSH_NAME chunk — key contactNames at
-                    // the JID form whatsmeow received (typically `@lid`
-                    // for group senders whose LID→PN mapping is missing),
-                    // so MessageRow's displayName lookup hits without
-                    // needing the local LID map. Complements the chat-
-                    // list reconcile path that runs off `.historySync`.
-                    for (jid, name) in names {
-                        session.ingestPushName(jid: jid, name: name)
-                    }
-                case .ephemeralTimerChanged(let chatJID, let seconds, _, _):
-                    // Server-side timer change (either side of a 1:1 or a
-                    // group admin). Refresh the in-memory Chat row so the
-                    // inspector picker and any composer banner reflect it.
-                    // 1:1 chats hydrate their timer only on the first
-                    // EphemeralSetting event — whatsmeow doesn't expose
-                    // a cold-read API for 1:1 ephemeral state.
-                    let canonical = JIDNormalize.canonical(chatJID, client: client)
-                    vm.applyEphemeralTimer(chatJID: canonical, seconds: seconds)
-                default:
-                    break
-                }
+            if !lastSelectedChatJID.isEmpty,
+               vm.chats.contains(where: { $0.jid == lastSelectedChatJID }) {
+                session.openRootChat(lastSelectedChatJID)
             }
         }
     }

@@ -10,7 +10,7 @@ extension Notification.Name {
 
 actor AvatarCache {
     static let shared = AvatarCache()
-    private var inflight: [String: Task<URL?, Never>] = [:]
+    private var inflight: [String: (id: UUID, task: Task<URL?, Never>)] = [:]
     private var negativeCache: Set<String> = []
     private let baseDir: URL
     // Throttle concurrent profile-picture HTTP calls — too many in
@@ -64,14 +64,15 @@ actor AvatarCache {
     /// The notification matcher uses `JIDNormalize.same`, so subscriber
     /// matching is forgiving — but the file deletion is byte-keyed and
     /// requires the canonical form.
-    func invalidate(jid: String) {
+    func invalidate(jid: String) async {
         let url = file(for: jid)
         try? FileManager.default.removeItem(at: url)
         negativeCache.remove(jid)
-        inflight[jid]?.cancel()
+        inflight[jid]?.task.cancel()
         inflight[jid] = nil
         let key = jid
-        Task { @MainActor in
+        await MainActor.run {
+            ThumbnailCache.shared.invalidateAvatar(forCacheKey: key)
             NotificationCenter.default.post(
                 name: .avatarCacheInvalidated,
                 object: nil,
@@ -87,24 +88,33 @@ actor AvatarCache {
         if FileManager.default.fileExists(atPath: url.path) {
             return url
         }
-        if let t = inflight[jid] { return await t.value }
+        if let load = inflight[jid] { return await load.task.value }
 
+        let id = UUID()
+        let staging = baseDir.appendingPathComponent("\(id).jpg")
         let sem = semaphore
-        let task: Task<URL?, Never> = Task.detached(priority: .utility) {
-            await sem.acquire()
-            defer { Task { await sem.release() } }
+        let task = Task { () -> URL? in
+            let result = await Task.detached(priority: .utility) { () -> URL? in
+                await sem.acquire()
+                defer { Task { await sem.release() } }
+                guard !Task.isCancelled else { return nil }
+                do {
+                    let path = try client.fetchProfilePicture(jid: jid, outPath: staging.path)
+                    return path.isEmpty ? nil : URL(filePath: path)
+                } catch { return nil }
+            }.value
+            defer { try? FileManager.default.removeItem(at: staging) }
+            guard inflight[jid]?.id == id else { return nil }
+            inflight[jid] = nil
+            guard let result else { negativeCache.insert(jid); return nil }
             do {
-                let result = try client.fetchProfilePicture(jid: jid, outPath: url.path)
-                return result.isEmpty ? nil : URL(filePath: result)
-            } catch {
-                return nil
-            }
+                if FileManager.default.fileExists(atPath: url.path) { try FileManager.default.removeItem(at: url) }
+                try FileManager.default.moveItem(at: result, to: url)
+                return url
+            } catch { return nil }
         }
-        inflight[jid] = task
-        let result = await task.value
-        inflight[jid] = nil
-        if result == nil { negativeCache.insert(jid) }
-        return result
+        inflight[jid] = (id, task)
+        return await task.value
     }
 }
 

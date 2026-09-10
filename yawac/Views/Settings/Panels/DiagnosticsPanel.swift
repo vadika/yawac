@@ -312,7 +312,7 @@ struct DiagnosticsPanel: View {
     ]
 
     private func computeIndexStatus() {
-        guard let url = SwiftDataIndexes.defaultStoreURL else {
+        guard let url = session.modelContext?.container.configurations.first?.url else {
             indexStatus = []
             return
         }
@@ -343,7 +343,7 @@ struct DiagnosticsPanel: View {
     }
 
     private func computeHistoryStats() {
-        guard let url = SwiftDataIndexes.defaultStoreURL else {
+        guard let url = session.modelContext?.container.configurations.first?.url else {
             historyStats = nil
             return
         }
