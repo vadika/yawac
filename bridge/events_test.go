@@ -29,21 +29,39 @@ func (r *recSink) wait(t *testing.T, kind string, d time.Duration) recEvent {
 	t.Helper()
 	deadline := time.After(d)
 	for {
+		r.mu.Lock()
+		for i, e := range r.events {
+			if e.kind == kind {
+				r.events = append(r.events[:i], r.events[i+1:]...)
+				r.mu.Unlock()
+				return e
+			}
+		}
+		r.mu.Unlock()
+		// Wakeups are coalesced and may have been consumed while waiting
+		// for another kind. Always check buffered events before blocking.
 		select {
 		case <-r.ch:
-			r.mu.Lock()
-			for i, e := range r.events {
-				if e.kind == kind {
-					// Remove the returned event so subsequent calls don't return it again
-					r.events = append(r.events[:i], r.events[i+1:]...)
-					r.mu.Unlock()
-					return e
-				}
-			}
-			r.mu.Unlock()
 		case <-deadline:
 			t.Fatalf("timeout waiting for %s", kind)
 		}
+	}
+}
+
+func TestRecSinkWaitFindsBufferedEventWithoutWakeup(t *testing.T) {
+	sink := newRecSink()
+	sink.OnEvent("HistoryConversation", "metadata")
+	<-sink.ch // A waiter for a different kind already consumed this wakeup.
+	sink.OnEvent("Message", "message")
+	if event := sink.wait(t, "Message", time.Second); event.payload != "message" {
+		t.Fatalf("unexpected message: %+v", event)
+	}
+	select {
+	case <-sink.ch:
+	default:
+	}
+	if event := sink.wait(t, "HistoryConversation", time.Second); event.payload != "metadata" {
+		t.Fatalf("unexpected metadata: %+v", event)
 	}
 }
 
