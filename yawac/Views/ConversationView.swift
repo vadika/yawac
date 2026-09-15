@@ -497,7 +497,8 @@ struct ConversationView: View {
                                         // without constructing each row's
                                         // body to fire its `.id()` modifier.
                                         .modifier(BottomVisibilityTracker(
-                                            isLast: msg.id == vm.messages.last?.id,
+                                            messageID: msg.id,
+                                            lastMessageID: { vm.messages.last?.id },
                                             atBottom: $atBottom))
                                         .modifier(ViewportReadModifier(
                                             messageID: msg.id, vm: vm))
@@ -889,21 +890,26 @@ private struct ViewportReadModifier: ViewModifier {
     }
 }
 
-/// Tracks the on-screen visibility of the chat's last row to drive the
-/// floating "scroll to latest" button. The lazy stack instantiates and
-/// disposes rows as they enter/leave the viewport, so this fires on the
-/// exact moment the user scrolls away from (or back to) the bottom.
-private struct BottomVisibilityTracker: ViewModifier {
-    let isLast: Bool
+/// Uses the current last ID so a departing row cannot overwrite the
+/// newest row's visibility after an append or message-ID replacement.
+struct BottomVisibilityTracker: ViewModifier {
+    let messageID: String
+    let lastMessageID: () -> String?
     @Binding var atBottom: Bool
+    @State private var isVisible = false
 
     func body(content: Content) -> some View {
-        if isLast {
-            content
-                .onAppear { atBottom = true }
-                .onDisappear { atBottom = false }
-        } else {
-            content
-        }
+        content
+            .onAppear {
+                isVisible = true
+                if messageID == lastMessageID() { atBottom = true }
+            }
+            .onDisappear {
+                isVisible = false
+                if messageID == lastMessageID() { atBottom = false }
+            }
+            .onChange(of: lastMessageID()) { _, lastID in
+                if messageID == lastID { atBottom = isVisible }
+            }
     }
 }

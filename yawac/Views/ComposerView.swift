@@ -3,6 +3,18 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 extension ComposerView {
+    static func attachmentURLs(from pasteboard: NSPasteboard) -> [URL] {
+        // Browsers also advertise the image's web URL; only file URLs
+        // can go through the attachment sender.
+        let fileOnly: [NSPasteboard.ReadingOptionKey: Any] = [.urlReadingFileURLsOnly: true]
+        if let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: fileOnly) as? [URL],
+           !urls.isEmpty {
+            return urls
+        }
+        let images = pasteboard.readObjects(forClasses: [NSImage.self], options: nil) as? [NSImage] ?? []
+        return images.compactMap(saveImageToTemp)
+    }
+
     /// Writes an NSImage's PNG representation to a unique file under
     /// the system temp dir so it can be staged through the same
     /// path as a Finder-attached image.
@@ -119,6 +131,11 @@ struct ComposerView: View {
             installPasteMonitor()
             syncMentionCandidates()
         }
+        .onChange(of: ObjectIdentifier(vm)) { _, _ in
+            // SwiftUI reuses the composer when the selected chat changes.
+            // Replace the event closure that captured the previous model.
+            installPasteMonitor()
+        }
         .onDisappear { removePasteMonitor() }
         .sheet(isPresented: $showLocationPicker) {
             LocationPickerSheet(
@@ -175,6 +192,7 @@ struct ComposerView: View {
     private func installPasteMonitor() {
         removePasteMonitor()
         pasteMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            guard focused, event.window?.isKeyWindow == true else { return event }
             // ⌘V (allow capslock; reject shift/option/control combos).
             let flags = event.modifierFlags
             guard flags.contains(.command),
@@ -184,7 +202,9 @@ struct ComposerView: View {
                   event.charactersIgnoringModifiers?.lowercased() == "v" else {
                 return event
             }
-            if pasteAttachmentsFromPasteboard() {
+            let urls = Self.attachmentURLs(from: .general)
+            if !urls.isEmpty {
+                for url in urls { vm.stageAttachment(at: url) }
                 return nil    // consumed; default paste suppressed
             }
             return event      // not a file/image — let TextField paste text
@@ -196,30 +216,6 @@ struct ComposerView: View {
             NSEvent.removeMonitor(m)
             pasteMonitor = nil
         }
-    }
-
-    /// Inspects the general pasteboard for file URLs or image bitmaps
-    /// and stages them through `vm.stageAttachment`. Returns true when
-    /// it consumed at least one item.
-    @discardableResult
-    private func pasteAttachmentsFromPasteboard() -> Bool {
-        let pb = NSPasteboard.general
-        // File URLs only — Chrome/Safari "Copy Image" puts its https source
-        // URL on the pasteboard alongside the bitmap; without this filter
-        // the URL branch wins and we try to stage the web URL as a file.
-        let fileOnly: [NSPasteboard.ReadingOptionKey: Any] = [.urlReadingFileURLsOnly: true]
-        if let urls = pb.readObjects(forClasses: [NSURL.self], options: fileOnly) as? [URL],
-           !urls.isEmpty {
-            for url in urls { vm.stageAttachment(at: url) }
-            return true
-        }
-        if let images = pb.readObjects(forClasses: [NSImage.self], options: nil) as? [NSImage],
-           let first = images.first,
-           let url = ComposerView.saveImageToTemp(first) {
-            vm.stageAttachment(at: url)
-            return true
-        }
-        return false
     }
 
     private var draftIsEmpty: Bool {
