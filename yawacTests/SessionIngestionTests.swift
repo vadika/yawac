@@ -145,12 +145,35 @@ final class SessionIngestionTests: XCTestCase {
             try await session.recordOutgoing(outgoing, from: client)
             XCTAssertEqual(try ModelContext(container).fetchCount(FetchDescriptor<PersistedMessage>()), 1)
             XCTAssertEqual(session.chatList?.chats.first?.lastMessage, "sent elsewhere")
+            XCTAssertEqual(session.chatList?.chats.first?.unread, 0)
             await session.stopSessionWork()
             do { try await session.recordOutgoing(message("late"), from: client); XCTFail("Old session accepted a send") }
             catch {}
             session.receive(.message(message("late-event")))
             await session.flushPendingWrites()
             XCTAssertEqual(try ModelContext(container).fetchCount(FetchDescriptor<PersistedMessage>()), 1)
+        }
+    }
+
+    func testOutgoingAndItsEchoDoNotIncreaseUnreadOrClearUnseenMessages() async throws {
+        try await withSession { session, _ in
+            let client = try XCTUnwrap(session.client)
+            let jid = "123@s.whatsapp.net"
+            let inbound = BridgeMessage(outgoing: UIMessage(id: "inbound", chatJID: jid,
+                senderJID: "peer", fromMe: false, timestamp: .now,
+                body: .text("unseen")), ownJID: "me")
+            session.receive(.message(inbound))
+            await session.flushPendingWrites()
+            XCTAssertEqual(session.chatList?.chats.first?.unread, 1)
+
+            let outgoing = BridgeMessage(outgoing: UIMessage(id: "outgoing", chatJID: jid,
+                senderJID: "me", fromMe: true, timestamp: .now,
+                body: .text("reply")), ownJID: "me")
+            try await session.recordOutgoing(outgoing, from: client)
+            session.receive(.message(outgoing))
+            await session.flushPendingWrites()
+            XCTAssertEqual(session.chatList?.chats.first?.lastMessage, "reply")
+            XCTAssertEqual(session.chatList?.chats.first?.unread, 1)
         }
     }
 

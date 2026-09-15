@@ -866,26 +866,21 @@ struct ConversationView: View {
 /// Attach to every MessageRow; the modifier bails for outbound rows
 /// and for ids that aren't tracked as unread, so the cost on read
 /// messages is nil.
-private struct ViewportReadModifier: ViewModifier {
+struct ViewportReadModifier: ViewModifier {
     let messageID: String
     let vm: ConversationViewModel
-    @State private var task: Task<Void, Never>?
+    @Environment(\.scenePhase) private var scenePhase
 
     func body(content: Content) -> some View {
+        let shouldMarkRead = scenePhase == .active && vm.unreadInboundIDs.contains(messageID)
         content
-            .onAppear {
-                guard vm.unreadInboundIDs.contains(messageID) else { return }
-                task?.cancel()
-                task = Task { @MainActor in
-                    try? await Task.sleep(for: .seconds(2))
-                    if Task.isCancelled { return }
-                    guard NSApp.isActive else { return }
-                    vm.markVisibleAsRead(messageID: messageID)
-                }
-            }
-            .onDisappear {
-                task?.cancel()
-                task = nil
+            // Restart when the app becomes active or history marks an
+            // already-visible row unread. Disappearing cancels the dwell.
+            .task(id: shouldMarkRead) {
+                guard shouldMarkRead else { return }
+                do { try await Task.sleep(for: .seconds(2)) }
+                catch { return }
+                vm.markVisibleAsRead(messageID: messageID)
             }
     }
 }
