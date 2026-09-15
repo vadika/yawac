@@ -6,8 +6,8 @@ Pinned via a `replace` directive in `bridge/go.mod` pointing at the
 github.com/vadika/whatsmeow fork. The fork mirrors upstream tip with
 cherry-picked patches on top.
 
-Current fork tip: `48c3cb4e077d` (pseudo-version
-`v0.0.0-20260903162328-48c3cb4e077d`), based on upstream
+Current fork tip: `997a861dba3a` (pseudo-version
+`v0.0.0-20260915185931-997a861dba3a`), based on upstream
 `b572e5bcb92b` (Jun 30 2026).
 
 ## Applied patches
@@ -19,6 +19,8 @@ Current fork tip: `48c3cb4e077d` (pseudo-version
   `GroupHistory` events. Also exposes type-6 response codes for diagnostics.
   The timestamp and inline flag match the current WhatsApp Web request builder;
   the previous seconds value made the anchor appear near January 1970.
+  Per-chat and full-history requests omit forced phone pushes, which can leave
+  visible self-chat notifications on the primary phone.
 
 - **PR #1160** — binary decoder doesn't panic on malformed nodes.
   Upstream: https://github.com/tulir/whatsmeow/pull/1160

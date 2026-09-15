@@ -47,4 +47,4 @@ require (
 // (#1151 poll-vote extractor was closed upstream; its logic lives in
 // bridge/history.go now.)
 // See docs/whatsmeow-patches.md.
-replace go.mau.fi/whatsmeow => github.com/vadika/whatsmeow v0.0.0-20260903162328-48c3cb4e077d
+replace go.mau.fi/whatsmeow => github.com/vadika/whatsmeow v0.0.0-20260915185931-997a861dba3a
