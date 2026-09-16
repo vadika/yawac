@@ -8,10 +8,89 @@ import (
 
 	waCommon "go.mau.fi/whatsmeow/proto/waCommon"
 	waE2E "go.mau.fi/whatsmeow/proto/waE2E"
+	waWeb "go.mau.fi/whatsmeow/proto/waWeb"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 	proto "google.golang.org/protobuf/proto"
 )
+
+func TestBusinessTemplateText(t *testing.T) {
+	hydrated := &waE2E.TemplateMessage_HydratedFourRowTemplate{
+		HydratedContentText: proto.String("Your account notification"),
+		Title: &waE2E.TemplateMessage_HydratedFourRowTemplate_HydratedTitleText{
+			HydratedTitleText: "Account update",
+		},
+	}
+	fourRow := &waE2E.TemplateMessage{
+		Format: &waE2E.TemplateMessage_HydratedFourRowTemplate_{HydratedFourRowTemplate: hydrated},
+	}
+	cases := []struct {
+		name string
+		msg  *waE2E.Message
+		want string
+	}{
+		{"hydrated field", &waE2E.Message{TemplateMessage: &waE2E.TemplateMessage{
+			HydratedTemplate: hydrated,
+		}}, "Your account notification"},
+		{"hydrated format", &waE2E.Message{TemplateMessage: fourRow}, "Your account notification"},
+		{"empty hydrated field with populated format", &waE2E.Message{TemplateMessage: &waE2E.TemplateMessage{
+			HydratedTemplate: &waE2E.TemplateMessage_HydratedFourRowTemplate{},
+			Format:           fourRow.Format,
+		}}, "Your account notification"},
+		{"structured message with hydrated format", &waE2E.Message{HighlyStructuredMessage: &waE2E.HighlyStructuredMessage{
+			HydratedHsm: fourRow,
+		}}, "Your account notification"},
+		{"interactive format", &waE2E.Message{TemplateMessage: &waE2E.TemplateMessage{
+			Format: &waE2E.TemplateMessage_InteractiveMessageTemplate{InteractiveMessageTemplate: &waE2E.InteractiveMessage{
+				Body: &waE2E.InteractiveMessage_Body{Text: proto.String("Your account notification")},
+			}},
+		}}, "Your account notification"},
+		{"title only", &waE2E.Message{TemplateMessage: &waE2E.TemplateMessage{
+			Format: &waE2E.TemplateMessage_HydratedFourRowTemplate_{HydratedFourRowTemplate: &waE2E.TemplateMessage_HydratedFourRowTemplate{
+				Title: hydrated.Title,
+			}},
+		}}, "Account update"},
+		{"empty template", &waE2E.Message{TemplateMessage: &waE2E.TemplateMessage{}}, "[business message]"},
+	}
+	chat := types.NewJID("12345", types.DefaultUserServer)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, source := range []string{"live", "history"} {
+				t.Run(source, func(t *testing.T) {
+					c := &Client{}
+					sink := newRecSink()
+					c.SetEventSink(sink)
+					if source == "live" {
+						c.dispatchMessage(&events.Message{
+							Info: types.MessageInfo{
+								MessageSource: types.MessageSource{Chat: chat, Sender: chat},
+								ID:            "BUSINESS-TEMPLATE",
+								Timestamp:     time.Unix(1700000000, 0),
+							},
+							Message: tc.msg,
+						})
+					} else {
+						c.dispatchWebMessage(chat.String(), &waWeb.WebMessageInfo{
+							Key: &waCommon.MessageKey{
+								ID: proto.String("BUSINESS-TEMPLATE"), RemoteJID: proto.String(chat.String()),
+							},
+							MessageTimestamp: proto.Uint64(1700000000),
+							Message:          tc.msg,
+						})
+					}
+					event := sink.wait(t, "Message", time.Second)
+					var got JMessage
+					if err := json.Unmarshal([]byte(event.payload), &got); err != nil {
+						t.Fatal(err)
+					}
+					if got.Kind != "text" || got.Text != tc.want {
+						t.Fatalf("got kind=%q text=%q, want text=%q", got.Kind, got.Text, tc.want)
+					}
+				})
+			}
+		})
+	}
+}
 
 func TestSendTextRejectsBadJID(t *testing.T) {
 	c, err := NewClient(t.TempDir() + "/m.db")

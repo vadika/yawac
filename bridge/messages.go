@@ -817,13 +817,19 @@ func bestEffortBusinessText(m *waE2E.Message) string {
 	}
 	if tm := m.GetTemplateMessage(); tm != nil {
 		probed = true
-		if h := tm.GetHydratedTemplate(); h != nil {
+		// The hydrated body can be a standalone field or the format oneof.
+		for _, h := range []*waE2E.TemplateMessage_HydratedFourRowTemplate{
+			tm.GetHydratedTemplate(), tm.GetHydratedFourRowTemplate(),
+		} {
 			if t := h.GetHydratedContentText(); t != "" {
 				return t
 			}
 			if t := h.GetHydratedTitleText(); t != "" {
 				return t
 			}
+		}
+		if im := tm.GetInteractiveMessageTemplate(); im != nil {
+			return bestEffortBusinessText(&waE2E.Message{InteractiveMessage: im})
 		}
 	}
 	if bm := m.GetButtonsMessage(); bm != nil {
