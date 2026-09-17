@@ -21,6 +21,7 @@ struct MessageContextMenu: View {
     let onReplyPrivately: (() -> Void)?
     let onForward: () -> Void
     let onCopyText: () -> Void
+    let onCopyMedia: (() -> Void)?
     let onStar: () -> Void
     let onPin: () -> Void
     let onDeleteForMe: () -> Void
@@ -63,6 +64,13 @@ struct MessageContextMenu: View {
                             label: "Copy text",
                             shortcut: "⌘C",
                             action: { dismiss(); onCopyText() })
+                }
+                if case .media = message.body {
+                    MenuRow(icon: "doc.on.doc",
+                            label: "Copy media",
+                            shortcut: "⌘C",
+                            disabled: onCopyMedia == nil,
+                            action: { dismiss(); onCopyMedia?() })
                 }
                 if canEdit {
                     MenuRow(icon: "pencil",
@@ -132,6 +140,9 @@ struct MessageContextMenu: View {
                 .keyboardShortcut("r", modifiers: .command)
             if bodyText != nil {
                 Button("") { dismiss(); onCopyText() }
+                    .keyboardShortcut("c", modifiers: .command)
+            } else if let onCopyMedia {
+                Button("") { dismiss(); onCopyMedia() }
                     .keyboardShortcut("c", modifiers: .command)
             }
             if canEdit {

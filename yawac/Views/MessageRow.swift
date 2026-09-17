@@ -131,6 +131,24 @@ extension MessageRow: Equatable {
 }
 
 struct MessageRow: View {
+    var copyableMediaURL: URL? {
+        guard message.revokedAt == nil, !message.locallyDeleted,
+              !message.isViewOnce, !message.viewOnceLocked,
+              case .media(_, _, _, let path, _, _) = message.body,
+              let path = localPath ?? path,
+              FileManager.default.isReadableFile(atPath: path) else { return nil }
+        return URL(fileURLWithPath: path)
+    }
+
+    @discardableResult
+    func copyMedia(to pasteboard: NSPasteboard) -> Bool {
+        guard let url = copyableMediaURL else { return false }
+        // Keep the original file so videos, audio and documents survive paste
+        // without being converted to an image or a path string.
+        pasteboard.clearContents()
+        return pasteboard.writeObjects([url as NSURL])
+    }
+
     let message: UIMessage
     let status: UIMessage.Status?
     let senderName: String?
@@ -427,6 +445,9 @@ struct MessageRow: View {
                                 NSPasteboard.general.clearContents()
                                 NSPasteboard.general.setString(body, forType: .string)
                             }
+                        },
+                        onCopyMedia: copyableMediaURL == nil ? nil : {
+                            copyMedia(to: .general)
                         },
                         onStar: { onStar?(message) },
                         onPin: { onPin?(message) },

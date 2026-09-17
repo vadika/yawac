@@ -73,6 +73,59 @@ final class ComposerPasteTests: XCTestCase {
         XCTAssertTrue(temporaryURLs.allSatisfy { NSImage(contentsOf: $0) != nil })
     }
 
+    func testMediaCopyRoundTripsOriginalFilesThroughComposerPaste() throws {
+        for (ext, kind) in [("png", "image"), ("mp4", "video"), ("m4a", "audio"), ("pdf", "document")] {
+            let url = FileManager.default.temporaryDirectory
+                .appendingPathComponent("chat media \(UUID().uuidString).\(ext)")
+            temporaryURLs.append(url)
+            let data = kind == "image" ? try imageData() : Data("original \(kind)".utf8)
+            try data.write(to: url)
+            let row = MessageRow(message: mediaMessage(kind: kind, path: url.path))
+
+            XCTAssertTrue(row.copyMedia(to: pasteboard))
+            let pasted = ComposerView.attachmentURLs(from: pasteboard)
+            XCTAssertEqual(pasted, [url])
+            XCTAssertEqual(try Data(contentsOf: XCTUnwrap(pasted.first)), data)
+            XCTAssertEqual(ConversationViewModel.attachmentKind(url), kind)
+        }
+    }
+
+    func testMediaCopyUsesNewlyDownloadedPath() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).png")
+        temporaryURLs.append(url)
+        try imageData().write(to: url)
+        let row = MessageRow(message: mediaMessage(path: nil), localPath: url.path)
+        XCTAssertTrue(row.copyMedia(to: pasteboard))
+        XCTAssertEqual(ComposerView.attachmentURLs(from: pasteboard), [url])
+    }
+
+    func testUnavailableOrRestrictedMediaDoesNotReplaceClipboard() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).png")
+        temporaryURLs.append(url)
+        try imageData().write(to: url)
+        let media = mediaMessage(path: url.path)
+        var viewOnce = media
+        viewOnce.isViewOnce = true
+        var revoked = media
+        revoked.revokedAt = .now
+        var deleted = media
+        deleted.locallyDeleted = true
+        let missing = mediaMessage(path: url.appendingPathExtension("missing").path)
+        pasteboard.setString("Keep this", forType: .string)
+        for message in [viewOnce, revoked, deleted, missing, mediaMessage(path: nil)] {
+            let row = MessageRow(message: message)
+            XCTAssertNil(row.copyableMediaURL)
+            XCTAssertFalse(row.copyMedia(to: pasteboard))
+            XCTAssertEqual(pasteboard.string(forType: .string), "Keep this")
+        }
+    }
+
+    private func mediaMessage(kind: String = "image", path: String?) -> UIMessage {
+        UIMessage(id: "media", chatJID: "source@s.whatsapp.net",
+                  senderJID: "sender@s.whatsapp.net", fromMe: false, timestamp: .now,
+                  body: .media(kind: kind, caption: nil, fileName: nil, localPath: path))
+    }
+
     private func imageData() throws -> Data {
         let bitmap = try XCTUnwrap(NSBitmapImageRep(
             bitmapDataPlanes: nil, pixelsWide: 2, pixelsHigh: 2,
