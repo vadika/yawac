@@ -446,6 +446,7 @@ func (c *Client) dispatchWebMessage(chatJID string, wm *waWeb.WebMessageInfo) {
 		IsViewOnce:       isViewOnce,
 	}
 	inner := unwrapViewOnce(msg)
+	jm.AlbumID, jm.AlbumIndex = albumAssociation(inner)
 	switch {
 	case inner.GetConversation() != "":
 		jm.Text = inner.GetConversation()

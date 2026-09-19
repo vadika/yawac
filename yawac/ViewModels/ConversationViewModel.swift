@@ -16,6 +16,8 @@ struct PendingAttachment: Identifiable, Equatable {
     let kind: String   // image | video | audio | document
     var viewOnce: Bool = false
     var thumbnail: NSImage? = nil
+
+    var canJoinAlbum: Bool { !viewOnce && (kind == "image" || kind == "video") }
 }
 
 @Observable @MainActor
@@ -151,23 +153,9 @@ final class ConversationViewModel {
         if cachedTimelineGen == timelineGeneration {
             return cachedTimeline
         }
-        let cal = Calendar.current
-        var out: [TimelineItem] = []
-        out.reserveCapacity(messages.count + 8)
-        var lastDay: DateComponents?
-        for m in messages {
-            let day = cal.dateComponents([.year, .month, .day], from: m.timestamp)
-            if day != lastDay {
-                if let header = cal.date(from: day) {
-                    out.append(.dateHeader(header))
-                }
-                lastDay = day
-            }
-            out.append(.message(m))
-        }
-        cachedTimeline = out
+        cachedTimeline = TimelineItem.sectioned(messages)
         cachedTimelineGen = timelineGeneration
-        return out
+        return cachedTimeline
     }
 
     /// Bumps the timeline generation counter. Call after every mutation
@@ -2075,7 +2063,8 @@ final class ConversationViewModel {
     }
 
     /// Send all staged attachments, clearing the composer. The typed caption
-    /// rides on the first file attachment only; the rest send caption-less.
+    /// rides on the first file attachment only. Consecutive photos/videos
+    /// share an album; view-once, audio and documents send individually.
     /// Locations and contacts dispatch after files; they don't carry
     /// captions.
     func sendPendingAttachments() async {
@@ -2088,10 +2077,29 @@ final class ConversationViewModel {
         pendingLocations = []
         pendingContacts = []
         draft = ""
-        for (i, item) in items.enumerated() {
-            await sendOneAttachment(url: item.url, kind: item.kind,
-                                    caption: i == 0 ? caption : "",
-                                    viewOnce: item.viewOnce)
+        var index = 0
+        while index < items.count {
+            let run = Array(items[index...].prefix(while: { $0.canJoinAlbum }))
+            let batch = run.count >= 2 ? run : [items[index]]
+            let text = index == 0 ? caption : ""
+            let sent: Int
+            if batch.count >= 2 {
+                sent = await sendAlbum(batch, caption: text)
+            } else {
+                let item = batch[0]
+                sent = await sendOneAttachment(url: item.url, kind: item.kind,
+                                                caption: text, viewOnce: item.viewOnce) ? 1 : 0
+            }
+            index += sent
+            if sent < batch.count {
+                pendingAttachments.insert(contentsOf: items[index...], at: 0)
+                pendingLocations.insert(contentsOf: locs, at: 0)
+                pendingContacts.insert(contentsOf: cards, at: 0)
+                if index == 0, !caption.isEmpty {
+                    draft = draft.isEmpty ? caption : caption + "\n" + draft
+                }
+                return
+            }
         }
         for loc in locs {
             await sendOneLocation(loc)
@@ -2112,7 +2120,7 @@ final class ConversationViewModel {
     }
 
     private func sendOneAttachment(url: URL, kind: String, caption: String,
-                                   viewOnce: Bool = false) async {
+                                   viewOnce: Bool = false) async -> Bool {
         do {
             let client = self.client
             let chatJID = self.chatJID
@@ -2139,41 +2147,65 @@ final class ConversationViewModel {
                         ephemeralSeconds: eph)
                 }
             }.value
-            // Own sent messages aren't echoed back by the server, so append the
-            // bubble optimistically (mirrors sendDraft / sendVoiceNote). Copy the
-            // picked file into the media cache so it keeps rendering after the
-            // security-scoped URL is released and across restarts.
-            let cached = await Task.detached(priority: .utility) {
-                Self.cacheOutgoingMedia(url, messageID: res.messageID)
-            }.value
-            let m = UIMessage(
-                id: res.messageID,
-                chatJID: chatJID,
-                senderJID: "me",
-                fromMe: true,
-                timestamp: Date(timeIntervalSince1970: TimeInterval(res.timestamp)),
-                body: .media(kind: kind,
-                             caption: (kind == "audio" || caption.isEmpty) ? nil : caption,
-                             fileName: kind == "document" ? url.lastPathComponent : nil,
-                             localPath: cached))
-            messages.append(m)
-            messageIDs.insert(m.id)
-            localPaths[res.messageID] = cached
-            invalidateTimeline()
-            receiptStatus[res.messageID] = .sent
-            await persistOutgoing(m)
+            await appendSentAttachment(url: url, kind: kind, caption: caption,
+                                       viewOnce: viewOnce, result: res)
+            return true
         } catch {
-            let sys = UIMessage(
-                id: UUID().uuidString,
-                chatJID: chatJID,
-                senderJID: "system",
-                fromMe: false,
-                timestamp: .now,
-                body: .system("send failed: \(error.localizedDescription)"))
-            messages.append(sys)
-            messageIDs.insert(sys.id)
-            invalidateTimeline()
+            transientError = "Couldn't send attachment: \(error.localizedDescription)"
+            return false
         }
+    }
+
+    private func sendAlbum(_ items: [PendingAttachment], caption: String) async -> Int {
+        do {
+            let client = self.client
+            let chat = chatJID
+            let files = items.map { BridgeAlbumFile(path: $0.url.path, kind: $0.kind) }
+            let expiration = ephemeralExpirationSeconds
+            let result = try await Task.detached(priority: .userInitiated) {
+                try client.sendAlbum(chat, files: files, caption: caption,
+                                     ephemeralSeconds: expiration)
+            }.value
+            for (index, pair) in zip(items, result.items).enumerated() {
+                await appendSentAttachment(url: pair.0.url, kind: pair.0.kind,
+                                           caption: index == 0 ? caption : "",
+                                           result: pair.1, albumID: result.albumID, albumIndex: index)
+            }
+            if let error = result.error { transientError = "Couldn't finish sending album: \(error)" }
+            return result.items.count
+        } catch {
+            transientError = "Couldn't send album: \(error.localizedDescription)"
+            return 0
+        }
+    }
+
+    private func appendSentAttachment(url: URL, kind: String, caption: String,
+                                      viewOnce: Bool = false, result: BridgeSendResult,
+                                      albumID: String? = nil, albumIndex: Int? = nil) async {
+        let cached = await Task.detached(priority: .utility) {
+            Self.cacheOutgoingMedia(url, messageID: result.messageID)
+        }.value
+        var message = UIMessage(
+            id: result.messageID, chatJID: chatJID, senderJID: "me", fromMe: true,
+            timestamp: Date(timeIntervalSince1970: TimeInterval(result.timestamp)),
+            body: .media(kind: kind,
+                         caption: (kind == "audio" || caption.isEmpty) ? nil : caption,
+                         fileName: kind == "document" ? url.lastPathComponent : nil,
+                         localPath: cached))
+        message.isViewOnce = viewOnce
+        message.albumID = albumID
+        message.albumIndex = albumIndex
+        // A companion sync may arrive before the send call finishes.
+        if let index = messages.firstIndex(where: { $0.id == message.id }) {
+            messages[index] = message
+        } else {
+            messages.append(message)
+        }
+        messageIDs.insert(message.id)
+        localPaths[message.id] = cached
+        invalidateTimeline()
+        receiptStatus[message.id] = .sent
+        await persistOutgoing(message)
     }
 
     /// Dispatch a single staged location through the bridge and append an

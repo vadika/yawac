@@ -4,6 +4,8 @@ extension PersistedMessage {
     /// Replays enrich metadata without undoing local lifecycle state or edits.
     func merge(_ message: BridgeMessage, canonicalChatJID: String) throws {
         chatJID = canonicalChatJID
+        if let value = message.albumID { albumID = value }
+        if let value = message.albumIndex { albumIndex = value }
         if editedAt == nil, let value = message.text { text = value }
         if let value = message.senderPushName, !value.isEmpty { senderPushName = value }
         if message.isForwarded == true { isForwarded = true }
@@ -146,6 +148,8 @@ extension PersistedMessage {
         m.quotedKind = p.quotedKind
         m.mediaWidth = p.mediaWidth
         m.mediaHeight = p.mediaHeight
+        m.albumID = p.albumID
+        m.albumIndex = p.albumIndex
         return m
     }
 }

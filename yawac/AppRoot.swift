@@ -21,6 +21,20 @@ struct AppRoot: View {
                     .foregroundStyle(Color.red.opacity(0.85))
             }
         }
+        .onOpenURL { url in
+            if !session.handleWhatsAppURL(url) {
+                session.urlOpenError = "This WhatsApp link is invalid or isn’t supported."
+            }
+            WindowToggler.bringToFront()
+        }
+        .environment(\.openURL, OpenURLAction { url in
+            session.handleWhatsAppURL(url) ? .handled : .systemAction
+        })
+        .alert("Couldn’t open link", isPresented: Binding(
+            get: { session.urlOpenError != nil },
+            set: { if !$0 { session.urlOpenError = nil } })) {
+                Button("OK") { session.urlOpenError = nil }
+            } message: { Text(session.urlOpenError ?? "") }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .environment(\.uiScaleFactor, UIScaleStep.from(scaleStepRaw).scaleFactor)
         // Sync state is surfaced inside ConversationView via the

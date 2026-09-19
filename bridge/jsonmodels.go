@@ -3,6 +3,8 @@ package bridge
 // All JSON payloads exchanged with Swift are defined here for review.
 
 type JMessage struct {
+	AlbumID          string                 `json:"album_id,omitempty"`
+	AlbumIndex       *int32                 `json:"album_index,omitempty"`
 	ID               string                 `json:"id"`
 	ChatJID          string                 `json:"chat_jid"`
 	SenderJID        string                 `json:"sender_jid"`

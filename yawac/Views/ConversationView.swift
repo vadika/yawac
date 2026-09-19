@@ -419,90 +419,9 @@ struct ConversationView: View {
                                     case .dateHeader(let date):
                                         DateSeparator(date: date)
                                     case .message(let msg):
-                                        MessageRow(
-                                            message: msg,
-                                            status: vm.receiptStatus[msg.id],
-                                            senderName: session.displayName(for: msg.senderJID),
-                                            localPath: vm.localPaths[msg.id],
-                                            reactions: vm.reactions(for: msg.id),
-                                            reactors: vm.reactors(for: msg.id),
-                                            downloadError: vm.downloadErrors[msg.id],
-                                            onRetryDownload: vm.retryHandler(for: msg),
-                                            voteCounts: vm.voteCounts(for: msg.id),
-                                            votersByOption: vm.voters(for: msg.id),
-                                            mySelections: vm.mySelections(for: msg.id),
-                                            onCastVote: { hashes, options in
-                                                vm.castVote(messageID: msg.id,
-                                                            hashes: hashes,
-                                                            options: options,
-                                                            pollSenderJID: msg.senderJID,
-                                                            pollFromMe: msg.fromMe)
-                                            },
-                                            myReaction: vm.myReaction(for: msg.id),
-                                            onReact: { emoji in
-                                                vm.sendReaction(messageID: msg.id,
-                                                                targetSenderJID: msg.senderJID,
-                                                                targetFromMe: msg.fromMe,
-                                                                emoji: emoji)
-                                            },
-                                            mentionResolver: { jid in session.displayName(for: jid) },
-                                            onOpenChat: { jid in
-                                                session.drillIntoChat(jid)
-                                            },
-                                            onReply: { m in vm.startReply(to: m) },
-                                            onReplyPrivately: { m in
-                                                // UX shortcut: open the DM
-                                                // with the message sender,
-                                                // then stash the reply
-                                                // target on the session so
-                                                // the destination CVM
-                                                // picks it up on mount.
-                                                // 100ms sleep lets the
-                                                // chat-selection swap a
-                                                // fresh CVM into place
-                                                // before we set the field.
-                                                Task { @MainActor in
-                                                    // Drill: group → DM
-                                                    // with sender. Pop
-                                                    // returns to the group
-                                                    // the reply originated
-                                                    // from (spec §3).
-                                                    session.pendingDrillSelection = m.senderJID
-                                                    try? await Task.sleep(nanoseconds: 100_000_000)
-                                                    session.pendingReplyTarget = m
-                                                }
-                                            },
-                                            onEdit: { m in vm.startEdit(m) },
-                                            onDeleteForEveryone: { m in Task { await vm.deleteForEveryone(m) } },
-                                            onDeleteForMe: { m in vm.deleteForMe(m) },
-                                            onStar: { m in vm.starMessage(m, starred: m.starredAt == nil) },
-                                            onPin: { m in vm.pinMessage(m, pinned: m.pinnedAt == nil) },
-                                            onForward: { m in vm.beginForward(m) },
-                                            onRevealViewOnce: { m in vm.revealViewOnce(messageID: m.id) },
-                                            onJumpToQuoted: { id in Task { await vm.jumpToQuoted(id: id) } },
-                                            isHighlighted: vm.highlightedID == msg.id,
-                                            selecting: vm.forwardSelecting,
-                                            selected: vm.forwardSelection.contains(msg.id),
-                                            selectable: vm.canForward(msg),
-                                            onToggleSelect: { vm.toggleForward(msg.id) },
-                                            isFindHit: vm.findHitIDs.contains(msg.id),
-                                            isFindCurrent: vm.findHits.indices.contains(vm.findCurrentIdx)
-                                                && vm.findHits[vm.findCurrentIdx].messageID == msg.id
-                                        )
-                                        // F82: explicit .id() removed —
-                                        // ForEach's Identifiable id from
-                                        // TimelineItem is the raw msg.id
-                                        // now, so scrollPosition / scrollTo
-                                        // can resolve targets from data
-                                        // without constructing each row's
-                                        // body to fire its `.id()` modifier.
-                                        .modifier(BottomVisibilityTracker(
-                                            messageID: msg.id,
-                                            lastMessageID: { vm.messages.last?.id },
-                                            atBottom: $atBottom))
-                                        .modifier(ViewportReadModifier(
-                                            messageID: msg.id, vm: vm))
-                                        .onAppear { lastVisibleMessageID = msg.id }
+                                        messageRow(msg, vm: vm)
+                                    case .album(let members):
+                                        albumRow(members, vm: vm)
                                     }
                                 }
                             }
@@ -761,6 +680,7 @@ struct ConversationView: View {
             session.currentConversation = vm
             vm.chatList = session.chatList
             vm.loadHistory()
+            session.applyPendingURLDraft(to: vm)
             // Recover messages the phone consumed while yawac was offline only
             // for the chat the user is viewing. A reconnect-wide fan-out woke
             // the phone once per stored chat and caused false alerts/battery
@@ -793,6 +713,122 @@ struct ConversationView: View {
                 try? client.subscribePresence(chatJID)
             }.value
 
+        }
+    }
+
+    private func messageRow(_ msg: UIMessage, vm: ConversationViewModel, albumPosition: MessageRow.AlbumPosition? = nil) -> some View {
+        var row = MessageRow(
+            message: msg,
+            status: vm.receiptStatus[msg.id],
+            senderName: session.displayName(for: msg.senderJID),
+            localPath: vm.localPaths[msg.id],
+            reactions: vm.reactions(for: msg.id),
+            reactors: vm.reactors(for: msg.id),
+            downloadError: vm.downloadErrors[msg.id],
+            onRetryDownload: vm.retryHandler(for: msg),
+            voteCounts: vm.voteCounts(for: msg.id),
+            votersByOption: vm.voters(for: msg.id),
+            mySelections: vm.mySelections(for: msg.id),
+            onCastVote: { hashes, options in
+                vm.castVote(messageID: msg.id,
+                            hashes: hashes,
+                            options: options,
+                            pollSenderJID: msg.senderJID,
+                            pollFromMe: msg.fromMe)
+            },
+            myReaction: vm.myReaction(for: msg.id),
+            onReact: { emoji in
+                vm.sendReaction(messageID: msg.id,
+                                targetSenderJID: msg.senderJID,
+                                targetFromMe: msg.fromMe,
+                                emoji: emoji)
+            },
+            mentionResolver: { jid in session.displayName(for: jid) },
+            onOpenChat: { jid in
+                session.drillIntoChat(jid)
+            },
+            onReply: { m in vm.startReply(to: m) },
+            onReplyPrivately: { m in
+                // UX shortcut: open the DM
+                // with the message sender,
+                // then stash the reply
+                // target on the session so
+                // the destination CVM
+                // picks it up on mount.
+                // 100ms sleep lets the
+                // chat-selection swap a
+                // fresh CVM into place
+                // before we set the field.
+                Task { @MainActor in
+                    // Drill: group → DM
+                    // with sender. Pop
+                    // returns to the group
+                    // the reply originated
+                    // from (spec §3).
+                    session.pendingDrillSelection = m.senderJID
+                    try? await Task.sleep(nanoseconds: 100_000_000)
+                    session.pendingReplyTarget = m
+                }
+            },
+            onEdit: { m in vm.startEdit(m) },
+            onDeleteForEveryone: { m in Task { await vm.deleteForEveryone(m) } },
+            onDeleteForMe: { m in vm.deleteForMe(m) },
+            onStar: { m in vm.starMessage(m, starred: m.starredAt == nil) },
+            onPin: { m in vm.pinMessage(m, pinned: m.pinnedAt == nil) },
+            onForward: { m in vm.beginForward(m) },
+            onRevealViewOnce: { m in vm.revealViewOnce(messageID: m.id) },
+            onJumpToQuoted: { id in Task { await vm.jumpToQuoted(id: id) } },
+            isHighlighted: vm.highlightedID == msg.id,
+            selecting: vm.forwardSelecting,
+            selected: vm.forwardSelection.contains(msg.id),
+            selectable: vm.canForward(msg),
+            onToggleSelect: { vm.toggleForward(msg.id) },
+            isFindHit: vm.findHitIDs.contains(msg.id),
+            isFindCurrent: vm.findHits.indices.contains(vm.findCurrentIdx)
+                && vm.findHits[vm.findCurrentIdx].messageID == msg.id
+        )
+        row.albumPosition = albumPosition
+        return row
+        // F82: explicit .id() removed —
+        // ForEach's Identifiable id from
+        // TimelineItem is the raw msg.id
+        // now, so scrollPosition / scrollTo
+        // can resolve targets from data
+        // without constructing each row's
+        // body to fire its `.id()` modifier.
+        .modifier(BottomVisibilityTracker(
+            messageID: msg.id,
+            lastMessageID: { vm.messages.last?.id },
+            atBottom: $atBottom))
+        .modifier(ViewportReadModifier(
+            messageID: msg.id, vm: vm))
+        .onAppear { lastVisibleMessageID = msg.id }
+    }
+
+    private func albumRow(_ members: [UIMessage], vm: ConversationViewModel) -> some View {
+        let fromMe = members[0].fromMe
+        return HStack(alignment: .top, spacing: 6) {
+            if fromMe { Spacer(minLength: 60) }
+            if !fromMe && chatJID.hasSuffix("@g.us") {
+                Button { session.drillIntoChat(members[0].senderJID) } label: {
+                    AvatarView(jid: members[0].senderJID,
+                               name: session.displayName(for: members[0].senderJID), size: 28)
+                }
+                .buttonStyle(.plain)
+            }
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(Array(members.enumerated()), id: \.element.id) { index, message in
+                    messageRow(message, vm: vm, albumPosition: index == 0 ? .first : (index == members.count - 1 ? .last : .middle))
+                        .id(message.id)
+                }
+            }
+            .background(fromMe ? Theme.ownBubble : Theme.otherBubble,
+                        in: RoundedRectangle(cornerRadius: Theme.bubbleRadius))
+            .overlay(RoundedRectangle(cornerRadius: Theme.bubbleRadius)
+                .stroke(fromMe ? Theme.ownBorder : Theme.otherBorder, lineWidth: 1))
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Album, \(members.count) attachments")
+            if !fromMe { Spacer(minLength: 60) }
         }
     }
 

@@ -105,27 +105,10 @@ func (c *Client) SendImage(chatJID, filePath, caption string, ephemeralSec int32
 	if err != nil {
 		return "", fmt.Errorf("parse jid: %w", err)
 	}
-	data, err := os.ReadFile(filePath)
+	inner, err := prepareVisualMedia(context.Background(), albumFile{Path: filePath, Kind: "image"}, caption, c.wa.Upload)
 	if err != nil {
-		return "", fmt.Errorf("read file: %w", err)
+		return "", err
 	}
-
-	up, err := c.wa.Upload(context.Background(), data, whatsmeow.MediaImage)
-	if err != nil {
-		return "", fmt.Errorf("upload: %w", err)
-	}
-
-	mime := detectImageMime(data, filePath)
-	inner := &waE2E.Message{ImageMessage: &waE2E.ImageMessage{
-		Caption:       proto.String(caption),
-		URL:           &up.URL,
-		DirectPath:    &up.DirectPath,
-		MediaKey:      up.MediaKey,
-		Mimetype:      proto.String(mime),
-		FileEncSHA256: up.FileEncSHA256,
-		FileSHA256:    up.FileSHA256,
-		FileLength:    proto.Uint64(uint64(len(data))),
-	}}
 	msg := wrapForChat(inner, ephemeralSec, viewOnce)
 	resp, err := c.wa.SendMessage(context.Background(), jid, msg)
 	if err != nil {
@@ -146,27 +129,10 @@ func (c *Client) SendVideo(chatJID, filePath, caption string, ephemeralSec int32
 	if err != nil {
 		return "", fmt.Errorf("parse jid: %w", err)
 	}
-	data, err := os.ReadFile(filePath)
+	inner, err := prepareVisualMedia(context.Background(), albumFile{Path: filePath, Kind: "video"}, caption, c.wa.Upload)
 	if err != nil {
-		return "", fmt.Errorf("read file: %w", err)
+		return "", err
 	}
-
-	up, err := c.wa.Upload(context.Background(), data, whatsmeow.MediaVideo)
-	if err != nil {
-		return "", fmt.Errorf("upload: %w", err)
-	}
-
-	mime := detectMime(data, filePath, "video/mp4")
-	inner := &waE2E.Message{VideoMessage: &waE2E.VideoMessage{
-		Caption:       proto.String(caption),
-		URL:           &up.URL,
-		DirectPath:    &up.DirectPath,
-		MediaKey:      up.MediaKey,
-		Mimetype:      proto.String(mime),
-		FileEncSHA256: up.FileEncSHA256,
-		FileSHA256:    up.FileSHA256,
-		FileLength:    proto.Uint64(uint64(len(data))),
-	}}
 	msg := wrapForChat(inner, ephemeralSec, viewOnce)
 	resp, err := c.wa.SendMessage(context.Background(), jid, msg)
 	if err != nil {

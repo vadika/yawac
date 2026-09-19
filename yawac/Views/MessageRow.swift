@@ -111,6 +111,7 @@ private struct ReactionChip: View {
 extension MessageRow: Equatable {
     static func == (l: MessageRow, r: MessageRow) -> Bool {
         l.message == r.message
+            && l.albumPosition == r.albumPosition
             && l.status == r.status
             && l.senderName == r.senderName
             && l.localPath == r.localPath
@@ -131,6 +132,9 @@ extension MessageRow: Equatable {
 }
 
 struct MessageRow: View {
+    enum AlbumPosition { case first, middle, last }
+    var albumPosition: AlbumPosition? = nil
+
     var copyableMediaURL: URL? {
         guard message.revokedAt == nil, !message.locallyDeleted,
               !message.isViewOnce, !message.viewOnceLocked,
@@ -188,6 +192,7 @@ struct MessageRow: View {
     var isFindCurrent: Bool = false
 
     @Environment(TranslationViewModel.self) private var translation
+    @Environment(\.openURL) private var openURL
 
     @State private var mentionPopover: MentionTarget?
     @State private var showContextMenu: Bool = false
@@ -341,11 +346,11 @@ struct MessageRow: View {
 
     private var bubbleRowContent: some View {
         HStack(alignment: .top, spacing: 6) {
-            if message.fromMe { Spacer(minLength: 60) }
+            if message.fromMe && albumPosition == nil { Spacer(minLength: 60) }
             // F32: WhatsApp-style avatar to the left of the bubble for
             // inbound group messages (matches the sidebar chat-list
             // layout). Tap = open DM with the sender.
-            if !message.fromMe && isGroupChat {
+            if !message.fromMe && isGroupChat && albumPosition == nil {
                 Button { onOpenChat?(message.senderJID) } label: {
                     AvatarView(jid: message.senderJID,
                                name: senderDisplay, size: 28)
@@ -354,19 +359,19 @@ struct MessageRow: View {
             }
             VStack(alignment: message.fromMe ? .trailing : .leading, spacing: 2) {
                 VStack(alignment: message.fromMe ? .trailing : .leading, spacing: 4) {
-                    if !message.fromMe && isGroupChat {
+                    if !message.fromMe && isGroupChat && (albumPosition == nil || albumPosition == .first) {
                         senderHeader
                     }
                     bodyView
-                    footerView
+                    if albumPosition == nil || albumPosition == .last { footerView }
                 }
                 .padding(.horizontal, 14).padding(.vertical, 10)
                 .background(
-                    message.fromMe ? Theme.ownBubble : Theme.otherBubble,
+                    albumPosition != nil ? Color.clear : (message.fromMe ? Theme.ownBubble : Theme.otherBubble),
                     in: .rect(cornerRadius: Theme.bubbleRadius))
                 .overlay(
                     RoundedRectangle(cornerRadius: Theme.bubbleRadius)
-                        .stroke(message.fromMe ? Theme.ownBorder : Theme.otherBorder,
+                        .stroke(albumPosition != nil ? Color.clear : (message.fromMe ? Theme.ownBorder : Theme.otherBorder),
                                 lineWidth: 1)
                 )
                 // F32: top-right timestamp overlay for inbound group
@@ -375,7 +380,7 @@ struct MessageRow: View {
                 // .padding(.horizontal, 14) so it lines up with the
                 // bubble's right edge.
                 .overlay(alignment: .topTrailing) {
-                    if !message.fromMe && isGroupChat {
+                    if !message.fromMe && isGroupChat && (albumPosition == nil || albumPosition == .first) {
                         Text(message.timestamp,
                              format: .dateTime.hour(.twoDigits(amPM: .omitted)).minute())
                             .scaledMono(10.5)
@@ -464,7 +469,7 @@ struct MessageRow: View {
                     reactionChips
                 }
             }
-            if !message.fromMe { Spacer(minLength: 60) }
+            if !message.fromMe && albumPosition == nil { Spacer(minLength: 60) }
         }
         .environment(\.openURL, OpenURLAction { url in
             if url.scheme == "yawac", url.host == "mention" {
@@ -477,7 +482,8 @@ struct MessageRow: View {
                 mentionPopover = MentionTarget(jid: jid, displayName: display)
                 return .handled
             }
-            return .systemAction
+            openURL(url)
+            return .handled
         })
     }
 

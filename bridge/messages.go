@@ -508,6 +508,9 @@ func (c *Client) dispatchMessage(evt *events.Message) {
 		})
 		c.dispatch("EphemeralTimerChanged", string(b))
 	}
+	if unwrapViewOnce(evt.Message).GetAlbumMessage() != nil {
+		return // The children carry the visible content and album association.
+	}
 	kind, loc, locSeq, contact, isViewOnce := classifyMessage(evt.Message)
 	jm := JMessage{
 		ID:               evt.Info.ID,
@@ -526,6 +529,7 @@ func (c *Client) dispatchMessage(evt *events.Message) {
 	// the wrapped Message. Resolve the effective payload once and use it
 	// for every per-kind getter below.
 	inner := unwrapViewOnce(evt.Message)
+	jm.AlbumID, jm.AlbumIndex = albumAssociation(inner)
 	switch {
 	case inner.GetConversation() != "":
 		jm.Text = inner.GetConversation()
@@ -589,8 +593,8 @@ func (c *Client) dispatchMessage(evt *events.Message) {
 	c.dispatch("Message", string(b))
 }
 
-// unwrapViewOnce returns the inner Message of a ViewOnceMessageV2 /
-// V2Extension wrapper, or m itself when no wrapper is present.
+// unwrapViewOnce returns the payload inside ephemeral and view-once wrappers,
+// or m itself when no wrapper is present.
 // classifyMessage performs the same unwrap internally; this helper is
 // for callers that also need to reach into the inner payload (media,
 // text, context-info) after asking for the kind.
@@ -598,11 +602,14 @@ func unwrapViewOnce(m *waE2E.Message) *waE2E.Message {
 	if m == nil {
 		return nil
 	}
+	if ephemeral := m.GetEphemeralMessage(); ephemeral != nil && ephemeral.Message != nil {
+		return unwrapViewOnce(ephemeral.Message)
+	}
 	if vo := m.GetViewOnceMessageV2(); vo != nil && vo.Message != nil {
-		return vo.Message
+		return unwrapViewOnce(vo.Message)
 	}
 	if voe := m.GetViewOnceMessageV2Extension(); voe != nil && voe.Message != nil {
-		return voe.Message
+		return unwrapViewOnce(voe.Message)
 	}
 	return m
 }
@@ -621,6 +628,9 @@ func classifyMessage(m *waE2E.Message) (
 ) {
 	if m == nil {
 		return "system", nil, 0, nil, false
+	}
+	if ephemeral := m.GetEphemeralMessage(); ephemeral != nil && ephemeral.Message != nil {
+		return classifyMessage(ephemeral.Message)
 	}
 	// Unwrap view-once first. Both V2 and the V2Extension carry the
 	// real payload in their inner Message; classify against that.
@@ -667,6 +677,8 @@ func classifyMessage(m *waE2E.Message) (
 // about the payload accessors.
 func classifyKindUnwrapped(m *waE2E.Message) string {
 	switch {
+	case m.GetAlbumMessage() != nil:
+		return "protocol"
 	case m.GetConversation() != "":
 		return "text"
 	case m.GetExtendedTextMessage() != nil:

@@ -18,6 +18,8 @@ struct BridgeMessage: Codable, Identifiable {
     let contact: BridgeContactPayload?
     let contactsArray: BridgeContactsArrayPayload?
     let isViewOnce: Bool?
+    var albumID: String? = nil
+    var albumIndex: Int? = nil
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -31,6 +33,8 @@ struct BridgeMessage: Codable, Identifiable {
         case locationSequence = "location_sequence"
         case contact
         case contactsArray = "contacts_array"
+        case albumID = "album_id"
+        case albumIndex = "album_index"
         case isViewOnce = "is_view_once"
     }
 
@@ -438,5 +442,21 @@ struct BridgeJoinRequestResult: Decodable, Hashable {
     enum CodingKeys: String, CodingKey {
         case jid
         case errorCode = "error_code"
+    }
+}
+
+struct BridgeAlbumFile: Codable, Sendable {
+    let path: String
+    let kind: String
+}
+
+struct BridgeAlbumSendResult: Decodable {
+    let albumID: String
+    let items: [BridgeSendResult]
+    let error: String?
+
+    enum CodingKeys: String, CodingKey {
+        case albumID = "album_id"
+        case items, error
     }
 }

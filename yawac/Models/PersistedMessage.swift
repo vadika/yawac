@@ -35,6 +35,8 @@ final class PersistedMessage {
     /// Both nil for pre-F38 rows + non-image/video kinds.
     var mediaWidth: Int? = nil
     var mediaHeight: Int? = nil
+    var albumID: String? = nil
+    var albumIndex: Int? = nil
     var pollJSON: String?
     // View-once envelope (Sticker / Image / Video).
     var isViewOnce: Bool = false

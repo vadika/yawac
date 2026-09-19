@@ -47,6 +47,7 @@ extension BridgeMessage {
                              fromMe: message.quotedFromMe, kind: message.quotedKind ?? "",
                              snippet: message.quotedTextSnippet ?? "")
                   }, isForwarded: message.isForwarded, location: location, locationSequence: sequence,
-                  contact: contact, contactsArray: contacts, isViewOnce: message.isViewOnce)
+                  contact: contact, contactsArray: contacts, isViewOnce: message.isViewOnce,
+                  albumID: message.albumID, albumIndex: message.albumIndex)
     }
 }

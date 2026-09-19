@@ -40,6 +40,8 @@ struct UIMessage: Identifiable, Hashable, Sendable {
     let timestamp: Date
     let body: Body
     var quotedMessageID: String? = nil
+    var albumID: String? = nil
+    var albumIndex: Int? = nil
     var quotedSenderJID: String? = nil
     var quotedFromMe: Bool = false
     var quotedTextSnippet: String? = nil
@@ -191,5 +193,7 @@ extension UIMessage {
         }
         self.isForwarded = b.isForwarded ?? false
         self.isViewOnce = b.isViewOnce ?? false
+        self.albumID = b.albumID
+        self.albumIndex = b.albumIndex
     }
 }

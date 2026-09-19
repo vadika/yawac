@@ -174,6 +174,60 @@ final class SessionViewModel {
     /// jumps, newly-created chat, account self-chat, etc.) — the trail
     /// resets when ContentView assigns it through.
     var pendingChatSelection: String?
+    var pendingWhatsAppLink: WhatsAppLink?
+    var urlShareText: String?
+    var urlOpenError: String?
+    private var pendingURLDraft: (jid: String, text: String)?
+
+    @discardableResult
+    func handleWhatsAppURL(_ url: URL) -> Bool {
+        guard let link = WhatsAppLink.parse(url) else {
+            if url.scheme?.lowercased() == "whatsapp" {
+                urlOpenError = "This WhatsApp link is invalid or isn’t supported."
+                return true
+            }
+            return false
+        }
+        urlOpenError = nil
+        pendingWhatsAppLink = link
+        processPendingWhatsAppLink()
+        return true
+    }
+
+    func processPendingWhatsAppLink() {
+        guard state == .ready, chatList != nil, let link = pendingWhatsAppLink else { return }
+        pendingWhatsAppLink = nil
+        urlShareText = nil
+        switch link {
+        case .app: break
+        case .chat(let phone, let text):
+            let jid = JIDNormalize.canonical(phone + "@s.whatsapp.net", client: client)
+            chatList?.upsertStubChat(jid: jid, displayName: "+" + phone)
+            openURLDraft(chatJID: jid, text: text)
+        case .share(let text):
+            urlShareText = text
+        case .invite(let code):
+            pendingShortcutQuery = "https://chat.whatsapp.com/" + code
+        }
+    }
+
+    func openURLDraft(chatJID: String, text: String?) {
+        let jid = JIDNormalize.canonical(chatJID, client: client)
+        pendingURLDraft = text.flatMap { $0.isEmpty ? nil : (jid, $0) }
+        openRootChat(jid)
+        if let conversation = currentConversation, conversation.chatJID == jid {
+            applyPendingURLDraft(to: conversation)
+        }
+    }
+
+    func applyPendingURLDraft(to conversation: ConversationViewModel) {
+        guard let pending = pendingURLDraft, pending.jid == conversation.chatJID else { return }
+        pendingURLDraft = nil
+        conversation.cancelCompose()
+        conversation.draft = conversation.draft.isEmpty
+            ? pending.text : conversation.draft + "\n" + pending.text
+    }
+
 
     /// Drill-in counterpart of `pendingChatSelection`. Set by the
     /// "Reply privately" affordance (group → DM with sender) so the
@@ -704,6 +758,10 @@ final class SessionViewModel {
     }
 
     func logout() async {
+        pendingWhatsAppLink = nil
+        pendingURLDraft = nil
+        urlShareText = nil
+        urlOpenError = nil
         await stopSessionWork()
         messageWriter = nil
         chatList = nil

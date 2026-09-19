@@ -6,6 +6,7 @@ struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
     private var chatList: ChatListViewModel? { session.chatList }
     @State private var chatSearch: ChatSearchViewModel?
+    @State private var shareQuery = ""
     /// Last selected chat JID, persisted across launches.
     @AppStorage("yawac.lastSelectedChatJID") private var lastSelectedChatJID: String = ""
 
@@ -78,6 +79,30 @@ struct ContentView: View {
             set: { if !$0 { session.persistenceError = nil } })) {
                 Button("OK") { session.persistenceError = nil }
             } message: { Text(session.persistenceError ?? "") }
+        .sheet(isPresented: Binding(
+            get: { session.urlShareText != nil },
+            set: { if !$0 { session.urlShareText = nil } })) {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        Text("Choose a chat").font(.headline)
+                        Spacer()
+                        Button("Cancel") { session.urlShareText = nil }
+                    }
+                    QuickSendChatPicker(query: $shareQuery, selectedChatJID: Binding(
+                        get: { nil },
+                        set: { jid in
+                            guard let jid else { return }
+                            session.openURLDraft(chatJID: jid, text: session.urlShareText)
+                            session.urlShareText = nil
+                        }), chats: chatList?.chats ?? [], nameResolver: { $0.name })
+                }
+                .padding(16)
+                .frame(width: 360, height: 360)
+                .onAppear { shareQuery = "" }
+        }
+        .onChange(of: session.pendingWhatsAppLink, initial: true) { _, _ in
+            session.processPendingWhatsAppLink()
+        }
         .navigationSplitViewStyle(.balanced)
         // Drop NavigationSplitView's auto-injected sidebar-toggle icon
         // (the lone "split-pane" button). The title bar itself stays so
@@ -141,7 +166,12 @@ struct ContentView: View {
         .task {
             guard let client = session.client, let vm = session.chatList else { return }
             self.chatSearch = ChatSearchViewModel(listVM: vm, validator: client)
-            if !lastSelectedChatJID.isEmpty,
+            if let query = session.pendingShortcutQuery {
+                self.chatSearch?.query = query
+                session.pendingShortcutQuery = nil
+            }
+            session.processPendingWhatsAppLink()
+            if session.nav.currentJID == nil, !lastSelectedChatJID.isEmpty,
                vm.chats.contains(where: { $0.jid == lastSelectedChatJID }) {
                 session.openRootChat(lastSelectedChatJID)
             }

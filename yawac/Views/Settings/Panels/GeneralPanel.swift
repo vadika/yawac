@@ -19,6 +19,8 @@ struct GeneralPanel: View {
     @AppStorage("yawac.notifications.enabled")  private var notifEnabled = true
     @AppStorage("yawac.notifications.preview")  private var notifPreview = true
     @AppStorage("yawac.notifications.sound")    private var notifSound: String = "Default"
+    @State private var linkHandlerStatus: String?
+    @State private var settingLinkHandler = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 26) {
@@ -33,6 +35,20 @@ struct GeneralPanel: View {
                     }
                     SettingsRow(label: "Keep in dock") {
                         SettingsSwitch(isOn: $keepInDock)
+                    }
+                    SettingsRow(label: "WhatsApp links") {
+                        Button("Open with yawac") {
+                            settingLinkHandler = true
+                            NSWorkspace.shared.setDefaultApplication(
+                                at: Bundle.main.bundleURL, toOpenURLsWithScheme: "whatsapp") { error in
+                                    Task { @MainActor in
+                                        settingLinkHandler = false
+                                        linkHandlerStatus = error?.localizedDescription
+                                            ?? "yawac now opens WhatsApp links."
+                                    }
+                                }
+                        }
+                        .disabled(settingLinkHandler)
                     }
                 }
                 .onChange(of: keepInDock) { _, newValue in
@@ -51,6 +67,9 @@ struct GeneralPanel: View {
                     // System truth wins on first display so a manual System Settings
                     // removal doesn't leave the toggle stuck on.
                     launchAtLogin = LaunchAtLoginService.isEnabled
+                }
+                if let linkHandlerStatus {
+                    Text(linkHandlerStatus).font(.caption).foregroundStyle(Theme.textMuted)
                 }
             }
 

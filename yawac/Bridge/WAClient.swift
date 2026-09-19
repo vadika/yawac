@@ -237,6 +237,17 @@ class WAClient: PhoneValidating, LIDResolving {
         return try Self.decodeJSON(json)
     }
 
+    nonisolated func sendAlbum(_ chatJID: String, files: [BridgeAlbumFile], caption: String,
+                               ephemeralSeconds: Int32 = 0) throws -> BridgeAlbumSendResult {
+        bump("sendAlbum")
+        let filesJSON = String(decoding: try JSONEncoder().encode(files), as: UTF8.self)
+        var err: NSError?
+        let json = go.sendAlbum(chatJID, filesJSON: filesJSON, caption: caption,
+                                ephemeralSec: ephemeralSeconds, error: &err)
+        if let err { throw err }
+        return try Self.decodeJSON(json)
+    }
+
     nonisolated func sendImage(_ chatJID: String, path: String, caption: String,
                    ephemeralSeconds: Int32 = 0,
                    viewOnce: Bool = false) throws -> BridgeSendResult {

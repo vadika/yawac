@@ -283,7 +283,7 @@ struct ComposerView: View {
                 Button {
                     attachFile()
                 } label: {
-                    Label("Attach file…", systemImage: "paperclip")
+                    Label("Attach files…", systemImage: "paperclip")
                 }
                 Button {
                     showLocationPicker = true
