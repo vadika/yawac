@@ -153,6 +153,54 @@ struct MessageRow: View {
         return pasteboard.writeObjects([url as NSURL])
     }
 
+    var suggestedMediaFilename: String? {
+        guard let source = copyableMediaURL else { return nil }
+        if case .media(_, _, let filename, _, _, _) = message.body,
+           let filename, !filename.isEmpty {
+            let name = URL(fileURLWithPath: filename).lastPathComponent
+            if !name.isEmpty, name != ".", name != "..", name != "/" { return name }
+        }
+        return source.lastPathComponent
+    }
+
+    func saveMedia(to destination: URL) async throws {
+        guard let source = copyableMediaURL else { throw CocoaError(.fileReadNoSuchFile) }
+        try await Task.detached(priority: .userInitiated) {
+            if source.resolvingSymlinksInPath().standardizedFileURL == destination.resolvingSymlinksInPath().standardizedFileURL {
+                return
+            }
+            let files = FileManager.default
+            // Stage the copy on the destination volume before replacing an
+            // existing file, so a failed copy leaves that file intact.
+            let temporary = try files.url(for: .itemReplacementDirectory, in: .userDomainMask,
+                                          appropriateFor: destination, create: true)
+            defer { try? files.removeItem(at: temporary) }
+            let staged = temporary.appendingPathComponent(source.lastPathComponent)
+            try files.copyItem(at: source, to: staged)
+            if files.fileExists(atPath: destination.path) {
+                _ = try files.replaceItemAt(destination, withItemAt: staged)
+            } else {
+                try files.moveItem(at: staged, to: destination)
+            }
+        }.value
+    }
+
+    private func saveMediaAs() {
+        guard let filename = suggestedMediaFilename else { return }
+        let panel = NSSavePanel()
+        panel.title = "Save Media As"
+        panel.nameFieldStringValue = filename
+        panel.canCreateDirectories = true
+        panel.isExtensionHidden = false
+        panel.begin { response in
+            guard response == .OK, let destination = panel.url else { return }
+            Task { @MainActor in
+                do { try await saveMedia(to: destination) }
+                catch { saveMediaError = error.localizedDescription }
+            }
+        }
+    }
+
     let message: UIMessage
     let status: UIMessage.Status?
     let senderName: String?
@@ -196,6 +244,7 @@ struct MessageRow: View {
 
     @State private var mentionPopover: MentionTarget?
     @State private var showContextMenu: Bool = false
+    @State private var saveMediaError: String?
     @State private var contextMenuAnchor: UnitPoint = .center
     /// View-once: transient flag covering the gap between tap and the
     /// persisted `viewOnceLocked` flip (~100ms). Outside that window the
@@ -319,6 +368,11 @@ struct MessageRow: View {
             }
         }
         .background(tint)
+        .alert("Couldn’t save media", isPresented: Binding(
+            get: { saveMediaError != nil },
+            set: { if !$0 { saveMediaError = nil } })) {
+                Button("OK") { saveMediaError = nil }
+            } message: { Text(saveMediaError ?? "") }
     }
 
     @ViewBuilder
@@ -453,6 +507,9 @@ struct MessageRow: View {
                         },
                         onCopyMedia: copyableMediaURL == nil ? nil : {
                             copyMedia(to: .general)
+                        },
+                        onSaveMedia: copyableMediaURL == nil ? nil : {
+                            DispatchQueue.main.async { saveMediaAs() }
                         },
                         onStar: { onStar?(message) },
                         onPin: { onPin?(message) },

@@ -22,6 +22,7 @@ struct MessageContextMenu: View {
     let onForward: () -> Void
     let onCopyText: () -> Void
     let onCopyMedia: (() -> Void)?
+    let onSaveMedia: (() -> Void)?
     let onStar: () -> Void
     let onPin: () -> Void
     let onDeleteForMe: () -> Void
@@ -71,6 +72,10 @@ struct MessageContextMenu: View {
                             shortcut: "⌘C",
                             disabled: onCopyMedia == nil,
                             action: { dismiss(); onCopyMedia?() })
+                    MenuRow(icon: "square.and.arrow.down",
+                            label: "Save As…",
+                            disabled: onSaveMedia == nil,
+                            action: { dismiss(); onSaveMedia?() })
                 }
                 if canEdit {
                     MenuRow(icon: "pencil",
