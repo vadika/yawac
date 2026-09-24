@@ -251,12 +251,13 @@ func TestDispatchReplyPopulatesQuoted(t *testing.T) {
 }
 
 func TestWrapForChatNoWrap(t *testing.T) {
-	inner := &waE2E.Message{
-		Conversation: proto.String("hello"),
-	}
-	out := wrapForChat(inner, 0, false)
-	if out != inner {
-		t.Fatal("expected unchanged inner when no wrapping requested")
+	for _, expiration := range []int32{0, -1} {
+		inner := &waE2E.Message{Conversation: proto.String("hello")}
+		want := proto.Clone(inner)
+		out := wrapForChat(inner, expiration, false)
+		if out != inner || !proto.Equal(out, want) {
+			t.Fatal("expected unchanged inner when no wrapping requested")
+		}
 	}
 }
 
@@ -273,6 +274,80 @@ func TestWrapForChatEphemeralOnly(t *testing.T) {
 	}
 	if out.ViewOnceMessageV2 != nil {
 		t.Fatal("unexpected ViewOnce wrap")
+	}
+	payload := out.GetEphemeralMessage().GetMessage()
+	if payload.Conversation != nil || payload.GetExtendedTextMessage().GetText() != "hi" {
+		t.Fatalf("disappearing text must use ExtendedTextMessage: %v", payload)
+	}
+	if got := payload.GetExtendedTextMessage().GetContextInfo().GetExpiration(); got != 86400 {
+		t.Fatalf("expiration = %d, want 86400", got)
+	}
+}
+
+func TestWrapForChatExpirationPreservesContent(t *testing.T) {
+	cases := []struct {
+		name    string
+		message func(*waE2E.ContextInfo) *waE2E.Message
+	}{
+		{"text", func(ci *waE2E.ContextInfo) *waE2E.Message {
+			return &waE2E.Message{ExtendedTextMessage: &waE2E.ExtendedTextMessage{Text: proto.String("hello"), ContextInfo: ci}}
+		}},
+		{"image", func(ci *waE2E.ContextInfo) *waE2E.Message {
+			return &waE2E.Message{ImageMessage: &waE2E.ImageMessage{Caption: proto.String("photo"), ContextInfo: ci}}
+		}},
+		{"video", func(ci *waE2E.ContextInfo) *waE2E.Message {
+			return &waE2E.Message{VideoMessage: &waE2E.VideoMessage{ContextInfo: ci}}
+		}},
+		{"audio", func(ci *waE2E.ContextInfo) *waE2E.Message {
+			return &waE2E.Message{AudioMessage: &waE2E.AudioMessage{ContextInfo: ci}}
+		}},
+		{"document", func(ci *waE2E.ContextInfo) *waE2E.Message {
+			return &waE2E.Message{DocumentMessage: &waE2E.DocumentMessage{ContextInfo: ci}}
+		}},
+		{"sticker", func(ci *waE2E.ContextInfo) *waE2E.Message {
+			return &waE2E.Message{StickerMessage: &waE2E.StickerMessage{ContextInfo: ci}}
+		}},
+		{"contact", func(ci *waE2E.ContextInfo) *waE2E.Message {
+			return &waE2E.Message{ContactMessage: &waE2E.ContactMessage{ContextInfo: ci}}
+		}},
+		{"contacts", func(ci *waE2E.ContextInfo) *waE2E.Message {
+			return &waE2E.Message{ContactsArrayMessage: &waE2E.ContactsArrayMessage{ContextInfo: ci}}
+		}},
+		{"location", func(ci *waE2E.ContextInfo) *waE2E.Message {
+			return &waE2E.Message{LocationMessage: &waE2E.LocationMessage{ContextInfo: ci}}
+		}},
+		{"poll", func(ci *waE2E.ContextInfo) *waE2E.Message {
+			return &waE2E.Message{PollCreationMessage: &waE2E.PollCreationMessage{ContextInfo: ci}}
+		}},
+		{"poll v2", func(ci *waE2E.ContextInfo) *waE2E.Message {
+			return &waE2E.Message{PollCreationMessageV2: &waE2E.PollCreationMessage{ContextInfo: ci}}
+		}},
+		{"poll v3", func(ci *waE2E.ContextInfo) *waE2E.Message {
+			return &waE2E.Message{PollCreationMessageV3: &waE2E.PollCreationMessage{ContextInfo: ci}}
+		}},
+		{"album", func(ci *waE2E.ContextInfo) *waE2E.Message {
+			return &waE2E.Message{AlbumMessage: &waE2E.AlbumMessage{ContextInfo: ci}}
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, existing := range []*waE2E.ContextInfo{nil, {
+				StanzaID: proto.String("quoted-id"), Participant: proto.String("123@s.whatsapp.net"),
+				QuotedMessage: &waE2E.Message{Conversation: proto.String("quoted text")},
+				MentionedJID:  []string{"456@s.whatsapp.net"}, IsForwarded: proto.Bool(true),
+				ForwardingScore: proto.Uint32(2), Expiration: proto.Uint32(86400),
+			}} {
+				wantContext := &waE2E.ContextInfo{}
+				if existing != nil {
+					wantContext = proto.Clone(existing).(*waE2E.ContextInfo)
+				}
+				wantContext.Expiration = proto.Uint32(604800)
+				out := wrapForChat(tc.message(existing), 604800, false)
+				if got := out.GetEphemeralMessage().GetMessage(); !proto.Equal(got, tc.message(wantContext)) {
+					t.Fatalf("content or expiration mismatch: %v", got)
+				}
+			}
+		})
 	}
 }
 
@@ -301,6 +376,9 @@ func TestWrapForChatBothEphemeralOutside(t *testing.T) {
 		out.EphemeralMessage.Message.ViewOnceMessageV2 == nil {
 		t.Fatalf("expected ViewOnceMessageV2 inside EphemeralMessage; got %+v",
 			out.EphemeralMessage.Message)
+	}
+	if got := out.GetEphemeralMessage().GetMessage().GetViewOnceMessageV2().GetMessage().GetImageMessage().GetContextInfo().GetExpiration(); got != 86400 {
+		t.Fatalf("view-once image expiration = %d, want 86400", got)
 	}
 }
 

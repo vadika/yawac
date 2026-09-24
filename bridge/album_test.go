@@ -63,6 +63,9 @@ func TestSendAlbumLinksChildrenAndPreservesCaption(t *testing.T) {
 			if sent[0].GetAlbumMessage().GetExpectedImageCount() != 1 || sent[0].GetAlbumMessage().GetExpectedVideoCount() != 1 {
 				t.Fatal("wrong album counts")
 			}
+			if got := sent[0].GetAlbumMessage().GetContextInfo().GetExpiration(); got != uint32(expiration) {
+				t.Fatalf("album expiration = %d, want %d", got, expiration)
+			}
 			if uploaded[0] != whatsmeow.MediaImage || uploaded[1] != whatsmeow.MediaVideo {
 				t.Fatalf("upload types: %v", uploaded)
 			}
@@ -70,6 +73,9 @@ func TestSendAlbumLinksChildrenAndPreservesCaption(t *testing.T) {
 				t.Fatal("caption not attached exactly once")
 			}
 			for i, child := range sent[1:] {
+				if got := contextInfoFromMessage(child).GetExpiration(); got != uint32(expiration) {
+					t.Fatalf("child expiration = %d, want %d", got, expiration)
+				}
 				id, index := albumAssociation(child)
 				if id != "1" || index == nil || *index != int32(i) {
 					t.Fatalf("association: %s %v", id, index)

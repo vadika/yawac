@@ -37,10 +37,53 @@ func parseChatJID(s string) (types.JID, error) {
 // caller passes viewOnce=true on an unrelated inner we still wrap
 // (whatsmeow / WhatsApp may reject; not our enforcement layer).
 //
-// Nesting order: ViewOnce inside Ephemeral. The outer EphemeralMessage
-// is what the server uses for retention; the inner ViewOnceMessageV2
-// is what the recipient client uses to gate the reveal flow.
+// Nesting order: ViewOnce inside Ephemeral. Recipients need the expiration
+// on the content's ContextInfo; the EphemeralMessage envelope alone does
+// not make a message disappear.
 func wrapForChat(inner *waE2E.Message, ephemeralSec int32, viewOnce bool) *waE2E.Message {
+	if ephemeralSec > 0 {
+		// Conversation cannot carry ContextInfo, so disappearing plain text
+		// must use ExtendedTextMessage, just like replies and mentions.
+		if inner.Conversation != nil {
+			inner.ExtendedTextMessage = &waE2E.ExtendedTextMessage{Text: inner.Conversation}
+			inner.Conversation = nil
+		}
+		var ctx **waE2E.ContextInfo
+		switch {
+		case inner.ExtendedTextMessage != nil:
+			ctx = &inner.ExtendedTextMessage.ContextInfo
+		case inner.ImageMessage != nil:
+			ctx = &inner.ImageMessage.ContextInfo
+		case inner.VideoMessage != nil:
+			ctx = &inner.VideoMessage.ContextInfo
+		case inner.AudioMessage != nil:
+			ctx = &inner.AudioMessage.ContextInfo
+		case inner.DocumentMessage != nil:
+			ctx = &inner.DocumentMessage.ContextInfo
+		case inner.StickerMessage != nil:
+			ctx = &inner.StickerMessage.ContextInfo
+		case inner.ContactMessage != nil:
+			ctx = &inner.ContactMessage.ContextInfo
+		case inner.ContactsArrayMessage != nil:
+			ctx = &inner.ContactsArrayMessage.ContextInfo
+		case inner.LocationMessage != nil:
+			ctx = &inner.LocationMessage.ContextInfo
+		case inner.PollCreationMessage != nil:
+			ctx = &inner.PollCreationMessage.ContextInfo
+		case inner.PollCreationMessageV2 != nil:
+			ctx = &inner.PollCreationMessageV2.ContextInfo
+		case inner.PollCreationMessageV3 != nil:
+			ctx = &inner.PollCreationMessageV3.ContextInfo
+		case inner.AlbumMessage != nil:
+			ctx = &inner.AlbumMessage.ContextInfo
+		}
+		if ctx != nil {
+			if *ctx == nil {
+				*ctx = &waE2E.ContextInfo{}
+			}
+			(*ctx).Expiration = proto.Uint32(uint32(ephemeralSec))
+		}
+	}
 	out := inner
 	if viewOnce {
 		out = &waE2E.Message{
