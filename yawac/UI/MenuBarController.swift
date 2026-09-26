@@ -115,6 +115,10 @@ final class MenuBarController: NSObject {
         let img = NSImage(named: name)
         img?.isTemplate = (unread == 0)
         button.image = img
+        let label = unread > 0 ? "yawac — \(unread) unread" : "yawac — no unread messages"
+        button.toolTip = "\(label)\nClick for quick send (⌘⇧Y); right-click for app actions."
+        button.setAccessibilityLabel(label)
+        button.setAccessibilityHelp("Open quick send. Control-click for app actions.")
     }
 
     @objc private func handleClick(_ sender: Any?) {
@@ -136,8 +140,8 @@ final class MenuBarController: NSObject {
     func togglePopover() {
         guard let item, let button = item.button else { return }
         guard let session else { return }
-        guard session.client != nil else {
-            // No client = no point opening the popover.
+        guard session.state == .ready, session.client != nil else {
+            WindowToggler.bringToFront()
             return
         }
         let popover = ensurePopover(session: session)

@@ -28,6 +28,7 @@ struct KeyboardShortcutsView: View {
             Entry(label: "Delete-for-me / cancel forward",  keys: ["⌫"]),
         ]),
         ("App", [
+            Entry(label: "Quick send (menu bar enabled)",    keys: ["⇧", "⌘", "Y"]),
             Entry(label: "Show shortcuts",                  keys: ["⌘", "?"]),
             Entry(label: "Log out",                         keys: ["⇧", "⌘", "Q"]),
         ]),

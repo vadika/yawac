@@ -6,6 +6,8 @@ against the WhatsApp baseline. Each item is a candidate for a future
 brainstorm → spec → plan cycle.
 
 Status legend: ☐ not started · ◐ partial · ✅ done · ⊘ dropped.
+Open items are candidates, not release commitments. The Shipped section is
+historical; current behavior is summarized in the README and architecture doc.
 
 Split: **Important** (primitives, admin, privacy, productivity) drives the
 next planning cycles. **Low-priority** (cosmetics, decorative pickers,
@@ -19,7 +21,9 @@ rare-use utilities) ships only when the important list is clear.
 
 - ☐ **Status / Stories** — view + post (whatsmeow supports).
 - ◐ **Polls** — create + vote shipped; tallies + voter-by-option render
-  in the bubble.
+  in the bubble. Multiple-choice polls submit the full selection on each tap.
+  Bundled historical votes are imported when supplied by the phone; coverage
+  is not guaranteed.
   Gaps:
     - ✅ Cross-device own-vote re-render from `HistoricalPollVote`
       event — landed as F90 in v0.10.18.
@@ -36,7 +40,7 @@ rare-use utilities) ships only when the important list is clear.
       v0.10.35 as F103.
 - ◐ **Contact-card share (vCard)** — WhatsApp-formatted vCard with
   `waid` extension parameter, tappable "Message on WhatsApp"
-  recipient action. Single-contact only. Shipped in v0.8.0.
+  recipient action. Single- and multi-contact sharing are implemented.
   Gaps:
     - ✅ Multi-contact share (`ContactsArrayMessage`) — picker is
       now a checkbox list; ≥2 selections fire one
@@ -72,12 +76,12 @@ rare-use utilities) ships only when the important list is clear.
 
 ## Search
 
-- ● **In-chat message search** — ⌘F find bar with ↑/↓ navigation,
+- ✅ **In-chat message search** — ⌘F find bar with ↑/↓ navigation,
   highlights, locale-aware tokenizer (FTS5). v0.8.4 added chip-strip
   filters for sender, kind, and date range (Today / Last 7 / 30 /
   90 / Custom…). Sender filter is JID-based (stable across
   push-name changes) since v0.9.4.
-- ● **Global message search** — sidebar `⌘K` Messages section,
+- ✅ **Global message search** — sidebar `⌘K` Messages section,
   tap-to-jump with brief flash highlight. v0.8.4 added chip-strip
   filters for chat, sender, kind, and date range. v0.9.9 fixed the
   hit-click → chat-swap + scroll-to-message race so the jump
@@ -153,23 +157,18 @@ rare-use utilities) ships only when the important list is clear.
   row above. Privacy-conscious UX win — the official app has
   none of this.
 - ✅ **Shortcuts / AppleScript integration** — App Intents path landed as F97 in v0.10.31. AppleScript sdef deferred.
-> Menu-bar quick-send shipped as F87 in v0.10.14.
+- ✅ **Menu-bar icon and quick send** — enabled by default and configurable
+  in Settings → General;
+  left-click or `⌘⇧Y` opens quick send, right-click opens the app menu.
+  The icon reflects unread messages. Shipped as F87 in v0.10.14.
 - ✅ **Folders / chat lists** — landed as F91 in v0.10.19.
 - ✅ **Wire cosmetic Settings toggles** — shipped as F73 in v0.10.6.
 
 ## Account / Privacy
 
-- ☐ **Multi-account** — link N WhatsApp accounts into one yawac
-  window; account switcher in the sidebar so power users can
-  drive personal + work + side-project numbers without juggling
-  separate apps. The official Mac client is single-account, so
-  this is likely the single strongest reason for a power user to
-  pick yawac over it. Touches: per-account
-  whatsmeow `*Client`, per-account SwiftData store + media
-  cache, sidebar account chip + cmd-1..N keyboard switch,
-  global notification routing tagged by account. Non-trivial —
-  device count limits, paired-store isolation, and
-  cross-account contact dedupe all have to land cleanly.
+- ☐ **Multi-account (deferred; scope undecided)** — currently one account
+  per app. Supporting several requires isolated sessions, message stores,
+  media caches, and notification routing. No implementation is committed.
 - ✅ **Push-name edit** — shipped as F96 in v0.10.29.
 - ☐ **Local chat export / archive** — proper local backup of
   conversations as machine-readable (JSON/SQLite) + human-
@@ -204,7 +203,7 @@ the important list is materially shorter.
 - ☐ **Per-chat wallpaper**.
 - ☐ **Theme picker** (light / dark / auto; today: dark only).
 - ☐ **Spotlight / Quick Look** integration for media.
-- ☐ **Export / print** conversation.
+- ☐ **Print** conversation (local export is tracked under Account / Privacy).
 
 ---
 
@@ -2638,7 +2637,6 @@ surfaces.
 # Out of scope (will not do)
 
 - **Voice / video calls** — companion-device protocol limit.
-- **Multi-account / profile switching**.
 
 ---
 

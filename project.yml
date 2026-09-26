@@ -76,8 +76,8 @@ targets:
             CFBundleTypeRole: Editor
             CFBundleURLSchemes:
               - whatsapp
-        CFBundleShortVersionString: "0.10.67"
-        CFBundleVersion: "150"
+        CFBundleShortVersionString: "0.10.68"
+        CFBundleVersion: "151"
         ATSApplicationFontsPath: Fonts
         CFBundleIconName: AppIcon
         # F72: prevent macOS from spawning a second yawac instance when

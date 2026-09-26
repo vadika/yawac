@@ -84,7 +84,7 @@ struct YawacApp: App {
                     // Done here (not init()) because @State can't be read from App.init.
                     AppDependencyManager.shared.add(dependency: session)
                     let show = UserDefaults.standard
-                        .object(forKey: "yawac.menuBar.show") as? Bool ?? false
+                        .object(forKey: "yawac.menuBar.show") as? Bool ?? true
                     // Test-host runs would otherwise race the GlobalHotkeyTests for ⌘⇧Y;
                     // keep the status item + hotkey out of XCTest hosts.
                     let underTest = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil

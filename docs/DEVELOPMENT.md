@@ -17,7 +17,7 @@ Local build, project layout, troubleshooting, and release flow for `yawac`.
 │                    │ AsyncStream<Event>      │
 │  ┌─────────────────▼──────────────────────┐  │
 │  │  WAClient (@MainActor wrapper)         │  │
-│  │  • one session event consumer              │  │
+│  │  • one session event consumer          │  │
 │  │  • Codable JSON ⇄ BridgeMessage etc.   │  │
 │  └─────────────────┬──────────────────────┘  │
 └────────────────────┼─────────────────────────┘
@@ -36,13 +36,14 @@ Local build, project layout, troubleshooting, and release flow for `yawac`.
 └──────────────────────────────────────────────┘
 ```
 
-The Go bridge exposes a flat, gomobile-friendly API: basic types (string, int, []byte) and JSON strings for complex payloads. Swift wraps the generated Objective-C classes in a `@MainActor` `WAClient` actor whose `AsyncStream<Event>` is consumed by the session. See [ARCHITECTURE.md](ARCHITECTURE.md) for state and persistence ownership.
+The Go bridge exposes a flat, gomobile-friendly API: basic types (string, int, []byte) and JSON strings for complex payloads. Swift wraps the generated Objective-C classes in a `@MainActor` `WAClient` class whose `AsyncStream<Event>` is consumed by the session. See [ARCHITECTURE.md](ARCHITECTURE.md) for state and persistence ownership.
 
 ## Requirements
 
 - macOS 14 (Sonoma) or newer
-- Xcode 15 or newer
-- Go 1.22 or newer
+- Xcode with a Swift toolchain compatible with the pinned SPM dependencies
+  (CI uses the macOS 26 runner; the app deployment target remains macOS 14)
+- Go 1.26.3 or newer, as declared in `bridge/go.mod`
 - Homebrew (for `xcodegen` and Go if not already installed)
 
 ## Build
@@ -60,7 +61,7 @@ To build from CLI:
 
 To run tests:
 
-    cd bridge && go test -short ./...
+    (cd bridge && go test -short ./...)
     xcodebuild -project yawac.xcodeproj -scheme yawac \
         -destination 'platform=macOS' test \
         CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
@@ -69,26 +70,28 @@ To run tests:
 
     bridge/                     — Go module, gomobile-bindable wrapper
     scripts/                    — install-tools, build-xcframework, release-edge,
-                                  release, bump-cask
+                                  bump-cask
     yawac/                      — SwiftUI app sources
         Bridge/                 — WAClient + JSON mirrors
         Models/                 — Chat, Message, PersistedMessage (SwiftData)
         ViewModels/             — Session, ChatList, Conversation, Groups,
                                   ChatSearch, Translation
         Views/                  — Login (QR), ChatList, Conversation, MessageRow,
-                                  ComposerView, GroupInfoView, QRCodeView,
+                                  ComposerView, ChatInfoView, QRCodeView,
                                   SettingsView
         Services/               — AppPaths, NotificationService, MediaCache,
                                   LanguageDetector, TranslationStore,
                                   TranslationEngine, TranslationModelManager,
                                   MentionResolver
+        UI/                     — menu-bar controller, quick send, global hotkey
+        Intents/                — Shortcuts actions
     Casks/                      — Homebrew Cask (auto-bumped by release workflow)
     yawacTests/                 — XCTest
     project.yml                 — XcodeGen project descriptor
     docs/superpowers/specs/     — design specs
     docs/superpowers/plans/     — implementation plans
     .github/workflows/ci.yml    — CI pipeline
-    .github/workflows/release.yml — per-commit edge release + cask bump
+    .github/workflows/release.yml — tagged release + cask bump
 
 The `yawac.xcodeproj` directory is generated from `project.yml`; do not commit it.
 

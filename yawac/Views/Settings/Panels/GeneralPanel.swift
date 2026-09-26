@@ -1,20 +1,10 @@
 import SwiftUI
 import AppKit
 
-/// Settings → General. Five toggles + one Select grouped into General /
-/// Notifications cards.
-///
-/// **Wiring status** (v0.9.13): the `@AppStorage` keys are new and
-/// cosmetic-only — none of these prefs are read by the rest of the app
-/// yet. They're persisted so a future release that wires up actual
-/// launch-at-login (SMAppService), menu-bar visibility, and notification
-/// preview/sound can pick the existing values up without forcing every
-/// user to re-tick them. The Settings UI is the source of truth for the
-/// design system shipping in this release; the functional plumbing
-/// follows as separate features.
+/// Settings → General: app visibility, launch behavior, and notifications.
 struct GeneralPanel: View {
     @AppStorage("yawac.launchAtLogin")          private var launchAtLogin = false
-    @AppStorage("yawac.menuBar.show")           private var showInMenuBar = false
+    @AppStorage("yawac.menuBar.show")           private var showInMenuBar = true
     @AppStorage("yawac.dock.keep")              private var keepInDock = true
     @AppStorage("yawac.notifications.enabled")  private var notifEnabled = true
     @AppStorage("yawac.notifications.preview")  private var notifPreview = true

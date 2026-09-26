@@ -2,15 +2,14 @@
 
 ## Known limitations
 
-### Historical reactions — unrecoverable
+### Historical reactions — incomplete coverage
 
 **Symptom:** Reactions on messages received before pairing don't show.
-Only reactions cast by us after pair appear (via optimistic local
-tally + DB hydration on chat re-open).
+Live reactions received after pairing persist and hydrate on chat reopen;
+older reaction state may be missing.
 
-**Root cause:** WhatsApp's `HistorySync` payload doesn't include
-`ReactionMessage` events. Diagnostic confirmation across multiple
-conversations:
+**Observed limitation:** Previous history-sync diagnostics did not contain
+`ReactionMessage` events. Across the sampled conversations:
 
 ```
 history reactions: 0
@@ -18,52 +17,21 @@ live dispatches: 0     (when no live reactions during the window)
 ```
 
 `bridge/history.go` walks every `Conversation.GetMessages()` and
-checks each `WebMessageInfo.GetMessage().GetReactionMessage()` — none
-ever match. The phone aggregates reactions internally and replays
-neither the individual reaction events nor any aggregate to companion
-devices.
+handles reaction events when supplied, including encrypted community
+reactions. Historical recovery is not guaranteed; missing reactions should
+not be interpreted as proof that a message has no reactions.
 
-**Accepted constraint:** Past reaction state stays phone-only. Live
-reactions after pair work, persist via `PersistedReaction`, and
-hydrate on chat re-open.
+### Historical poll votes — coverage depends on the phone
 
-### Historical poll vote tallies — unrecoverable
+The bridge imports bundled `WebMessageInfo.PollUpdates` records from history
+sync, including our own votes cast on another device. Live and historical
+votes persist through the same message writer and hydrate on chat reopen.
+Opening a conversation also requests recent poll history when needed.
 
-**Symptom:** Polls created before pairing show 0 votes in yawac even when the
-phone shows real tallies. Only votes cast *after* pairing this device populate
-the tally.
-
-**Root cause:** WhatsApp's `HistorySync` payload includes
-`PollCreationMessage`s but does **not** include the corresponding
-`PollUpdateMessage` (vote) events. Diagnostic logging across 9 conversations
-and 35 historical polls showed:
-
-```
-[yawac/poll-history] conv=…@g.us polls=11 votes=0  with_secret=364 total_msgs=370
-[yawac/poll-history] conv=…@g.us polls=14 votes=0  with_secret=430 total_msgs=438
-…
-poll-history count: 9
-poll-vote count: 0
-```
-
-`MessageSecret` is present on every poll creation, and the bridge persists it
-via `Store.MsgSecrets.PutMessageSecret` so future votes can decrypt — but no
-vote messages ever arrive in HistorySync to be decrypted.
-
-The phone-side client for WhatsApp maintains an aggregated tally view privately
-and apparently doesn't replay individual vote events to companion devices.
-
-**Workarounds considered (not implemented):**
-
-1. **Custom IQ query for poll aggregate** — WhatsApp's web client uses a
-   private XMPP-style IQ (`<iq type='get'><query xmlns='w:m:p'>…`) to fetch
-   server-side poll aggregates. Undocumented, schema changes silently. High
-   maintenance cost.
-2. **Request media retry for vote messages** — the retry path only re-sends
-   media, not vote history. Doesn't apply.
-3. **Scrape from phone via Accessibility / ADB** — out of scope.
-
-**Accepted constraint:** Past poll tallies stay phone-only. Live votes work.
+Earlier diagnostics counted standalone `PollUpdateMessage` events and missed
+the bundled records. The absence of standalone events does not mean historical
+votes are unrecoverable. Tallies can still be incomplete when the phone supplies
+no vote records; a displayed zero is not proof that nobody voted.
 
 ### `@lid` ↔ `@s.whatsapp.net` chat duplication
 
@@ -78,30 +46,23 @@ both namespaces:
 - Group participants in lid-protected groups come back as `@lid`.
 - Direct DMs may switch over time.
 
-These are different strings to us, so the chat list keeps them as
-separate rows.
+Without a known identity mapping, these can appear as separate rows.
 
-**What we fixed:** Device-suffixed variants
-(`<user>:<device>@<server>`) are now normalized to the bare JID via
-`JIDNormalize.bare(_:)` in `yawac/Models/Chat.swift`. Existing
-device-suffixed rows in `PersistedChat` are collapsed into canonical
-rows on app start (`ChatListViewModel.loadChats`). Unread counts get
-summed, the latest timestamp wins.
+**Current handling:** Device suffixes are normalized, and known LID-to-phone
+mappings are used to canonicalize chats. `reconcileLIDDuplicates()` merges
+resolvable duplicates through `MessageWriter`, reparents their messages, and
+refreshes the sidebar as mappings become available.
 
-**What stays broken:** `@lid` ↔ `@s.whatsapp.net` for the *same person*
-cannot be linked without a server-side identity lookup. whatsmeow's
-`store.Devices` keeps some `lid<->primary` mapping but only for
-devices we have a Signal session with; it's incomplete in practice.
-
-**Workaround:** None automatic. Manual: open the `@lid` chat once so
-the resolved push-name surfaces; you'll at least see the same display
-name on both rows.
+**Remaining limitation:** When the bridge has no mapping for an identity, yawac
+cannot safely infer that two rows are the same person from their display names.
+Such duplicates can remain until the identity mapping becomes available.
 
 ### whatsmeow limitations (research pass)
 
-Sourced from `whatsmeow@v0.0.0-20260516102357-8d3700152a69` + upstream
-issues. Items below are protocol-level constraints we can't fix
-client-side; they shape what yawac can sensibly support.
+Historical research against `whatsmeow@v0.0.0-20260516102357-8d3700152a69`
+and upstream issues. These notes are not a verified inventory of the current
+fork. Recheck them against `bridge/go.mod` and `whatsmeow-patches.md` before
+using an item as a development blocker.
 
 #### Calls
 - Voice/video cannot be initiated or answered from a companion
@@ -249,10 +210,10 @@ client-side; they shape what yawac can sensibly support.
   producing a fresh message with mediaKey that we will receive live.
 - `@<phone>` mentions for users who never sent a message + aren't in
   contacts: leave as raw digits (no push-name source).
-- Multi-select poll UI: tap = replaces current selection; no batch
-  "select multiple then submit" flow.
+- Multiple-choice polls submit the full selected set on every tap; there is
+  no separate batch-submit step.
 - ~~Reactions and poll-vote tallies are in-memory only; lost on restart~~ —
   both now persist (`PersistedReaction` / `PersistedPollVote`) and hydrate on
-  chat load. (Historical pre-pair tallies remain unrecoverable — see above.)
+  chat load. Historical coverage depends on the supplied payload — see above.
 - Video/audio/document larger than 100 MB skipped with "Too large" badge
   (size cap intentional).

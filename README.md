@@ -12,12 +12,15 @@ A native macOS SwiftUI client backed by [tulir/whatsmeow](https://github.com/tul
 - React, reply, edit, delete, forward, and star messages
 - Mention people with `@` (and `@everyone` in groups)
 - Share your location, or open a live location someone sent you on the map
-- Share a contact card; recipients can tap "Message on WhatsApp" to start a chat
+- Share one or more contact cards; recipients can tap "Message on WhatsApp" to start a chat
+- Create single- or multiple-choice polls, vote, and see available tallies and voters
+- Save downloaded photos, videos, voice notes, and documents to files
 - Disappearing messages — pick a timer (off / 24h / 7d / 90d) per chat
 - View-once photos and videos — reveal once on receive, send your own with a single toggle
-- On-device translation for incoming messages
+- On-device translation for incoming messages, with automatic translation and language exclusions (requires a model download)
 
 **Chats**
+- Organize chats into local folders, with unread badges and drag-and-drop ordering
 - Pin chats to the top of the sidebar and pin important messages inside a chat
 - Mute a chat for 8 hours, a week, or until you turn it back on (mentions still notify)
 - Archive, delete, or block — kept in sync with your phone
@@ -37,15 +40,30 @@ A native macOS SwiftUI client backed by [tulir/whatsmeow](https://github.com/tul
 **Search & navigation**
 - `⌘F` in a chat to find and jump between matches
 - `⌘K` to search every chat and message across the app, with ranked snippets
+- Filter messages by sender, type, and date; global search also supports a chat filter
 - Chat inspector — About, starred messages, shared media grid, and file list (tap to jump back)
 
 **Platform**
 - QR code to link your account, just like the official mobile + web clients
-- Native macOS notifications and dock badge
+- Native macOS notifications with inline replies, preview/sound settings, and a dock badge
+- Menu-bar icon with unread indication, quick send, and a global `⌘⇧Y` shortcut
+- Shortcuts actions to send a message, open a chat, mark a chat read, and search messages
+- Launch at login and choose whether to show yawac in the Dock
 - Read receipts, typing indicators, and online presence
 - Edits, deletes, stars, pins, and mutes stay in sync across your linked devices
 - Adjustable interface size (Small → X-Large) for custom fonts
 - Keyboard shortcuts cheat sheet — `⌘?` from the Help menu
+- Edit your profile, manage linked devices and blocked contacts, and adjust privacy settings
+
+## Menu bar and quick send
+
+The menu-bar icon is enabled by default; existing saved preferences are kept.
+Change it in **Settings → General → Show in menu bar**. Left-click the icon or
+press `⌘⇧Y` from another app to choose a chat and send a text message.
+Right-click (or Control-click) for **Show Main Window**, **Show / Hide Window**,
+and **Quit yawac**. The icon changes when there are unread messages.
+Turning the setting off also disables the global quick-send shortcut.
+Before an account is available, clicking the icon brings the main window forward.
 
 ## Install
 
@@ -80,6 +98,11 @@ State ownership and storage constraints are described in
 - **Unofficial protocol.** whatsmeow speaks the multi-device companion protocol that WhatsApp doesn't officially support for third-party clients. Use at your own risk; accounts can be banned if usage looks bot-like.
 - **Multi-device limit.** WhatsApp allows up to 4 linked devices per account. yawac counts as one.
 - **No call support.** Voice/video calls are out of scope for this build.
+- **History coverage varies.** Recovery depends on what the phone supplies;
+  older messages, reactions, poll votes, or media may be incomplete. See
+  [known limitations](docs/TODO.md).
+- **Single account.** Multi-account switching is not implemented. Chat folders
+  are local to this installation.
 
 ## Sponsor
 
